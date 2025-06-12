@@ -1,0 +1,27 @@
+[project]
+name = "kaizen-agent"
+version = "0.1.0"
+description = "A CLI tool for running YAML-defined test cases for AI agents"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+dependencies = [
+    "pyyaml>=6.0.1",
+    "rich>=13.7.0",
+]
+requires-python = ">=3.8"
+readme = "README.md"
+license = {text = "MIT"}
+
+[project.scripts]
+kaizen = "kaizen.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["kaizen"] 

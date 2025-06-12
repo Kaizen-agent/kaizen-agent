@@ -1,0 +1,44 @@
+name: Email Agent Core Test
+agent_type: dynamic_region
+file_path: test_agent/email_agent.py
+evaluation:
+  llm_provider: openai
+  criteria:
+    - name: class_implementation
+      description: |
+        The EmailAgent class should be properly implemented with:
+        - Correct initialization with API key handling
+        - Proper error handling for missing API key
+        - Well-structured improve_email method
+        - Appropriate use of OpenAI API
+        - Clear documentation and type hints
+    - name: code_quality
+      description: |
+        The code should follow Python best practices:
+        - Clear and descriptive variable names
+        - Proper error handling
+        - Appropriate use of type hints
+        - Well-documented methods
+        - Clean code structure
+steps:
+  - step_index: 1
+    name: Basic Email Improvement
+    input:
+      file_path: test_agent/email_agent.py
+      region: email_agent
+      method: improve_email
+      input: "hey, can we meet tomorrow to discuss the project? let me know when you're free."
+    expected_output_contains:
+      - "Dear"
+      - "meeting"
+      - "project"
+      - "schedule"
+
+  - step_index: 2
+    name: Error Handling Test
+    input:
+      file_path: test_agent/email_agent.py
+      region: email_agent
+      method: improve_email
+      input: ""
+    expected_output_exact: "Please provide either --draft or --file argument" 
