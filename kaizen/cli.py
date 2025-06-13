@@ -9,6 +9,7 @@ from datetime import datetime
 import types
 from pathlib import Path
 from .runner import TestRunner, run_test_block
+from .autofix import run_autofix_and_pr
 
 @click.group()
 def cli():
@@ -16,43 +17,54 @@ def cli():
     pass
 
 @cli.command()
-@click.argument('file_path', type=click.Path(exists=True))
-@click.option('--config', '-c', type=click.Path(exists=True), help='Path to test configuration YAML file')
-def test(file_path: str, config: str):
+@click.option('--config', '-c', type=click.Path(exists=True), required=True, help='Test configuration file')
+@click.option('--auto-fix', is_flag=True, help='Automatically fix failing tests')
+@click.option('--create-pr', is_flag=True, help='Create a pull request with fixes')
+def test_all(config: str, auto_fix: bool, create_pr: bool):
     """
-    Run tests on the specified file using the given configuration.
+    Run all tests specified in the configuration file.
     
-    FILE_PATH: Path to the file to test
+    CONFIG: Path to the test configuration YAML file
     """
     try:
-        # Convert paths to Path objects
-        file_path = Path(file_path)
-        config_path = Path(config) if config else None
-        
-        # Load test configuration
-        test_config = {}
-        if config_path:
-            with open(config_path, 'r') as f:
-                test_config = yaml.safe_load(f)
-        
-        # Initialize and run tests
+        with open(config, 'r') as f:
+            test_config = yaml.safe_load(f)
+            
+        # Create test runner
         runner = TestRunner(test_config)
-        results = runner.run_tests(file_path)
+        logger = TestLogger(test_config.get('name', 'Unnamed Test'))
         
-        # Display results
-        click.echo("\nTest Results:")
+        click.echo(f"Running test: {test_config.get('name', 'Unnamed Test')}")
         click.echo("=" * 50)
+        
+        # Run tests
+        results = runner.run_tests(Path(config))
+        
+        # Check if any tests failed
+        failed_tests = []
         for region, result in results.items():
-            click.echo(f"\nRegion: {region}")
-            click.echo("-" * 30)
             for test_case in result.get('test_cases', []):
-                status = "✅" if test_case['status'] == 'passed' else "❌"
-                click.echo(f"{status} {test_case['name']}")
-                if 'details' in test_case:
-                    click.echo(f"   Details: {test_case['details']}")
+                if test_case['status'] != 'passed':
+                    failed_tests.append({
+                        'region': region,
+                        'test_name': test_case['name'],
+                        'error_message': test_case.get('details', 'Test failed')
+                    })
+        
+        if failed_tests and auto_fix:
+            click.echo("\nAttempting to fix failing tests...")
+            file_path = test_config.get('file_path')
+            if file_path:
+                run_autofix_and_pr(failed_tests, file_path)
+            else:
+                click.echo("Error: file_path not specified in test configuration")
+        
+        # Output results
+        click.echo("\nTest Results:")
+        click.echo(json.dumps(results, indent=2))
         
     except Exception as e:
-        click.echo(f"Error: {str(e)}", err=True)
+        click.echo(f"Error running tests: {str(e)}")
         raise click.Abort()
 
 @cli.command()
@@ -80,29 +92,6 @@ def run_block(file_path: str, input_text: str = None, output: str = None):
             
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
-        raise click.Abort()
-
-@cli.command()
-@click.option('--config', '-c', type=click.Path(exists=True), required=True, help='Test configuration file')
-@click.option('--language', '-l', default='python', help='Programming language')
-def test(config: str, language: str):
-    """Automatically test code regions in a file."""
-    try:
-        with open(config, 'r') as f:
-            test_config = yaml.safe_load(f)
-            
-        # Create test runner
-        runner = TestRunner(test_config)
-        
-        # Run tests
-        results = runner.run_tests(Path(config))
-        
-        # Output results
-        click.echo("\nTest Results:")
-        click.echo(json.dumps(results, indent=2))
-        
-    except Exception as e:
-        click.echo(f"Error running tests: {str(e)}")
         raise click.Abort()
 
 @cli.command()

@@ -1,3 +1,5 @@
-"""Kaizen Agent - A testing framework for AI agents."""
+"""Kaizen Agent - Automated Code Improvement Tool"""
 
-__version__ = '0.1.0' 
+from .autofix import run_autofix_and_pr
+
+__version__ = "0.1.0" 

@@ -206,26 +206,32 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         return f"Error executing code block: {str(e)}"
 
 class TestRunner:
-    def __init__(self):
+    def __init__(self, test_config: Optional[Dict] = None):
+        """
+        Initialize the TestRunner.
+        
+        Args:
+            test_config: Optional test configuration dictionary
+        """
+        self.test_config = test_config or {}
+        self._load_config()
+        self._validate_api_keys()
         self.agent_registry = AgentRegistry()
         # Register default runners
         self.agent_registry.register("python", PythonAgentRunner)
         self.agent_registry.register("typescript", TypeScriptAgentRunner)
         self.agent_registry.register("dynamic_region", DynamicRegionRunner)
-        self._load_config()
 
     def _load_config(self):
-        """Load configuration from .env file and environment variables."""
-        # Try to load .env file
-        env_path = Path('.env')
-        if env_path.exists():
-            load_dotenv(env_path)
+        """Load configuration from environment variables and test config."""
+        # Load environment variables
+        load_dotenv()
+        
+        # Merge with test config if provided
+        if self.test_config:
+            self.config = {**self.test_config}
         else:
-            console.print("[yellow]Warning: No .env file found[/yellow]")
-            console.print("Please create a .env file with your API keys")
-
-        # Validate API keys
-        self._validate_api_keys()
+            self.config = {}
 
     def _validate_api_keys(self):
         """Validate that required API keys are present."""
@@ -403,46 +409,53 @@ class TestRunner:
             logger.logger.error(f"Error in configuration test: {str(e)}")
             return False
 
-    def run_test(self, test_file: str) -> bool:
-        """Run all steps in a test file."""
-        try:
-            test_data = self.load_test_file(test_file)
+    def run_tests(self, file_path: Union[str, Path]) -> Dict[str, Any]:
+        """
+        Run all tests specified in the configuration.
+        
+        Args:
+            file_path: Path to the file to test
             
-            if not self.validate_test_data(test_data):
-                return False
+        Returns:
+            Dict[str, Any]: Test results for each region
+        """
+        file_path = Path(file_path)
+        results = {}
+        
+        # Get the agent type from config
+        agent_type = self.test_config.get('agent_type', 'dynamic_region')
+        
+        # Create logger
+        logger = TestLogger(self.test_config.get('name', 'Unnamed Test'))
+        
+        # Run each test step
+        for step in self.test_config.get('steps', []):
+            step_index = step.get('step_index')
+            step_name = step.get('name', f'Step {step_index}')
             
-            test_name = test_data.get('name', 'Unnamed Test')
-            global_agent_type = test_data.get('agent_type')
+            logger.log_step_start(step_index, step.get('input', {}))
             
-            # Initialize logger
-            logger = TestLogger(test_name)
-            logger.logger.info(f"Starting test: {test_name}")
+            # Run the step
+            passed = self.run_step(step, agent_type, logger)
             
-            if not global_agent_type:
-                error_msg = "No global agent_type specified in test file"
-                logger.logger.error(error_msg)
-                console.print(f"[red]❌ {error_msg}[/red]")
-                return False
-
-            console.print(f"\n[bold]Running test: {test_name}[/bold]")
+            # Log the result
+            logger.log_step_result(
+                step_index,
+                {'status': 'passed' if passed else 'failed'},
+                passed
+            )
             
-            steps = test_data.get('steps', [])
-            if not steps:
-                logger.logger.warning("No steps found in test file")
-                console.print("[yellow]⚠️ No steps found in test file[/yellow]")
-                return False
-
-            all_passed = True
-            for step in steps:
-                if not self.run_step(step, global_agent_type, logger):
-                    all_passed = False
-
-            # Save test results
-            result_file = logger.save_results()
-            console.print(f"\n[green]Test results saved to: {result_file}[/green]")
-
-            return all_passed
-
-        except Exception as e:
-            console.print(f"[red]❌ Error running test: {str(e)}[/red]")
-            return False 
+            # Store results by region
+            region = step.get('input', {}).get('region', 'default')
+            if region not in results:
+                results[region] = {'test_cases': []}
+            
+            results[region]['test_cases'].append({
+                'name': step_name,
+                'status': 'passed' if passed else 'failed'
+            })
+        
+        # Save test results
+        logger.save_results()
+        
+        return results 

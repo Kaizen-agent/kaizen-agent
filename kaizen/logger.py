@@ -11,6 +11,37 @@ from rich.logging import RichHandler
 
 console = Console()
 
+def get_logger(name: str) -> logging.Logger:
+    """
+    Get a logger instance with the specified name.
+    
+    Args:
+        name: The name of the logger
+        
+    Returns:
+        A configured logger instance
+    """
+    logger = logging.getLogger(f"kaizen.{name}")
+    logger.setLevel(logging.DEBUG)
+    
+    # Add rich handler for console output if no handlers exist
+    if not logger.handlers:
+        console_handler = RichHandler(console=console)
+        console_handler.setLevel(logging.INFO)
+        logger.addHandler(console_handler)
+        
+        # Add file handler for detailed logs
+        output_dir = Path("logs")
+        output_dir.mkdir(exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = output_dir / f"{name}_{timestamp}.log"
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)
+        logger.addHandler(file_handler)
+    
+    return logger
+
 class TestLogger:
     def __init__(self, test_name: str, output_dir: str = "test-results"):
         self.test_name = test_name
@@ -18,20 +49,7 @@ class TestLogger:
         self.output_dir.mkdir(exist_ok=True)
         
         # Set up logging
-        self.logger = logging.getLogger(f"kaizen.{test_name}")
-        self.logger.setLevel(logging.DEBUG)
-        
-        # Add rich handler for console output
-        console_handler = RichHandler(console=console)
-        console_handler.setLevel(logging.INFO)
-        self.logger.addHandler(console_handler)
-        
-        # Add file handler for detailed logs
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file = self.output_dir / f"{test_name}_{timestamp}.log"
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(logging.DEBUG)
-        self.logger.addHandler(file_handler)
+        self.logger = get_logger(test_name)
         
         # Initialize test results
         self.results = {
