@@ -1,3 +1,4 @@
+```python
 import os
 from typing import Optional
 from openai import OpenAI
@@ -24,24 +25,16 @@ class EmailAgent:
         Returns:
             str: The improved email draft
         """
-        prompt = f"""Please improve the following email draft. Make it more professional, 
-        clear, and effective while maintaining its original intent. Here's the draft:
+        prompt = f"Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent. Here's the draft:\n\n{draft}\n\nImproved version:"
 
-        {draft}
-
-        Improved version:"""
-
-        response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are an expert email editor who improves email drafts to be more professional and effective."},
-                {"role": "user", "content": prompt}
-            ],
+        response = self.client.Completion.create(
+            model="text-davinci-003",
+            prompt=prompt,
             temperature=0.7,
             max_tokens=1000
         )
 
-        return response.choices[0].message.content.strip()
+        return response.choices[0].text.strip()
 # kaizen:end:email_agent
 
 # kaizen:start:cli_interface
@@ -57,13 +50,15 @@ def main():
     try:
         agent = EmailAgent()
         
+        draft = None
         if args.draft:
             draft = args.draft
         elif args.file:
             with open(args.file, 'r') as f:
                 draft = f.read()
-        else:
-            print("Please enter your email draft (press Ctrl+D or Ctrl+Z when finished):")
+
+        if draft is None:
+            print("Please enter your email draft (press Ctrl+D or Ctrl+Z on Windows when finished):")
             draft = ""
             try:
                 while True:
@@ -71,9 +66,10 @@ def main():
                     draft += line + "\n"
             except EOFError:
                 pass
-            if not draft.strip():
-                print("No email draft provided")
-                return
+
+        if not draft.strip():
+            print("No email draft provided.")
+            return
 
         improved_email = agent.improve_email(draft)
         print("\nImproved Email:")
@@ -87,3 +83,4 @@ def main():
 if __name__ == "__main__":
     main()
 # kaizen:end:cli_interface
+```
