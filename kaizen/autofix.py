@@ -1,16 +1,164 @@
 import os
 import uuid
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import subprocess
 from pathlib import Path
 import openai
 from github import Github
 from github.GithubException import GithubException
+from datetime import datetime
+import json
 
 from .logger import get_logger
 from .config import get_config
+from .runner import TestRunner
 
 logger = get_logger(__name__)
+
+def format_test_results_table(test_results: Dict) -> str:
+    """Format test results into a markdown table."""
+    table = "| Test Name | Region | Status |\n|-----------|--------|--------|\n"
+    for region, result in test_results.items():
+        for test_case in result.get('test_cases', []):
+            status = "✅ PASS" if test_case['status'] == 'passed' else "❌ FAIL"
+            table += f"| {test_case['name']} | {region} | {status} |\n"
+    return table
+
+def analyze_failures(failure_data: List[Dict]) -> str:
+    """Analyze test failures and generate a summary."""
+    analysis = "## Failure Analysis\n\n"
+    
+    # Group failures by error type
+    error_groups = {}
+    for failure in failure_data:
+        error_type = failure['error_message'].split(':')[0] if ':' in failure['error_message'] else 'Unknown Error'
+        if error_type not in error_groups:
+            error_groups[error_type] = []
+        error_groups[error_type].append(failure)
+    
+    # Generate analysis for each error type
+    for error_type, failures in error_groups.items():
+        analysis += f"### {error_type}\n\n"
+        analysis += f"**Affected Tests ({len(failures)}):**\n"
+        for failure in failures:
+            analysis += f"- {failure['test_name']}\n"
+        analysis += f"\n**Error Pattern:**\n{failures[0]['error_message']}\n\n"
+        analysis += "**Likely Root Cause:**\n"
+        # Add common root causes based on error type
+        if "AssertionError" in error_type:
+            analysis += "- Incorrect logic or condition in the code\n"
+            analysis += "- Unexpected output format or value\n"
+        elif "TypeError" in error_type:
+            analysis += "- Incorrect type handling or conversion\n"
+            analysis += "- Missing type checking or validation\n"
+        elif "AttributeError" in error_type:
+            analysis += "- Missing or incorrect attribute access\n"
+            analysis += "- Object initialization issues\n"
+        elif "ImportError" in error_type:
+            analysis += "- Missing or incorrect imports\n"
+            analysis += "- Module path or dependency issues\n"
+        else:
+            analysis += "- General implementation error\n"
+            analysis += "- Edge case not properly handled\n"
+        analysis += "\n"
+    
+    return analysis
+
+def _generate_pr_info(failure_data: List[Dict], fixed_tests: List[Dict], test_results: Dict) -> Tuple[str, str, str]:
+    """
+    Generate meaningful branch name, PR title, and body using LLM.
+    
+    Args:
+        failure_data: List of test failures
+        fixed_tests: List of fixed tests
+        test_results: Complete test results
+        
+    Returns:
+        Tuple of (branch_name, pr_title, pr_body)
+    """
+    try:
+        config = get_config()
+        client = openai.OpenAI(api_key=config.get_api_key("openai"))
+        
+        # Prepare prompt for LLM
+        prompt = f"""Based on the following test failures and fixes, generate:
+1. A short, descriptive branch name (max 50 chars, use hyphens)
+2. A clear PR title (max 100 chars)
+3. A detailed PR body explaining the changes
+
+Test Failures:
+{json.dumps(failure_data, indent=2)}
+
+Fixed Tests:
+{json.dumps(fixed_tests, indent=2)}
+
+Test Results:
+{json.dumps(test_results, indent=2)}
+
+Requirements:
+- Branch name should reflect the main purpose of the fixes
+- PR title should be clear and concise
+- PR body should explain what was fixed and why
+- Focus on the most important changes
+"""
+        
+        # Call OpenAI API
+        response = client.chat.completions.create(
+            model="gpt-4-1106-preview",
+            messages=[
+                {"role": "system", "content": "You are a PR generation expert. Generate meaningful branch names and PR descriptions based on test fixes."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        
+        # Parse response
+        content = response.choices[0].message.content.strip()
+        
+        # Extract branch name, title, and body
+        lines = content.split('\n')
+        branch_name = lines[0].strip()
+        pr_title = lines[1].strip()
+        pr_body = '\n'.join(lines[2:]).strip()
+        
+        # Clean up branch name
+        branch_name = branch_name.lower()
+        branch_name = ''.join(c if c.isalnum() or c == '-' else '-' for c in branch_name)
+        branch_name = '-'.join(filter(None, branch_name.split('-')))
+        
+        # Add timestamp to ensure uniqueness
+        timestamp = datetime.now().strftime('%Y%m%d')
+        branch_name = f"{branch_name}-{timestamp}"
+        
+        return branch_name, pr_title, pr_body
+        
+    except Exception as e:
+        logger.warning(f"Error generating PR info: {str(e)}")
+        # Fallback to default values
+        timestamp = datetime.now().strftime('%Y%m%d')
+        branch_name = f"fix-tests-{timestamp}"
+        pr_title = "Fix: Resolved test failures"
+        pr_body = f"""# Test Fix Summary
+
+## Overview
+- **Fix Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+- **Fixed Tests:** {len(fixed_tests)}
+- **Total Tests:** {sum(len(result.get('test_cases', [])) for result in test_results.values())}
+
+## Test Results
+{format_test_results_table(test_results)}
+
+{analyze_failures(failure_data)}
+
+## Fix Details
+### Fixed Tests
+{chr(10).join(f'- {test["test_name"]} ({test["region"]})' for test in fixed_tests)}
+
+### Original Failures
+{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failure in failure_data)}
+"""
+        return branch_name, pr_title, pr_body
 
 def run_autofix_and_pr(failure_data: List[Dict], file_path: str) -> None:
     """
@@ -28,6 +176,10 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str) -> None:
     try:
         config = get_config()
         logger.info(f"Starting auto-fix process for {file_path} with {len(failure_data)} failures")
+        
+        # Create a set of failing test names for quick lookup
+        failing_test_names = {failure["test_name"] for failure in failure_data}
+        logger.info(f"Tests that were failing: {failing_test_names}")
         
         # Read the original code
         with open(file_path, 'r') as f:
@@ -60,8 +212,35 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         fixed_code = response.choices[0].message.content.strip()
         logger.info("Received fixed code from GPT-4")
         
+        # Run tests again to verify fixes
+        logger.info("Running tests to verify fixes")
+        test_runner = TestRunner()
+        test_results = test_runner.run_tests(Path(file_path))
+        
+        # Track which previously failing tests are now passing
+        fixed_tests = []
+        for region, result in test_results.items():
+            for test_case in result.get('test_cases', []):
+                test_name = test_case['name']
+                if test_name in failing_test_names and test_case['status'] == 'passed':
+                    fixed_tests.append({
+                        'region': region,
+                        'test_name': test_name
+                    })
+        
+        if not fixed_tests:
+            logger.info("No previously failing tests were fixed. Reverting changes.")
+            subprocess.run(["git", "checkout", "main"], check=True)
+            subprocess.run(["git", "branch", "-D", branch_name], check=True)
+            return
+        
+        logger.info(f"Fixed {len(fixed_tests)} previously failing tests")
+        
+        # Generate branch name and PR info
+        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results)
+        logger.info(f"Generated branch name: {branch_name}")
+        
         # Create a new branch
-        branch_name = f"kaizen-fix-{uuid.uuid4().hex[:8]}"
         logger.info(f"Creating new branch: {branch_name}")
         subprocess.run(["git", "checkout", "-b", branch_name], check=True)
         
@@ -70,16 +249,9 @@ task: Modify the code to resolve all listed issues and return only the full fixe
             f.write(fixed_code)
         logger.info(f"Updated file: {file_path}")
         
-        # Create commit message
-        commit_body = "Fixed the following test failures:\n" + "\n".join(
-            f"- {failure['test_name']}: {failure['error_message']}"
-            for failure in failure_data
-        )
-        
         # Commit changes
         subprocess.run(["git", "add", file_path], check=True)
-        subprocess.run(["git", "commit", "-m", "fix: resolved multiple Kaizen Agent test failures", 
-                       "-m", commit_body], check=True)
+        subprocess.run(["git", "commit", "-m", pr_title, "-m", pr_body], check=True)
         logger.info("Committed changes")
         
         # Push branch
@@ -106,15 +278,10 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         except GithubException as e:
             raise ValueError(f"Error accessing GitHub repository: {str(e)}")
         
-        # Create PR body
-        pr_body = f"""## Fixed Test Failures\n\n{commit_body}\n\n"""
-        if response.choices[0].message.content:
-            pr_body += f"## GPT-4 Explanation\n\n{response.choices[0].message.content}\n"
-        
         # Create PR
         try:
             pr = repo.create_pull(
-                title="Fix: Addressed multiple agent failures",
+                title=pr_title,
                 body=pr_body,
                 head=branch_name,
                 base="main"

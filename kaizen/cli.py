@@ -1,7 +1,7 @@
 import click
 import yaml
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from .agent_runners import TestLogger
 from .code_region import extract_code_regions
 import os
@@ -10,6 +10,7 @@ import types
 from pathlib import Path
 from .runner import TestRunner, run_test_block
 from .autofix import run_autofix_and_pr
+from .test_generator import TestGenerator
 
 @click.group()
 def cli():
@@ -119,6 +120,60 @@ def run_test(test_file: str):
         
     except Exception as e:
         click.echo(f"Error running test: {str(e)}")
+        raise click.Abort()
+
+@cli.command()
+@click.option('--project', '-p', type=click.Path(exists=True), required=True, help='Path to agent project')
+@click.option('--results', '-r', type=click.Path(exists=True), required=True, help='Path to test results directory')
+@click.option('--output', '-o', type=click.Path(), required=True, help='Directory to write new YAML test files')
+@click.option('--config', '-c', type=click.Path(exists=True), help='Path to existing test configuration file or directory')
+@click.option('--suggestions', is_flag=True, help='Include rationale/comments in YAML')
+@click.option('--make-pr', is_flag=True, help='Create a GitHub pull request')
+def generate_tests(project: str, results: str, output: str, config: Optional[str], suggestions: bool, make_pr: bool):
+    """
+    Generate new YAML-based test cases for an agent project.
+    
+    PROJECT: Path to agent code (Python or TypeScript)
+    RESULTS: Path to existing test results folder (JSON or logs)
+    OUTPUT: Directory to write new YAML test files
+    """
+    try:
+        # Initialize test generator
+        generator = TestGenerator(project, results, output)
+        
+        # Generate test cases
+        click.echo("Analyzing codebase and test results...")
+        test_cases = generator.generate_tests(
+            include_suggestions=suggestions,
+            config_path=config
+        )
+        
+        if not test_cases:
+            click.echo("No test cases were generated.")
+            return
+        
+        # Save test cases
+        click.echo(f"Saving {len(test_cases)} test cases...")
+        saved_files = generator.save_test_cases(test_cases)
+        
+        if not saved_files:
+            click.echo("No test files were saved.")
+            return
+        
+        click.echo(f"Saved test files to: {', '.join(saved_files)}")
+        
+        # Create pull request if requested
+        if make_pr:
+            click.echo("Creating pull request...")
+            branch_name = f"auto/gen-tests-{datetime.now().strftime('%Y%m%d')}"
+            
+            if generator.create_pull_request(branch_name, saved_files):
+                click.echo(f"Successfully created pull request from branch: {branch_name}")
+            else:
+                click.echo("Failed to create pull request.")
+        
+    except Exception as e:
+        click.echo(f"Error generating tests: {str(e)}")
         raise click.Abort()
 
 if __name__ == '__main__':
