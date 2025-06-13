@@ -34,7 +34,7 @@ class EmailAgent:
             max_tokens=1000
         )
 
-        return response.choices[0].text.strip()
+        return response['choices'][0]['text'].strip()
 # kaizen:end:email_agent
 
 # kaizen:start:cli_interface
