@@ -1,0 +1,151 @@
+agent_type: dynamic_region
+description: 'Test suite for the EmailAgent class that handles email improvement using
+  OpenAI''s API.
+
+  Tests cover initialization, error handling, and email improvement functionality.
+
+  '
+evaluation:
+  criteria:
+  - description: 'The EmailAgent class should be properly implemented with:
+
+      - Correct initialization with API key handling
+
+      - Proper error handling for missing API key
+
+      - Well-structured improve_email method
+
+      - Appropriate use of OpenAI API
+
+      - Clear documentation and type hints
+
+      '
+    name: class_implementation
+    weight: 0.4
+  - description: 'The code should follow Python best practices:
+
+      - Clear and descriptive variable names
+
+      - Proper error handling
+
+      - Appropriate use of type hints
+
+      - Well-documented methods
+
+      - Clean code structure
+
+      '
+    name: code_quality
+    weight: 0.3
+  - description: 'The email improvement functionality should:
+
+      - Maintain the original intent of the email
+
+      - Improve professionalism and clarity
+
+      - Handle various email types appropriately
+
+      - Process both short and long emails
+
+      '
+    name: functionality
+    weight: 0.3
+  llm_provider: openai
+  model: gpt-3.5-turbo
+file_path: test_agent/email_agent.py
+metadata:
+  dependencies:
+  - openai>=1.0.0
+  - python-dotenv>=0.19.0
+  environment_variables:
+  - OPENAI_API_KEY
+  version: 1.0.0
+name: Email Agent Core Test
+steps:
+- description: Test basic email improvement functionality with a simple meeting request
+  expected_output_contains:
+  - Dear
+  - meeting
+  - project
+  - schedule
+  input:
+    file_path: test_agent/email_agent.py
+    input: hey, can we meet tomorrow to discuss the project? let me know when you're
+      free.
+    method: improve_email
+    region: email_agent
+  name: Basic Email Improvement
+  step_index: 1
+  validation:
+    max_length: 500
+    min_length: 100
+    type: contains
+- description: Test error handling for empty input
+  expected_output_exact: Please provide either --draft or --file argument
+  input:
+    file_path: test_agent/email_agent.py
+    input: ''
+    method: improve_email
+    region: email_agent
+  name: Error Handling - Empty Input
+  step_index: 2
+  validation:
+    error_expected: true
+    type: exact
+- description: Test handling of a longer, more complex email
+  expected_output_contains:
+  - Dear
+  - meeting
+  - project status
+  - updates
+  - input
+  - schedule
+  input:
+    file_path: test_agent/email_agent.py
+    input: "hi team,\n\ni wanted to check if we could have a quick meeting tomorrow\
+      \ to go over the project status. \ni have some updates to share and would like\
+      \ to get your input on a few things.\n\nlet me know what time works for you.\n\
+      \nthanks!\n"
+    method: improve_email
+    region: email_agent
+  name: Long Email Improvement
+  step_index: 3
+  validation:
+    max_length: 800
+    min_length: 200
+    type: contains
+- description: Test error handling for missing API key
+  expected_output_contains:
+  - OpenAI API key is required
+  input:
+    file_path: test_agent/email_agent.py
+    input:
+      api_key: null
+    method: __init__
+    region: email_agent
+  name: API Key Error Handling
+  step_index: 4
+  validation:
+    error_expected: true
+    type: contains
+- description: Test improvement of a formal business email
+  expected_output_contains:
+  - Dear
+  - order
+  - status
+  - delivery
+  - regards
+  input:
+    file_path: test_agent/email_agent.py
+    input: "Dear Sir/Madam,\n\nI am writing to inquire about the status of our recent\
+      \ order #12345. \nWe placed this order on March 1st and have not received any\
+      \ updates.\n\nPlease let us know when we can expect delivery.\n\nBest regards,\n\
+      John Smith\n"
+    method: improve_email
+    region: email_agent
+  name: Formal Email Improvement
+  step_index: 5
+  validation:
+    max_length: 600
+    min_length: 150
+    type: contains
