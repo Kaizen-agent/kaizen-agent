@@ -50,8 +50,8 @@ evaluation:
       '
     name: functionality
     weight: 0.3
-  llm_provider: openai
-  model: gpt-3.5-turbo
+  llm_provider: gemini
+  model: gemini-2.5-flash-preview-05-20
 file_path: test_agent/email_agent.py
 metadata:
   dependencies:
