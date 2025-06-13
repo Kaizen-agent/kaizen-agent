@@ -94,4 +94,64 @@ dmypy.json
 Pipfile.lock
 
 # poetry
-poetry.lock 
+poetry.lock
+
+# Test results
+test-results/
+
+# Internal documentation
+DOCUMENTATION.md
+
+# System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Node.js (if you're using any JavaScript/TypeScript)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build output
+dist/
+build/
+out/
+.next/
+
+# Cache directories
+.cache/
+.npm/
+.eslintcache
+.stylelintcache
+
+# Environment files
+.env*
+!.env.example
+
+# Coverage and test reports
+coverage/
+.nyc_output/
+junit.xml
+test-report.xml
+
+# Editor directories and files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local development
+*.local
+local.* 

@@ -1,0 +1,148 @@
+name: Email Agent Core Test
+agent_type: dynamic_region
+file_path: test_agent/email_agent.py
+description: |
+  Test suite for the EmailAgent class that handles email improvement using OpenAI's API.
+  Tests cover initialization, error handling, and email improvement functionality.
+
+metadata:
+  version: 1.0.0
+  dependencies:
+    - openai>=1.0.0
+    - python-dotenv>=0.19.0
+  environment_variables:
+    - OPENAI_API_KEY
+
+evaluation:
+  llm_provider: openai
+  model: gpt-3.5-turbo
+  criteria:
+    - name: class_implementation
+      description: |
+        The EmailAgent class should be properly implemented with:
+        - Correct initialization with API key handling
+        - Proper error handling for missing API key
+        - Well-structured improve_email method
+        - Appropriate use of OpenAI API
+        - Clear documentation and type hints
+      weight: 0.4
+    - name: code_quality
+      description: |
+        The code should follow Python best practices:
+        - Clear and descriptive variable names
+        - Proper error handling
+        - Appropriate use of type hints
+        - Well-documented methods
+        - Clean code structure
+      weight: 0.3
+    - name: functionality
+      description: |
+        The email improvement functionality should:
+        - Maintain the original intent of the email
+        - Improve professionalism and clarity
+        - Handle various email types appropriately
+        - Process both short and long emails
+      weight: 0.3
+
+steps:
+  - step_index: 1
+    name: Basic Email Improvement
+    description: Test basic email improvement functionality with a simple meeting request
+    input:
+      file_path: test_agent/email_agent.py
+      region: email_agent
+      method: improve_email
+      input: "hey, can we meet tomorrow to discuss the project? let me know when you're free."
+    expected_output_contains:
+      - "Dear"
+      - "meeting"
+      - "project"
+      - "schedule"
+    validation:
+      type: contains
+      min_length: 100
+      max_length: 500
+
+  - step_index: 2
+    name: Error Handling - Empty Input
+    description: Test error handling for empty input
+    input:
+      file_path: test_agent/email_agent.py
+      region: email_agent
+      method: improve_email
+      input: ""
+    expected_output_exact: "Please provide either --draft or --file argument"
+    validation:
+      type: exact
+      error_expected: true
+
+  - step_index: 3
+    name: Long Email Improvement
+    description: Test handling of a longer, more complex email
+    input:
+      file_path: test_agent/email_agent.py
+      region: email_agent
+      method: improve_email
+      input: |
+        hi team,
+
+        i wanted to check if we could have a quick meeting tomorrow to go over the project status. 
+        i have some updates to share and would like to get your input on a few things.
+
+        let me know what time works for you.
+
+        thanks!
+    expected_output_contains:
+      - "Dear"
+      - "meeting"
+      - "project status"
+      - "updates"
+      - "input"
+      - "schedule"
+    validation:
+      type: contains
+      min_length: 200
+      max_length: 800
+
+  - step_index: 4
+    name: API Key Error Handling
+    description: Test error handling for missing API key
+    input:
+      file_path: test_agent/email_agent.py
+      region: email_agent
+      method: __init__
+      input:
+        api_key: null
+    expected_output_contains:
+      - "OpenAI API key is required"
+    validation:
+      type: contains
+      error_expected: true
+
+  - step_index: 5
+    name: Formal Email Improvement
+    description: Test improvement of a formal business email
+    input:
+      file_path: test_agent/email_agent.py
+      region: email_agent
+      method: improve_email
+      input: |
+        Dear Sir/Madam,
+
+        I am writing to inquire about the status of our recent order #12345. 
+        We placed this order on March 1st and have not received any updates.
+
+        Please let us know when we can expect delivery.
+
+        Best regards,
+        John Smith
+    expected_output_contains:
+      - "Dear"
+      - "order"
+      - "status"
+      - "delivery"
+      - "regards"
+    validation:
+      type: contains
+      min_length: 150
+      max_length: 600 
