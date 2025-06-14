@@ -42,6 +42,30 @@ class LLMEvaluator:
         total_weight = 0
         weighted_score = 0
         
+        # Check if there are any outputs to evaluate
+        outputs = []
+        for region, result in results.items():
+            if isinstance(result, dict) and 'test_cases' in result:
+                for test_case in result['test_cases']:
+                    if isinstance(test_case, dict) and 'output' in test_case:
+                        outputs.append(test_case['output'])
+        
+        if not outputs:
+            self.logger.logger.error("No outputs found in test results to evaluate")
+            return {
+                "status": "error",
+                "overall_score": 0,
+                "criteria": {
+                    "no_outputs": {
+                        "status": "error",
+                        "score": 0,
+                        "feedback": "No outputs found in test results to evaluate",
+                        "details": [],
+                        "weight": 1.0
+                    }
+                }
+            }
+        
         for criterion in criteria:
             name = criterion["name"]
             description = criterion["description"]
@@ -126,10 +150,6 @@ class LLMEvaluator:
                 for test_case in result['test_cases']:
                     if isinstance(test_case, dict) and 'output' in test_case:
                         outputs.append(test_case['output'])
-        
-        # If no outputs found, return error
-        if not outputs:
-            return "No outputs found in test results to evaluate."
         
         prompt = f"""You are an expert evaluator assessing outputs against specific criteria.
 

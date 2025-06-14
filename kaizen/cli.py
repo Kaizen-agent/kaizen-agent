@@ -31,7 +31,8 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
     CONFIG: Path to the test configuration YAML file
     """
     try:
-        with open(config, 'r') as f:
+        config_path = Path(config)
+        with open(config_path, 'r') as f:
             test_config = yaml.safe_load(f)
             
         # Create test runner
@@ -41,13 +42,19 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
         click.echo(f"Running test: {test_config.get('name', 'Unnamed Test')}")
         click.echo("=" * 50)
         
-        # Extract file path from the root of the configuration
+        # Extract file path from the root of the configuration and resolve it relative to config file
         file_path = test_config.get('file_path')
         if not file_path:
             console_print("[red]Error: No file_path found in test configuration[/red]")
             sys.exit(1)
             
-        results = runner.run_tests(Path(file_path))
+        # Resolve file_path relative to config file's directory
+        resolved_file_path = (config_path.parent / file_path).resolve()
+        if not resolved_file_path.exists():
+            console_print(f"[red]Error: File not found: {resolved_file_path}[/red]")
+            sys.exit(1)
+            
+        results = runner.run_tests(resolved_file_path)
         
         # Check if any tests failed
         failed_tests = []
@@ -85,7 +92,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
                 click.echo(f"\nAttempting to fix failing tests (max retries: {max_retries})...")
                 file_path = test_config.get('file_path')
                 if file_path:
-                    run_autofix_and_pr(failed_tests, file_path, config, max_retries=max_retries)
+                    run_autofix_and_pr(failed_tests, file_path, config, max_retries=max_retries, create_pr=create_pr)
                     if create_pr:
                         click.echo("Pull request created with fixes")
                 else:

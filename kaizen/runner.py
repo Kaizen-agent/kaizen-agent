@@ -513,8 +513,8 @@ class TestRunner:
                         step.get('input', {}).get('region')
                     )
                 
-                # Check if output is properly defined
-                passed = output is not None
+                # Use run_step to properly validate all test criteria
+                passed = self.run_step(step, agent_type, logger)
                 
                 # Store results by region
                 region = step.get('input', {}).get('region', 'default')

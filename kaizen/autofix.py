@@ -156,15 +156,16 @@ Requirements:
 """
         return branch_name, pr_title, pr_body
 
-def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1) -> None:
+def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True) -> None:
     """
-    Automatically fixes code based on test failures and creates a PR.
+    Automatically fixes code based on test failures and optionally creates a PR.
     
     Args:
         failure_data: List of dictionaries containing test failure information
         file_path: Path to the source code file to be fixed
         test_config_path: Path to the test configuration file
         max_retries: Maximum number of retry attempts for fixing tests (default: 1)
+        create_pr: Whether to create a pull request with the fixes (default: True)
         
     Raises:
         ValueError: If required environment variables are not set
@@ -175,6 +176,9 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         # Store the original branch
         original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
         logger.info(f"Stored original branch: {original_branch}")
+        
+        # Initialize branch_name with a default value
+        branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         
         config = get_config()
         logger.info(f"Starting auto-fix process for {file_path} with {len(failure_data)} failures")
@@ -214,6 +218,11 @@ task: Modify the code to resolve all listed issues and return only the full fixe
             response = model.generate_content(user_prompt)
             fixed_code = response.text.strip()
             logger.info("Received fixed code from Gemini")
+            
+            # Write the fixed code to disk before running tests
+            with open(file_path, 'w') as f:
+                f.write(fixed_code)
+            logger.info(f"Updated file: {file_path}")
             
             # Run tests again to verify fixes
             logger.info("Running tests to verify fixes")
@@ -295,12 +304,7 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         logger.info(f"Creating new branch: {branch_name}")
         subprocess.run(["git", "checkout", "-b", branch_name], check=True)
         
-        # Write the fixed code
-        with open(file_path, 'w') as f:
-            f.write(fixed_code)
-        logger.info(f"Updated file: {file_path}")
-        
-        # Commit changes
+        # Commit changes (file is already updated from earlier)
         subprocess.run(["git", "add", file_path], check=True)
         subprocess.run(["git", "commit", "-m", pr_title, "-m", pr_body], check=True)
         logger.info("Committed changes")
@@ -310,39 +314,40 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         logger.info(f"Pushed branch: {branch_name}")
         
         # Create PR using GitHub API
-        github_token = os.environ.get("GITHUB_TOKEN")
-        if not github_token:
-            raise ValueError("GITHUB_TOKEN environment variable not set. Please set it with your GitHub personal access token.")
-        
-        g = Github(github_token)
-        
-        # Get repository information from git config
-        try:
-            repo_url = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], text=True).strip()
-            if repo_url.endswith('.git'):
-                repo_url = repo_url[:-4]
-            repo_name = repo_url.split('/')[-1]
-            repo_owner = repo_url.split('/')[-2]
-            repo = g.get_repo(f"{repo_owner}/{repo_name}")
-        except subprocess.CalledProcessError:
-            raise ValueError("Could not determine repository information. Please ensure you're in a git repository with a remote origin.")
-        except GithubException as e:
-            raise ValueError(f"Error accessing GitHub repository: {str(e)}")
-        
-        # Create PR
-        try:
-            pr = repo.create_pull(
-                title=pr_title,
-                body=pr_body,
-                head=branch_name,
-                base="main"
-            )
+        if create_pr:
+            github_token = os.environ.get("GITHUB_TOKEN")
+            if not github_token:
+                raise ValueError("GITHUB_TOKEN environment variable not set. Please set it with your GitHub personal access token.")
             
-            logger.info(f"Created Pull Request: {pr.html_url}")
-            print(f"Pull Request created: {pr.html_url}")
+            g = Github(github_token)
             
-        except GithubException as e:
-            raise ValueError(f"Error creating pull request: {str(e)}")
+            # Get repository information from git config
+            try:
+                repo_url = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], text=True).strip()
+                if repo_url.endswith('.git'):
+                    repo_url = repo_url[:-4]
+                repo_name = repo_url.split('/')[-1]
+                repo_owner = repo_url.split('/')[-2]
+                repo = g.get_repo(f"{repo_owner}/{repo_name}")
+            except subprocess.CalledProcessError:
+                raise ValueError("Could not determine repository information. Please ensure you're in a git repository with a remote origin.")
+            except GithubException as e:
+                raise ValueError(f"Error accessing GitHub repository: {str(e)}")
+            
+            # Create PR
+            try:
+                pr = repo.create_pull(
+                    title=pr_title,
+                    body=pr_body,
+                    head=branch_name,
+                    base="main"
+                )
+                
+                logger.info(f"Created Pull Request: {pr.html_url}")
+                print(f"Pull Request created: {pr.html_url}")
+                
+            except GithubException as e:
+                raise ValueError(f"Error creating pull request: {str(e)}")
         
         # Return to the original branch
         logger.info(f"Returning to original branch: {original_branch}")
