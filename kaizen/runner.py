@@ -34,7 +34,7 @@ def create_execution_namespace() -> Dict[str, Any]:
     """
     # Get all built-in modules
     builtins = {name: module for name, module in sys.modules.items() 
-               if name in sys.stdlib_module_names}
+               if name in sys.builtin_module_names}
     
     # Add commonly used imports
     namespace = {
@@ -100,41 +100,57 @@ def execute_code_block(block_code: str, namespace: Dict[str, Any], test_input: O
         test_input (Optional[str]): Input to pass to functions/classes
         
     Returns:
-        str: The execution output
+        str: The execution output (only return values, ignoring printed output)
     """
-    output = io.StringIO()
-    
     try:
         # Parse the block to determine its type
         block_ast = ast.parse(block_code)
         
-        with redirect_stdout(output):
-            # Execute the block in the namespace
-            exec(block_code, namespace)
+        # Execute the block in the namespace (without capturing stdout)
+        exec(block_code, namespace)
+        
+        # Check if it's a function or class
+        if len(block_ast.body) == 1:
+            node = block_ast.body[0]
             
-            # Check if it's a function or class
-            if len(block_ast.body) == 1:
-                node = block_ast.body[0]
-                
-                if isinstance(node, ast.FunctionDef):
-                    # It's a function, call it with test_input
-                    func_name = node.name
-                    if func_name in namespace:
+            if isinstance(node, ast.FunctionDef):
+                # It's a function, call it with test_input
+                func_name = node.name
+                if func_name in namespace:
+                    try:
                         result = namespace[func_name](test_input)
                         if result is not None:
-                            print(result)
-                            
-                elif isinstance(node, ast.ClassDef):
-                    # It's a class, instantiate and call reply if present
-                    class_name = node.name
-                    if class_name in namespace:
+                            return str(result)
+                    except Exception as e:
+                        return f"Error executing function {func_name}: {str(e)}"
+                        
+            elif isinstance(node, ast.ClassDef):
+                # It's a class, try to find and call a method that takes input
+                class_name = node.name
+                if class_name in namespace:
+                    try:
+                        # Create an instance of the class
                         instance = namespace[class_name]()
-                        if hasattr(instance, 'reply'):
-                            result = instance.reply(test_input)
-                            if result is not None:
-                                print(result)
-                                
-        return output.getvalue().strip()
+                        
+                        # Find a method that takes input
+                        for method_name in dir(instance):
+                            method = getattr(instance, method_name)
+                            if callable(method) and not method_name.startswith('_'):
+                                # Check if the method can accept the test_input
+                                try:
+                                    result = method(test_input)
+                                    if result is not None:
+                                        return str(result)
+                                except (TypeError, ValueError):
+                                    # Skip methods that don't accept the input
+                                    continue
+                                    
+                        return f"Error: No suitable method found in class {class_name} that accepts the input"
+                    except Exception as e:
+                        return f"Error executing class {class_name}: {str(e)}"
+        
+        # If we get here, either it wasn't a function/class or there was no return value
+        return "No return value found"
         
     except SyntaxError as e:
         return f"Error: Invalid Python syntax in block: {str(e)}"
@@ -154,30 +170,21 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         str: Output from the code block execution or error message
     """
     try:
+        # Convert test file path to actual code file path
+        if file_path.endswith('.yaml'):
+            # If it's a test file, look for the corresponding Python file
+            code_file = file_path.replace('test_simple.yaml', 'email_agent.py')
+            if not os.path.exists(code_file):
+                return f"Error: Could not find code file at {code_file}"
+        else:
+            code_file = file_path
+
         # Read the full file
-        with open(file_path, 'r') as f:
+        with open(code_file, 'r') as f:
             content = f.read()
             
         # Create execution namespace with all necessary imports
         namespace = create_execution_namespace()
-        
-        # Add imports from the file to the namespace
-        try:
-            # Execute imports first
-            import_lines = []
-            for line in content.split('\n'):
-                if line.startswith('import ') or line.startswith('from '):
-                    import_lines.append(line)
-                elif line.strip() and not line.startswith('#'):
-                    break
-            
-            if import_lines:
-                exec('\n'.join(import_lines), namespace)
-            
-            # Now execute the full file
-            exec(content, namespace)
-        except Exception as e:
-            return f"Error setting up imports: {str(e)}"
         
         # Extract the block between markers
         if region:
@@ -191,14 +198,31 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         
         start_idx = content.find(start_marker)
         if start_idx == -1:
-            return f"Error: Start marker '{start_marker}' not found"
+            return f"Error: Start marker '{start_marker}' not found in file {code_file}"
             
         end_idx = content.find(end_marker, start_idx)
         if end_idx == -1:
-            return f"Error: End marker '{end_marker}' not found"
+            return f"Error: End marker '{end_marker}' not found in file {code_file}"
             
         # Extract the block code
         block_code = content[start_idx + len(start_marker):end_idx].strip()
+        
+        # Extract imports from the full file
+        import_lines = []
+        for line in content.split('\n'):
+            line = line.strip()
+            if line.startswith('import ') or line.startswith('from '):
+                import_lines.append(line)
+            elif line and not line.startswith('#'):
+                break
+        
+        # Add imports to the namespace
+        if import_lines:
+            try:
+                import_block = '\n'.join(import_lines)
+                exec(import_block, namespace)
+            except Exception as e:
+                return f"Error setting up imports: {str(e)}"
         
         # Execute the block
         return execute_code_block(block_code, namespace, test_input)
@@ -450,6 +474,7 @@ class TestRunner:
         """
         file_path = Path(file_path)
         results = {}
+        all_steps_passed = True
         
         # Get the agent type from config
         agent_type = self.test_config.get('agent_type', 'dynamic_region')
@@ -457,34 +482,124 @@ class TestRunner:
         # Create logger
         logger = TestLogger(self.test_config.get('name', 'Unnamed Test'))
         
-        # Run each test step
-        for step in self.test_config.get('steps', []):
-            step_index = step.get('step_index')
-            step_name = step.get('name', f'Step {step_index}')
+        try:
+            # Initialize LLM evaluator if evaluation criteria are specified
+            evaluator = None
+            if 'evaluation' in self.test_config:
+                from .evaluator import LLMEvaluator
+                evaluator = LLMEvaluator(
+                    provider=self.test_config['evaluation'].get('llm_provider', 'google'),
+                    logger=logger
+                )
             
-            logger.log_step_start(step_index, step.get('input', {}))
+            # Run each test step
+            for step in self.test_config.get('steps', []):
+                step_index = step.get('step_index')
+                step_name = step.get('name', f'Step {step_index}')
+                
+                logger.log_step_start(step_index, step.get('input', {}))
+                
+                # Run the step and capture output
+                output = None
+                if 'region' in step.get('input', {}):
+                    output = run_test_block(
+                        str(file_path),
+                        step.get('input', {}).get('input'),
+                        step.get('input', {}).get('region')
+                    )
+                
+                # Check if output is properly defined
+                passed = output is not None
+                
+                # Store results by region
+                region = step.get('input', {}).get('region', 'default')
+                if region not in results:
+                    results[region] = {
+                        'test_cases': [],
+                        'status': 'passed'  # Initialize status for each region
+                    }
+                
+                # If we have an output and evaluator, evaluate it immediately
+                evaluation_result = None
+                if output and evaluator and 'evaluation' in self.test_config:
+                    try:
+                        # Create a temporary results structure for evaluation
+                        temp_results = {
+                            region: {
+                                'test_cases': [{
+                                    'name': step_name,
+                                    'output': output,
+                                    'details': logger.get_last_step_details()
+                                }]
+                            }
+                        }
+                        
+                        print(f"Debug: Temp results: {temp_results}")
+                        
+                        # Run evaluation
+                        evaluation_result = evaluator.evaluate(
+                            results=temp_results,
+                            criteria=self.test_config['evaluation'].get('criteria', [])
+                        )
+                        
+                        # Update passed status based on evaluation
+                        if isinstance(evaluation_result, dict):
+                            if evaluation_result.get('status') == 'failed':
+                                passed = False
+                                all_steps_passed = False
+                                results[region]['status'] = 'failed'  # Update region status
+                        elif isinstance(evaluation_result, str):
+                            # If evaluation_result is a string, treat it as an error
+                            passed = False
+                            all_steps_passed = False
+                            results[region]['status'] = 'failed'  # Update region status
+                            evaluation_result = {
+                                'status': 'error',
+                                'error': evaluation_result
+                            }
+                            
+                    except Exception as e:
+                        logger.logger.error(f"Error during output evaluation: {str(e)}")
+                        evaluation_result = {
+                            'status': 'error',
+                            'error': str(e)
+                        }
+                        results[region]['status'] = 'failed'  # Update region status
+                
+                # Add test case result
+                test_case = {
+                    'name': step_name,
+                    'status': 'passed' if passed else 'failed',
+                    'output': output,
+                    'details': logger.get_last_step_details()
+                }
+                
+                # Add evaluation result if available
+                if evaluation_result:
+                    test_case['evaluation'] = evaluation_result
+                
+                results[region]['test_cases'].append(test_case)
+                
+                # Update region status if test case failed
+                if not passed:
+                    results[region]['status'] = 'failed'
             
-            # Run the step
-            passed = self.run_step(step, agent_type, logger)
+            # Set overall status in a separate field
+            results['overall_status'] = 'failed' if not all_steps_passed else 'passed'
             
-            # Log the result
-            logger.log_step_result(
-                step_index,
-                {'status': 'passed' if passed else 'failed'},
-                passed
-            )
+            if not all_steps_passed:
+                logger.logger.error("Test failed due to failed steps or evaluations")
+            else:
+                logger.logger.info("All tests passed")
             
-            # Store results by region
-            region = step.get('input', {}).get('region', 'default')
-            if region not in results:
-                results[region] = {'test_cases': []}
+            # Save test results
+            logger.save_results()
             
-            results[region]['test_cases'].append({
-                'name': step_name,
-                'status': 'passed' if passed else 'failed'
-            })
-        
-        # Save test results
-        logger.save_results()
-        
-        return results 
+            return results
+            
+        except Exception as e:
+            logger.logger.error(f"Error running tests: {str(e)}")
+            return {
+                'status': 'error',
+                'error': str(e)
+            } 

@@ -12,6 +12,7 @@ import json
 from .logger import get_logger
 from .config import get_config
 from .runner import TestRunner
+from .logger import TestLogger
 
 logger = get_logger(__name__)
 
@@ -199,11 +200,17 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         # Run tests again to verify fixes
         logger.info("Running tests to verify fixes")
         test_runner = TestRunner()
+        test_logger = TestLogger("Auto-fix Test Run")
         test_results = test_runner.run_tests(Path(file_path))
         
         # Track which previously failing tests are now passing
         fixed_tests = []
         for region, result in test_results.items():
+            print(f"Region: {region}")
+            print(f"Result: {result}")
+            # Skip if result is a string (like 'status')
+            if isinstance(result, str):
+                continue
             for test_case in result.get('test_cases', []):
                 test_name = test_case['name']
                 if test_name in failing_test_names and test_case['status'] == 'passed':

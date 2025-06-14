@@ -36,17 +36,79 @@ class EmailAgent:
         if not draft:
             return "Please provide either --draft or --file argument"
             
-        prompt = f"Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent. Here's the draft:\n\n{draft}\n\nImproved version:"
+        # Add safety instructions to the prompt
+        prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
+        Focus on:
+        - Professional tone and language
+        - Clear and concise communication
+        - Proper email etiquette
+        - Maintaining the original message's intent
+        
+        Here's the draft:
+        
+        {draft}
+        
+        Improved version:"""
 
         try:
+            print(f"Debug: Prompt: {prompt}")
             response = self.model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.7,
-                    max_output_tokens=1000,
-                )
+                    max_output_tokens=2048,  # Increased token limit
+                    top_p=0.8,
+                    top_k=40,
+                ),
+                safety_settings=[
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH",
+                        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                    }
+                ]
             )
-            return response.text.strip()
+            print(f"Debug: Response: {response}")
+            
+            # Check for safety issues
+            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                if hasattr(response.prompt_feedback, 'block_reason'):
+                    raise ValueError(f"Content was blocked due to: {response.prompt_feedback.block_reason}")
+            
+            # Check for candidates
+            if not hasattr(response, 'candidates') or not response.candidates:
+                raise ValueError("No response candidates were generated")
+            
+            # Get the first candidate
+            candidate = response.candidates[0]
+            
+            # Check finish reason
+            if hasattr(candidate, 'finish_reason'):
+                if candidate.finish_reason == "MAX_TOKENS":
+                    raise ValueError("Response was cut off due to token limit. Please try with a shorter email draft.")
+                elif candidate.finish_reason == "BLOCKED":
+                    raise ValueError("Content was blocked by safety filters")
+            
+            # Try to get the text content
+            if hasattr(candidate, 'content'):
+                if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                    return candidate.content.parts[0].text.strip()
+                elif hasattr(candidate.content, 'text'):
+                    return candidate.content.text.strip()
+            
+            raise ValueError("Could not extract text from the response")
+            
         except Exception as e:
             raise ValueError(f"Failed to generate improved email: {str(e)}")
 # kaizen:end:email_agent

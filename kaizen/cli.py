@@ -44,21 +44,46 @@ def test_all(config: str, auto_fix: bool, create_pr: bool):
         # Check if any tests failed
         failed_tests = []
         for region, result in results.items():
-            for test_case in result.get('test_cases', []):
-                if test_case['status'] != 'passed':
+            if not isinstance(result, dict):
+                click.echo(f"Warning: Invalid result format for region {region}: {result}")
+                continue
+                
+            test_cases = result.get('test_cases', [])
+            if not isinstance(test_cases, list):
+                click.echo(f"Warning: Invalid test_cases format for region {region}: {test_cases}")
+                continue
+                
+            for test_case in test_cases:
+                if not isinstance(test_case, dict):
+                    click.echo(f"Warning: Invalid test case format: {test_case}")
+                    continue
+                    
+                if test_case.get('status') != 'passed':
                     failed_tests.append({
                         'region': region,
-                        'test_name': test_case['name'],
-                        'error_message': test_case.get('details', 'Test failed')
+                        'test_name': test_case.get('name', 'Unknown Test'),
+                        'error_message': test_case.get('details', 'Test failed'),
+                        'output': test_case.get('output', 'No output available')
                     })
         
-        if failed_tests and auto_fix:
-            click.echo("\nAttempting to fix failing tests...")
-            file_path = test_config.get('file_path')
-            if file_path:
-                run_autofix_and_pr(failed_tests, file_path)
-            else:
-                click.echo("Error: file_path not specified in test configuration")
+        if failed_tests:
+            click.echo("\nFailed Tests:")
+            for test in failed_tests:
+                click.echo(f"- {test['test_name']} ({test['region']}): {test['error_message']}")
+                if test['output']:
+                    click.echo(f"  Output: {test['output']}")
+            
+            if auto_fix:
+                click.echo("\nAttempting to fix failing tests...")
+                file_path = test_config.get('file_path')
+                if file_path:
+                    run_autofix_and_pr(failed_tests, file_path)
+                    if create_pr:
+                        click.echo("Pull request created with fixes")
+                else:
+                    click.echo("Error: file_path not specified in test configuration")
+        else:
+            click.echo("\nAll tests passed!")
         
         # Output results
         click.echo("\nTest Results:")
