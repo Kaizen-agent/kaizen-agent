@@ -11,6 +11,7 @@ import json
 import yaml
 import sys
 from rich.console import Console
+import ast
 
 from .logger import get_logger
 from .config import get_config
@@ -91,6 +92,8 @@ def _generate_pr_info(failure_data: List[Dict], fixed_tests: List[Dict], test_re
         # Prepare prompt for LLM
         prompt = f"""You are a senior software engineer specializing in AI agent development. Your task is to improve the following code by fixing the issues described in the test failures. Make only minimal changes necessary to resolve all problems while preserving existing logic.
 
+IMPORTANT: You must return valid Python code that can be executed. DO NOT return empty code blocks or invalid syntax.
+
 Context:
 1. This is an AI agent code that needs to be fixed
 2. The test configuration provides evaluation criteria and test steps
@@ -113,6 +116,8 @@ Requirements:
 4. Maintain code quality standards (type hints, documentation, etc.)
 5. Keep changes minimal and focused on fixing the specific issues
 6. Return only the complete fixed code file, no explanations
+7. DO NOT return empty code blocks or invalid syntax
+8. The returned code must be valid Python code that can be executed
 
 Code Structure Requirements:
 1. All imports must be at the top of the file
@@ -125,6 +130,8 @@ Code Structure Requirements:
 8. All required dependencies must be imported
 9. All code must be executable in a Python environment
 10. All code must be compatible with Python 3.8+
+11. The code must be a complete, valid Python file
+12. The code must not contain any empty code blocks or invalid syntax
 
 Execution Requirements:
 1. Code must be executable in a controlled environment with proper namespace setup
@@ -268,6 +275,77 @@ Return the complete fixed code file that addresses all test failures while follo
 """
         return branch_name, pr_title, pr_body
 
+def _validate_and_improve_code(code: str, original_code: str) -> str:
+    """
+    Validate and improve the generated code if it has invalid syntax.
+    
+    Args:
+        code: The generated code to validate
+        original_code: The original code for reference
+        
+    Returns:
+        str: Improved code that should be valid Python syntax
+    """
+    try:
+        # First try to parse the code to check syntax
+        ast.parse(code)
+        return code
+    except SyntaxError:
+        logger.warning("Generated code has invalid syntax, attempting to improve it")
+        
+        # If code is empty or just whitespace, return original code
+        if not code.strip():
+            logger.warning("Generated code is empty, returning original code")
+            return original_code
+            
+        # Try to fix common syntax issues
+        try:
+            # Initialize Gemini for code improvement
+            config = get_config()
+            genai.configure(api_key=config.get_api_key("google"))
+            model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+            
+            # Create prompt for fixing syntax
+            prompt = f"""The following Python code has invalid syntax. Please fix it to be valid Python code that can be executed.
+The code should maintain the same functionality as the original code.
+
+Original Code:
+{original_code}
+
+Invalid Code:
+{code}
+
+Requirements:
+1. Return only valid Python code, no explanations
+2. Maintain the same functionality as the original code
+3. Fix any syntax errors
+4. Ensure all imports are at the top
+5. Ensure proper indentation
+6. Ensure all brackets and parentheses are properly closed
+7. Ensure all strings are properly quoted
+8. Ensure all statements end with proper punctuation
+9. Ensure all code blocks are properly defined
+10. Ensure all functions and classes are properly defined
+
+Return only the fixed code, no explanations or additional text."""
+            
+            # Get improved code from Gemini
+            response = model.generate_content(prompt)
+            improved_code = response.text.strip()
+            
+            # Validate the improved code
+            try:
+                ast.parse(improved_code)
+                logger.info("Successfully improved code syntax")
+                return improved_code
+            except SyntaxError:
+                logger.warning("Failed to improve code syntax, returning original code")
+                return original_code
+                
+        except Exception as e:
+            logger.error(f"Error improving code: {str(e)}")
+            return original_code
+
 def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True) -> None:
     """
     Automatically fixes code based on test failures and optionally creates a PR.
@@ -332,7 +410,10 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             logger.info("Requesting code fixes from Gemini")
             response = model.generate_content(pr_body)
             fixed_code = response.text.strip()
-            logger.info("Received fixed code from Gemini")
+            
+            # Validate and improve the generated code
+            fixed_code = _validate_and_improve_code(fixed_code, original_code)
+            logger.info("Validated and improved generated code")
             
             # Write the fixed code to disk before running tests
             with open(file_path, 'w') as f:
