@@ -11,6 +11,8 @@ from pathlib import Path
 from .runner import TestRunner, run_test_block
 from .autofix import run_autofix_and_pr
 from .test_generator import TestGenerator
+import sys
+from rich import print as console_print
 
 @click.group()
 def cli():
@@ -38,8 +40,13 @@ def test_all(config: str, auto_fix: bool, create_pr: bool):
         click.echo(f"Running test: {test_config.get('name', 'Unnamed Test')}")
         click.echo("=" * 50)
         
-        # Run tests
-        results = runner.run_tests(Path(config))
+        # Extract file path from the root of the configuration
+        file_path = test_config.get('file_path')
+        if not file_path:
+            console_print("[red]Error: No file_path found in test configuration[/red]")
+            sys.exit(1)
+            
+        results = runner.run_tests(Path(file_path))
         
         # Check if any tests failed
         failed_tests = []

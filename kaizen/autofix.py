@@ -8,6 +8,9 @@ from github import Github
 from github.GithubException import GithubException
 from datetime import datetime
 import json
+import yaml
+import sys
+from rich.console import Console
 
 from .logger import get_logger
 from .config import get_config
@@ -15,6 +18,7 @@ from .runner import TestRunner
 from .logger import TestLogger
 
 logger = get_logger(__name__)
+console = Console()
 
 def format_test_results_table(test_results: Dict) -> str:
     """Format test results into a markdown table."""
@@ -166,6 +170,10 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str) -> None:
         GithubException: If GitHub API operations fail
     """
     try:
+        # Store the original branch
+        original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+        logger.info(f"Stored original branch: {original_branch}")
+        
         config = get_config()
         logger.info(f"Starting auto-fix process for {file_path} with {len(failure_data)} failures")
         
@@ -201,7 +209,18 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         logger.info("Running tests to verify fixes")
         test_runner = TestRunner()
         test_logger = TestLogger("Auto-fix Test Run")
-        test_results = test_runner.run_tests(Path(file_path))
+        
+        # Load test configuration
+        with open(file_path, 'r') as f:
+            test_config = yaml.safe_load(f)
+            
+        # Extract file path from the root of the configuration
+        test_file_path = test_config.get('file_path')
+        if not test_file_path:
+            console.print("[red]Error: No file_path found in test configuration[/red]")
+            sys.exit(1)
+            
+        test_results = test_runner.run_tests(Path(test_file_path))
         
         # Generate branch name and PR info early
         branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], test_results)
@@ -297,12 +316,31 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         except GithubException as e:
             raise ValueError(f"Error creating pull request: {str(e)}")
         
+        # Return to the original branch
+        logger.info(f"Returning to original branch: {original_branch}")
+        subprocess.run(["git", "checkout", original_branch], check=True)
+        
     except subprocess.CalledProcessError as e:
         logger.error(f"Git command failed: {e}")
+        # Try to return to original branch even if there was an error
+        try:
+            subprocess.run(["git", "checkout", original_branch], check=True)
+        except:
+            pass
         raise
     except GithubException as e:
         logger.error(f"GitHub API error: {e}")
+        # Try to return to original branch even if there was an error
+        try:
+            subprocess.run(["git", "checkout", original_branch], check=True)
+        except:
+            pass
         raise
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
+        # Try to return to original branch even if there was an error
+        try:
+            subprocess.run(["git", "checkout", original_branch], check=True)
+        except:
+            pass
         raise 
