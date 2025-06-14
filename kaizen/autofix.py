@@ -95,6 +95,7 @@ Context:
 1. This is an AI agent code that needs to be fixed
 2. The test configuration provides evaluation criteria and test steps
 3. Each test failure includes specific error messages and expected outputs
+4. The code will be executed in a controlled environment with proper namespace setup
 
 Test Configuration:
 {json.dumps(test_config, indent=2)}
@@ -112,6 +113,30 @@ Requirements:
 4. Maintain code quality standards (type hints, documentation, etc.)
 5. Keep changes minimal and focused on fixing the specific issues
 6. Return only the complete fixed code file, no explanations
+
+Code Structure Requirements:
+1. All imports must be at the top of the file
+2. All classes and functions must be properly defined with type hints
+3. All functions must have docstrings explaining their purpose and parameters
+4. All classes must have proper initialization methods
+5. All methods must handle their own exceptions and return appropriate values
+6. All code must be properly indented and follow PEP 8 style
+7. All variables must be properly initialized before use
+8. All required dependencies must be imported
+9. All code must be executable in a Python environment
+10. All code must be compatible with Python 3.8+
+
+Execution Requirements:
+1. Code must be executable in a controlled environment with proper namespace setup
+2. Code must handle all possible input types and edge cases
+3. Code must validate all inputs before processing
+4. Code must handle all possible error conditions
+5. Code must return appropriate values for all execution paths
+6. Code must not rely on external state or global variables
+7. Code must be thread-safe and reentrant
+8. Code must clean up any resources it uses
+9. Code must not have any side effects
+10. Code must be deterministic
 
 Code Improvement Guidelines:
 1. Error Handling:
