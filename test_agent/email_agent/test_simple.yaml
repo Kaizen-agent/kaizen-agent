@@ -33,8 +33,6 @@ steps:
       region: email_agent
       method: improve_email
       input: "hey, can we meet tomorrow to discuss the project? let me know when you're free."
-
- steps:
   - step_index: 2
     name: Edge case of random input
     description: Test random input functionality

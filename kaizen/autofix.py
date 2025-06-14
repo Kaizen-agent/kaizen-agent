@@ -69,7 +69,7 @@ def analyze_failures(failure_data: List[Dict]) -> str:
     
     return analysis
 
-def _generate_pr_info(failure_data: List[Dict], fixed_tests: List[Dict], test_results: Dict) -> Tuple[str, str, str]:
+def _generate_pr_info(failure_data: List[Dict], fixed_tests: List[Dict], test_results: Dict, test_config: Dict, original_code: str) -> Tuple[str, str, str]:
     """
     Generate meaningful branch name, PR title, and body using LLM.
     
@@ -77,6 +77,8 @@ def _generate_pr_info(failure_data: List[Dict], fixed_tests: List[Dict], test_re
         failure_data: List of test failures
         fixed_tests: List of fixed tests
         test_results: Complete test results
+        test_config: Test configuration data
+        original_code: The original code that needs to be fixed
         
     Returns:
         Tuple of (branch_name, pr_title, pr_body)
@@ -272,117 +274,25 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         failing_test_names = {failure["test_name"] for failure in failure_data}
         logger.info(f"Tests that were failing: {failing_test_names}")
         
-        # Read the original code
+        # Load test configuration
+        with open(test_config_path, 'r') as f:
+            test_config = yaml.safe_load(f)
+        
+        # Load original code
         with open(file_path, 'r') as f:
             original_code = f.read()
         
-        # Prepare the prompt for Gemini
-        prompt = f"""You are a senior software engineer specializing in AI agent development. Your task is to improve the following code by fixing the issues described in the test failures. Make only minimal changes necessary to resolve all problems while preserving existing logic.
-
-Context:
-1. This is an AI agent code that needs to be fixed
-2. The test configuration provides evaluation criteria and test steps
-3. Each test failure includes specific error messages and expected outputs
-
-Test Configuration:
-{json.dumps(test_config, indent=2)}
-
-Original Code:
-{original_code}
-
-Test Failures:
-{chr(10).join(f'  - test_name: {failure["test_name"]}{chr(10)}    error_message: {failure["error_message"]}' for failure in failure_data)}
-
-Requirements:
-1. Fix all test failures while maintaining the agent's core functionality
-2. Follow the evaluation criteria from the test configuration
-3. Ensure proper error handling and input validation
-4. Maintain code quality standards (type hints, documentation, etc.)
-5. Keep changes minimal and focused on fixing the specific issues
-6. Return only the complete fixed code file, no explanations
-
-Code Improvement Guidelines:
-1. Error Handling:
-   - Add proper error handling for API calls and external services
-   - Include specific error messages for different failure scenarios
-   - Handle edge cases gracefully with appropriate fallbacks
-   - Validate inputs before processing
-
-2. AI Agent Best Practices:
-   - Ensure proper initialization of AI models and services
-   - Handle API rate limits and timeouts
-   - Implement proper logging for debugging
-   - Add retry mechanisms for transient failures
-   - Validate model outputs before returning
-
-3. Code Structure:
-   - Keep methods focused and single-purpose
-   - Use clear and descriptive variable names
-   - Add type hints for all parameters and return values
-   - Include docstrings explaining method purpose and parameters
-   - Follow consistent code style
-
-4. Testing Considerations:
-   - Make code testable by avoiding hard-coded values
-   - Use dependency injection where appropriate
-   - Add proper mocking points for external services
-   - Ensure error cases are testable
-   - Make validation logic explicit and testable
-
-5. Performance:
-   - Optimize API calls and external service interactions
-   - Cache results where appropriate
-   - Handle large inputs efficiently
-   - Implement proper resource cleanup
-
-6. Security:
-   - Never expose API keys or sensitive data
-   - Validate and sanitize all inputs
-   - Implement proper access controls
-   - Handle sensitive data appropriately
-
-7. AI Agent Prompt Engineering:
-   When test failures indicate output quality issues (e.g., missing expected content, incorrect format, or poor response quality):
-   
-   a) Analyze the Failure:
-      - Identify which specific aspects of the output failed (content, format, style, etc.)
-      - Check if the failure is due to missing context or unclear instructions
-      - Determine if the model needs more specific guidance or constraints
-   
-   b) Improve the Prompt:
-      - Add clear output format requirements
-      - Include specific examples of expected outputs
-      - Specify required content elements
-      - Add constraints for response length and style
-      - Include validation criteria in the prompt
-   
-   c) Add Output Validation:
-      - Implement checks for required content elements
-      - Validate output format and structure
-      - Add length and style validation
-      - Include fallback responses for invalid outputs
-   
-   d) Enhance Context:
-      - Add relevant background information
-      - Include domain-specific terminology
-      - Specify the target audience
-      - Add style and tone requirements
-   
-   e) Add Safety and Quality Checks:
-      - Include content filtering requirements
-      - Add fact-checking instructions
-      - Specify ethical guidelines
-      - Include quality assurance steps
-
-8. Output Quality Improvements:
-   - Add post-processing for output formatting
-   - Implement content validation
-   - Add response enhancement logic
-   - Include output sanitization
-   - Add quality scoring mechanisms
-
-Return the complete fixed code file that addresses all test failures while following these guidelines."""
-
+        # Generate PR info with test configuration
+        try:
+            branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], {}, test_config, original_code)
+        except Exception as e:
+            logger.warning(f"Failed to generate PR info: {str(e)}")
+            # Use default values if PR info generation fails
+            timestamp = datetime.now().strftime('%Y%m%d')
+            branch_name = f"fix-tests-{timestamp}"
+            pr_title = "Fix: Resolved test failures"
+            pr_body = f"# Test Fix Summary\n\nFixing test failures in {file_path}"
+        
         # Track which previously failing tests are now passing
         fixed_tests = []
         best_fixed_tests = []
@@ -395,7 +305,7 @@ Return the complete fixed code file that addresses all test failures while follo
             genai.configure(api_key=config.get_api_key("google"))
             model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
             logger.info("Requesting code fixes from Gemini")
-            response = model.generate_content(prompt)
+            response = model.generate_content(pr_body)
             fixed_code = response.text.strip()
             logger.info("Received fixed code from Gemini")
             
@@ -407,10 +317,6 @@ Return the complete fixed code file that addresses all test failures while follo
             # Run tests again to verify fixes
             logger.info("Running tests to verify fixes")
             
-            # Load test configuration
-            with open(test_config_path, 'r') as f:
-                test_config = yaml.safe_load(f)
-                
             test_runner = TestRunner(test_config)
             test_logger = TestLogger(f"Auto-fix Test Run (Attempt {attempt + 1})")
             
@@ -481,7 +387,7 @@ Return the complete fixed code file that addresses all test failures while follo
         logger.info(f"Fixed {len(fixed_tests)} previously failing tests")
         
         # Update PR info with fixed tests
-        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results)
+        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results, test_config, original_code)
         logger.info(f"Updated branch name: {branch_name}")
         
         # Create a new branch
