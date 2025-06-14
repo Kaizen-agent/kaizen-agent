@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from rich.console import Console
 
 from .runner import TestRunner, run_test_block
@@ -13,6 +13,41 @@ from .logger import TestLogger
 from .autofix import run_autofix_and_pr
 
 console = Console()
+
+def collect_failed_tests(results: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Collect all failed tests from the test results dictionary.
+    
+    Args:
+        results: Dictionary containing test results by region
+        
+    Returns:
+        List of dictionaries containing failed test information
+    """
+    failed_tests = []
+    for region, result in results.items():
+        if not isinstance(result, dict):
+            click.echo(f"Warning: Invalid result format for region {region}: {result}")
+            continue
+            
+        test_cases = result.get('test_cases', [])
+        if not isinstance(test_cases, list):
+            click.echo(f"Warning: Invalid test_cases format for region {region}: {test_cases}")
+            continue
+            
+        for test_case in test_cases:
+            if not isinstance(test_case, dict):
+                click.echo(f"Warning: Invalid test case format: {test_case}")
+                continue
+                
+            if test_case.get('status') != 'passed':
+                failed_tests.append({
+                    'region': region,
+                    'test_name': test_case.get('name', 'Unknown Test'),
+                    'error_message': test_case.get('details', 'Test failed'),
+                    'output': test_case.get('output', 'No output available')
+                })
+    return failed_tests
 
 @click.group()
 def cli():
@@ -62,29 +97,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
         results = runner.run_tests(resolved_file_path)
         
         # Check if any tests failed
-        failed_tests = []
-        for region, result in results.items():
-            if not isinstance(result, dict):
-                click.echo(f"Warning: Invalid result format for region {region}: {result}")
-                continue
-                
-            test_cases = result.get('test_cases', [])
-            if not isinstance(test_cases, list):
-                click.echo(f"Warning: Invalid test_cases format for region {region}: {test_cases}")
-                continue
-                
-            for test_case in test_cases:
-                if not isinstance(test_case, dict):
-                    click.echo(f"Warning: Invalid test case format: {test_case}")
-                    continue
-                    
-                if test_case.get('status') != 'passed':
-                    failed_tests.append({
-                        'region': region,
-                        'test_name': test_case.get('name', 'Unknown Test'),
-                        'error_message': test_case.get('details', 'Test failed'),
-                        'output': test_case.get('output', 'No output available')
-                    })
+        failed_tests = collect_failed_tests(results)
         
         if failed_tests:
             click.echo("\nFailed Tests:")
@@ -96,7 +109,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
             if auto_fix:
                 click.echo(f"\nAttempting to fix failing tests (max retries: {max_retries})...")
                 if file_path:
-                    run_autofix_and_pr(failed_tests, str(resolved_file_path), config, max_retries=max_retries, create_pr=create_pr)
+                    run_autofix_and_pr(failed_tests, str(resolved_file_path), str(config_path), max_retries=max_retries, create_pr=create_pr)
                     if create_pr:
                         click.echo("Pull request created with fixes")
                 else:
@@ -205,30 +218,11 @@ def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: 
             test_results = runner.run_tests(resolved_file_path)
             
             # Collect failed tests
-            failed_tests = []
-            for region, result in test_results.items():
-                if not isinstance(result, dict):
-                    continue
-                    
-                test_cases = result.get('test_cases', [])
-                if not isinstance(test_cases, list):
-                    continue
-                    
-                for test_case in test_cases:
-                    if not isinstance(test_case, dict):
-                        continue
-                        
-                    if test_case.get('status') != 'passed':
-                        failed_tests.append({
-                            'region': region,
-                            'test_name': test_case.get('name', 'Unknown Test'),
-                            'error_message': test_case.get('details', 'Test failed'),
-                            'output': test_case.get('output', 'No output available')
-                        })
+            failed_tests = collect_failed_tests(test_results)
             
             if failed_tests:
                 # Run auto-fix
-                run_autofix_and_pr(failed_tests, str(resolved_file_path), test_file, max_retries=max_retries, create_pr=make_pr)
+                run_autofix_and_pr(failed_tests, str(resolved_file_path), str(Path(test_file).resolve()), max_retries=max_retries, create_pr=make_pr)
                 fixed_tests.extend(failed_tests)
         
         if fixed_tests:
