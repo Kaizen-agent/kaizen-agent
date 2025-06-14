@@ -1,6 +1,6 @@
 name: Email Agent Core Test
 agent_type: dynamic_region
-file_path: test_agent/email_agent/email_agent.py
+file_path: email_agent.py
 description: |
   Test suite for the EmailAgent class that handles email improvement using OpenAI's API.
   Tests cover initialization, error handling, and email improvement functionality.
@@ -27,7 +27,7 @@ steps:
     name: Basic Email Improvement
     description: Test basic email improvement functionality with a simple meeting request
     input:
-      file_path: test_agent/email_agent/email_agent.py
+      file_path: email_agent.py
       region: email_agent
       method: improve_email
       input: "hey, can we meet tomorrow to discuss the project? let me know when you're free."

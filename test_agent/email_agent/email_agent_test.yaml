@@ -49,7 +49,7 @@ steps:
     name: Basic Email Improvement
     description: Test basic email improvement functionality with a simple meeting request
     input:
-      file_path: test_agent/email_agent/email_agent.py
+      file_path: email_agent.py
       region: email_agent
       method: improve_email
       input: "hey, can we meet tomorrow to discuss the project? let me know when you're free."
@@ -67,7 +67,7 @@ steps:
     name: Error Handling - Empty Input
     description: Test error handling for empty input
     input:
-      file_path: test_agent/email_agent/email_agent.py
+      file_path: email_agent.py
       region: email_agent
       method: improve_email
       input: ""
@@ -80,7 +80,7 @@ steps:
     name: Long Email Improvement
     description: Test handling of a longer, more complex email
     input:
-      file_path: test_agent/email_agent/email_agent.py
+      file_path: email_agent.py
       region: email_agent
       method: improve_email
       input: |
@@ -108,7 +108,7 @@ steps:
     name: Formal Email Improvement
     description: Test improvement of a formal business email
     input:
-      file_path: test_agent/email_agent/email_agent.py
+      file_path: email_agent.py
       region: email_agent
       method: improve_email
       input: |
