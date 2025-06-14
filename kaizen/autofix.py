@@ -226,7 +226,16 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         if not fixed_tests:
             logger.info("No previously failing tests were fixed. Reverting changes.")
             subprocess.run(["git", "checkout", "main"], check=True)
-            subprocess.run(["git", "branch", "-D", branch_name], check=True)
+            # Only try to delete the branch if we created it
+            try:
+                # Check if branch exists
+                result = subprocess.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"], 
+                                      capture_output=True, check=False)
+                if result.returncode == 0:
+                    subprocess.run(["git", "branch", "-D", branch_name], check=True)
+            except subprocess.CalledProcessError:
+                # Ignore errors if branch doesn't exist
+                pass
             return
         
         logger.info(f"Fixed {len(fixed_tests)} previously failing tests")
