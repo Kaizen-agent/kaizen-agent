@@ -174,7 +174,8 @@ def run_test(test_file: str):
 @click.option('--project', '-p', type=click.Path(exists=True), required=True, help='Path to agent project')
 @click.option('--results', '-r', type=click.Path(), help='Path to save test results')
 @click.option('--make-pr', is_flag=True, help='Create a GitHub pull request')
-def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: bool):
+@click.option('--max-retries', type=int, default=1, help='Maximum number of retry attempts for auto-fix (default: 1)')
+def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: bool, max_retries: int):
     """
     Automatically fix failing tests.
     
@@ -201,11 +202,11 @@ def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: 
             
             # Run tests to get failures
             runner = TestRunner(test_config)
-            results = runner.run_tests(resolved_file_path)
+            test_results = runner.run_tests(resolved_file_path)
             
             # Collect failed tests
             failed_tests = []
-            for region, result in results.items():
+            for region, result in test_results.items():
                 if not isinstance(result, dict):
                     continue
                     
@@ -227,7 +228,7 @@ def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: 
             
             if failed_tests:
                 # Run auto-fix
-                run_autofix_and_pr(failed_tests, str(resolved_file_path), test_file, max_retries=1, create_pr=make_pr)
+                run_autofix_and_pr(failed_tests, str(resolved_file_path), test_file, max_retries=max_retries, create_pr=make_pr)
                 fixed_tests.extend(failed_tests)
         
         if fixed_tests:
