@@ -12,23 +12,26 @@ from datetime import datetime
 import openai
 from rich.console import Console
 from .config import get_config
+import random
+import time
+from google import genai
 
 console = Console()
 
 class TestGenerator:
     """Class for generating test cases based on code analysis and test results."""
     
-    def __init__(self, project_path: str, results_path: str, output_path: str):
+    def __init__(self, project_path: str, results_path: Optional[str], output_path: str = './test-examples'):
         """
         Initialize the test generator.
         
         Args:
             project_path: Path to the agent project
-            results_path: Path to test results directory
-            output_path: Path to write generated test files
+            results_path: Path to test results directory (optional)
+            output_path: Path to write generated test files (default: ./test-examples)
         """
         self.project_path = Path(project_path)
-        self.results_path = Path(results_path)
+        self.results_path = Path(results_path) if results_path else None
         self.output_path = Path(output_path)
         self.config = get_config()
         
@@ -85,6 +88,13 @@ class TestGenerator:
             for file in config_path.glob('**/*.yaml'):
                 self._analyze_config_file(file, analysis)
         
+        # Convert sets to lists for JSON serialization
+        analysis['patterns'] = {
+            'input_types': list(analysis['patterns']['input_types']),
+            'expected_outputs': list(analysis['patterns']['expected_outputs']),
+            'test_scenarios': list(analysis['patterns']['test_scenarios'])
+        }
+        
         return analysis
     
     def _analyze_config_file(self, file_path: Path, analysis: Dict[str, Any]):
@@ -139,40 +149,65 @@ class TestGenerator:
     def _analyze_file(self, file_path: Path, analysis: Dict[str, Any]):
         """Analyze a single file for testable components."""
         try:
-            with open(file_path, 'r') as f:
-                content = f.read()
+            # Try to read the file with UTF-8 encoding first
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                # If UTF-8 fails, try with a different encoding
+                with open(file_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
                 
             if file_path.suffix == '.py':
-                tree = ast.parse(content)
-                
-                # Find functions and classes
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.FunctionDef):
-                        analysis['functions'].append({
-                            'name': node.name,
-                            'file': str(file_path),
-                            'line': node.lineno
-                        })
-                    elif isinstance(node, ast.ClassDef):
-                        analysis['classes'].append({
-                            'name': node.name,
-                            'file': str(file_path),
-                            'line': node.lineno
-                        })
-                        
-                # Check for complex regions (e.g., nested conditionals, loops)
-                for node in ast.walk(tree):
-                    if isinstance(node, (ast.If, ast.For, ast.While)):
-                        complexity = self._calculate_complexity(node)
-                        if complexity > 3:  # Threshold for complexity
-                            analysis['complex_regions'].append({
+                try:
+                    tree = ast.parse(content)
+                    
+                    # Find functions and classes
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.FunctionDef):
+                            analysis['functions'].append({
+                                'name': node.name,
                                 'file': str(file_path),
-                                'line': node.lineno,
-                                'complexity': complexity
+                                'line': node.lineno
+                            })
+                        elif isinstance(node, ast.ClassDef):
+                            analysis['classes'].append({
+                                'name': node.name,
+                                'file': str(file_path),
+                                'line': node.lineno
                             })
                             
+                    # Check for complex regions (e.g., nested conditionals, loops)
+                    for node in ast.walk(tree):
+                        if isinstance(node, (ast.If, ast.For, ast.While)):
+                            complexity = self._calculate_complexity(node)
+                            if complexity > 3:  # Threshold for complexity
+                                analysis['complex_regions'].append({
+                                    'file': str(file_path),
+                                    'line': node.lineno,
+                                    'complexity': complexity
+                                })
+                except SyntaxError as e:
+                    console.print(f"[yellow]Warning: Syntax error in {file_path}: {str(e)}[/yellow]")
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Error analyzing Python file {file_path}: {str(e)}[/yellow]")
+            elif file_path.suffix == '.ts':
+                # Basic TypeScript analysis (can be enhanced)
+                if 'function ' in content:
+                    analysis['functions'].append({
+                        'name': 'TypeScript function',
+                        'file': str(file_path),
+                        'line': 1
+                    })
+                if 'class ' in content:
+                    analysis['classes'].append({
+                        'name': 'TypeScript class',
+                        'file': str(file_path),
+                        'line': 1
+                    })
+                            
         except Exception as e:
-            console.print(f"[yellow]Warning: Could not analyze {file_path}: {str(e)}[/yellow]")
+            console.print(f"[yellow]Warning: Could not read or analyze {file_path}: {str(e)}[/yellow]")
     
     def _calculate_complexity(self, node: ast.AST) -> int:
         """Calculate cyclomatic complexity of an AST node."""
@@ -196,6 +231,10 @@ class TestGenerator:
             'gaps': [],
             'coverage': {}
         }
+        
+        # Skip analysis if no results path provided
+        if not self.results_path:
+            return results
         
         # Walk through results directory
         for root, _, files in os.walk(self.results_path):
@@ -264,20 +303,43 @@ class TestGenerator:
         code_analysis = self.analyze_codebase()
         test_analysis = self.analyze_test_results()
         
+        # Load existing test cases if provided
+        existing_test_cases = []
+        if config_path:
+            try:
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    if isinstance(config, dict) and 'steps' in config:
+                        # Single test case format
+                        existing_test_cases.append(config)
+                    elif isinstance(config, list):
+                        # Multiple test cases format
+                        existing_test_cases.extend(config)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not load existing test cases from {config_path}: {str(e)}[/yellow]")
+        
         # Analyze existing test configuration if provided
         config_analysis = None
         if config_path:
             config_analysis = self.analyze_test_config(config_path)
         
-        # Generate test cases using LLM
-        test_cases = self._generate_test_cases_with_llm(
+        # Generate new test cases using LLM
+        new_test_cases = self._generate_test_cases_with_llm(
             code_analysis,
             test_analysis,
             include_suggestions,
             config_analysis
         )
         
-        return test_cases
+        # Combine existing and new test cases
+        all_test_cases = existing_test_cases + new_test_cases
+        
+        if not all_test_cases:
+            console.print("[red]No test cases were generated or loaded.[/red]")
+            return []
+        
+        console.print(f"[green]Total test cases: {len(all_test_cases)} ({len(existing_test_cases)} existing + {len(new_test_cases)} new)[/green]")
+        return all_test_cases
     
     def _generate_test_cases_with_llm(
         self,
@@ -286,7 +348,7 @@ class TestGenerator:
         include_suggestions: bool,
         config_analysis: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
-        """Generate test cases using OpenAI's API."""
+        """Generate test cases using Gemini's API."""
         try:
             # Prepare prompt for LLM
             prompt = self._create_llm_prompt(
@@ -296,19 +358,24 @@ class TestGenerator:
                 config_analysis
             )
             
-            # Call OpenAI API
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are a test generation expert. Generate YAML test cases based on the provided code analysis and test results."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=2000
-            )
+            # Initialize Gemini client
+            genai.configure(api_key=self.config.get_api_key("google"))
+            model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+            
+            console.print("[yellow]Generating test cases with Gemini...[/yellow]")
+            
+            # Call Gemini API
+            response = model.generate_content(prompt)
+            
+            # Get the response content
+            content = response.text.strip()
+            
+            # Debug output
+            console.print("[yellow]Raw LLM response:[/yellow]")
+            console.print(content)
             
             # Parse response into test cases
-            test_cases = self._parse_llm_response(response.choices[0].message.content)
+            test_cases = self._parse_llm_response(content)
             
             return test_cases
             
@@ -324,7 +391,7 @@ class TestGenerator:
         config_analysis: Optional[Dict[str, Any]] = None
     ) -> str:
         """Create a prompt for the LLM."""
-        prompt = f"""Generate YAML test cases for the following codebase analysis and test results:
+        prompt = f"""Generate YAML test cases for the following codebase analysis and test results.
 
 Code Analysis:
 {json.dumps(code_analysis, indent=2)}
@@ -338,10 +405,41 @@ Test Results Analysis:
 Existing Test Configuration Analysis:
 {json.dumps(config_analysis, indent=2)}
 
+IMPORTANT: Return ONLY the YAML test cases, no explanations or additional text.
+
 Requirements:
-1. Generate test cases in YAML format
-2. Include test name, agent type, and steps
-3. Each step should have input and expected output
+1. Generate test cases in YAML format with the following structure:
+   test_cases:
+     - name: "Test Case Name"
+       agent_type: "dynamic_region"
+       steps:
+         - name: "Step Name"
+           input:
+             file_path: "test_agent/email_agent/email_agent.py"
+             region: "email_agent"
+             method: "improve_email"
+             input: "hey, can we meet tomorrow to discuss the project?"
+           expected_output_contains:
+             - "Dear"
+             - "meeting"
+             - "project"
+             - "schedule"
+           validation:
+             type: "contains"
+             min_length: 100
+             max_length: 500
+
+2. Each test case must have:
+   - name: A descriptive name
+   - agent_type: The type of agent being tested
+   - steps: A list of test steps
+
+3. Each step must have:
+   - name: A descriptive name
+   - input: The input configuration with actual file paths and methods
+   - expected_output_contains: List of expected text snippets
+   - validation: Validation criteria
+
 4. Focus on untested functions and classes
 5. Include edge cases for complex regions
 6. Address existing test failures
@@ -353,10 +451,41 @@ Requirements:
 """
         else:
             prompt += """
+IMPORTANT: Return ONLY the YAML test cases, no explanations or additional text.
+
 Requirements:
-1. Generate test cases in YAML format
-2. Include test name, agent type, and steps
-3. Each step should have input and expected output
+1. Generate test cases in YAML format with the following structure:
+   test_cases:
+     - name: "Test Case Name"
+       agent_type: "dynamic_region"
+       steps:
+         - name: "Step Name"
+           input:
+             file_path: "test_agent/email_agent/email_agent.py"
+             region: "email_agent"
+             method: "improve_email"
+             input: "hey, can we meet tomorrow to discuss the project?"
+           expected_output_contains:
+             - "Dear"
+             - "meeting"
+             - "project"
+             - "schedule"
+           validation:
+             type: "contains"
+             min_length: 100
+             max_length: 500
+
+2. Each test case must have:
+   - name: A descriptive name
+   - agent_type: The type of agent being tested
+   - steps: A list of test steps
+
+3. Each step must have:
+   - name: A descriptive name
+   - input: The input configuration with actual file paths and methods
+   - expected_output_contains: List of expected text snippets
+   - validation: Validation criteria
+
 4. Focus on untested functions and classes
 5. Include edge cases for complex regions
 6. Address existing test failures
@@ -372,19 +501,54 @@ Requirements:
         test_cases = []
         
         try:
-            # Split response into individual YAML documents
-            yaml_docs = response.split('---')
+            # Clean up the response
+            response = response.strip()
             
-            for doc in yaml_docs:
-                if doc.strip():
-                    test_case = yaml.safe_load(doc)
-                    if test_case:
-                        test_cases.append(test_case)
-                        
+            # If response starts with a list marker, wrap it in a test_cases object
+            if response.startswith('- '):
+                response = f"test_cases:\n{response}"
+            
+            # Try to parse as YAML
+            try:
+                parsed = yaml.safe_load(response)
+                if isinstance(parsed, dict) and 'test_cases' in parsed:
+                    test_cases = parsed['test_cases']
+                elif isinstance(parsed, list):
+                    test_cases = parsed
+                else:
+                    console.print("[yellow]Warning: Unexpected YAML structure. Expected 'test_cases' list or array of test cases.[/yellow]")
+                    console.print(f"Got: {type(parsed)}")
+                    return []
+            except yaml.YAMLError as e:
+                console.print(f"[red]Error parsing YAML: {str(e)}[/red]")
+                console.print("Raw response:")
+                console.print(response)
+                return []
+            
+            # Validate test cases
+            valid_cases = []
+            for case in test_cases:
+                if not isinstance(case, dict):
+                    console.print(f"[yellow]Warning: Skipping invalid test case (not a dictionary): {case}[/yellow]")
+                    continue
+                    
+                if 'name' not in case:
+                    console.print("[yellow]Warning: Skipping test case without name[/yellow]")
+                    continue
+                    
+                if 'steps' not in case:
+                    console.print(f"[yellow]Warning: Skipping test case '{case['name']}' without steps[/yellow]")
+                    continue
+                    
+                valid_cases.append(case)
+            
+            return valid_cases
+            
         except Exception as e:
             console.print(f"[red]Error parsing LLM response: {str(e)}[/red]")
-        
-        return test_cases
+            console.print("Raw response:")
+            console.print(response)
+            return []
     
     def save_test_cases(self, test_cases: List[Dict[str, Any]]) -> List[str]:
         """
@@ -434,8 +598,19 @@ Requirements:
             # Generate meaningful branch name and PR title
             branch_name, pr_title, pr_body = self._generate_pr_info(test_files)
             
+            # Add timestamp and random suffix to make branch name unique
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            random_suffix = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=4))
+            unique_branch_name = f"{branch_name}-{timestamp}-{random_suffix}"
+            
             # Create and checkout new branch
-            self._create_branch(branch_name)
+            try:
+                subprocess.run(['git', 'checkout', '-b', unique_branch_name], check=True)
+            except subprocess.CalledProcessError:
+                # If branch creation fails, try with a different name
+                console.print(f"[yellow]Branch {unique_branch_name} already exists, trying alternative name...[/yellow]")
+                unique_branch_name = f"{branch_name}-{timestamp}-{random_suffix}-{int(time.time())}"
+                subprocess.run(['git', 'checkout', '-b', unique_branch_name], check=True)
             
             # Add and commit test files
             for file in test_files:
@@ -445,10 +620,10 @@ Requirements:
             subprocess.run(['git', 'commit', '-m', commit_message], check=True)
             
             # Push branch and create PR
-            subprocess.run(['git', 'push', 'origin', branch_name], check=True)
+            subprocess.run(['git', 'push', 'origin', unique_branch_name], check=True)
             
             # Create PR using GitHub API
-            self._create_github_pr(branch_name, pr_title, pr_body, test_files)
+            self._create_github_pr(unique_branch_name, pr_title, pr_body, test_files)
             
             return True
             
@@ -539,10 +714,10 @@ These tests were generated to improve test coverage and address existing gaps in
         """Create a pull request using GitHub API."""
         import requests
         
-        # Get GitHub token from config
-        token = self.config.get('GITHUB_TOKEN')
+        # Get GitHub token from environment variables
+        token = os.getenv('GITHUB_TOKEN')
         if not token:
-            raise ValueError("GitHub token not found in configuration")
+            raise ValueError("GITHUB_TOKEN environment variable not set. Please set it in your .env file or environment variables.")
         
         # Get repository information
         repo_url = subprocess.run(

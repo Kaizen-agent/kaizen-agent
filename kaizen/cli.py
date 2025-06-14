@@ -124,18 +124,18 @@ def run_test(test_file: str):
 
 @cli.command()
 @click.option('--project', '-p', type=click.Path(exists=True), required=True, help='Path to agent project')
-@click.option('--results', '-r', type=click.Path(exists=True), required=True, help='Path to test results directory')
-@click.option('--output', '-o', type=click.Path(), required=True, help='Directory to write new YAML test files')
+@click.option('--results', '-r', type=click.Path(exists=True), help='Path to test results directory')
+@click.option('--output', '-o', type=click.Path(), default='./test-examples', help='Directory to write new YAML test files')
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to existing test configuration file or directory')
 @click.option('--suggestions', is_flag=True, help='Include rationale/comments in YAML')
 @click.option('--make-pr', is_flag=True, help='Create a GitHub pull request')
-def generate_tests(project: str, results: str, output: str, config: Optional[str], suggestions: bool, make_pr: bool):
+def generate_tests(project: str, results: Optional[str], output: str, config: Optional[str], suggestions: bool, make_pr: bool):
     """
     Generate new YAML-based test cases for an agent project.
     
     PROJECT: Path to agent code (Python or TypeScript)
     RESULTS: Path to existing test results folder (JSON or logs)
-    OUTPUT: Directory to write new YAML test files
+    OUTPUT: Directory to write new YAML test files (default: ./test-examples)
     """
     try:
         # Initialize test generator

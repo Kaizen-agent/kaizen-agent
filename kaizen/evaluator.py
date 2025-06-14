@@ -2,15 +2,14 @@
 LLM-based evaluation module for Kaizen Agent.
 """
 from typing import Dict, Any, List, Optional
-import openai
-from anthropic import Anthropic
+import google.generativeai as genai
 from .agent_runners import TestLogger
 from .config import Config
 
 class LLMEvaluator:
     """Evaluates test results using LLMs."""
     
-    def __init__(self, provider: str, logger: Optional[TestLogger] = None):
+    def __init__(self, provider: str = "google", logger: Optional[TestLogger] = None):
         self.provider = provider
         self.config = Config()
         self.api_key = self.config.get_api_key(provider)
@@ -22,10 +21,9 @@ class LLMEvaluator:
     
     def _setup_provider(self):
         """Set up the LLM provider client."""
-        if self.provider == "openai":
-            openai.api_key = self.api_key
-        elif self.provider == "anthropic":
-            self.client = Anthropic(api_key=self.api_key)
+        if self.provider == "google":
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
         else:
             raise ValueError(f"Unsupported LLM provider: {self.provider}")
     
@@ -90,25 +88,9 @@ Format your response as a JSON object with the following structure:
     def _get_llm_evaluation(self, prompt: str) -> Dict[str, Any]:
         """Get evaluation from the LLM provider."""
         try:
-            if self.provider == "openai":
-                response = openai.ChatCompletion.create(
-                    model="gpt-4",
-                    messages=[
-                        {"role": "system", "content": "You are an expert code reviewer."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.1
-                )
-                evaluation = response.choices[0].message.content
-            elif self.provider == "anthropic":
-                response = self.client.messages.create(
-                    model="claude-3-opus-20240229",
-                    max_tokens=1000,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                evaluation = response.content[0].text
+            if self.provider == "google":
+                response = self.model.generate_content(prompt)
+                evaluation = response.text
             
             # Parse the JSON response
             import json

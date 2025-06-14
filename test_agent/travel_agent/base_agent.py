@@ -1,33 +1,33 @@
-import openai
+import google.generativeai as genai
 from typing import List, Dict, Any
 
 class BaseLLMAgent:
-    """Base class for LLM-powered agents."""
+    """Base class for LLM-powered agents using Google's Gemini model."""
     
     def __init__(self, api_key: str, system_prompt: str):
-        """Initialize with OpenAI API key and system prompt."""
+        """Initialize with Google API key and system prompt."""
         self.api_key = api_key
-        openai.api_key = api_key
+        genai.configure(api_key=api_key)
         self.system_prompt = system_prompt
+        self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
         self.conversation_history: List[Dict[str, str]] = [
             {"role": "system", "content": system_prompt}
         ]
     
     def _call_llm(self, user_input: str, temperature: float = 0.7) -> str:
-        """Make a call to the OpenAI API."""
+        """Make a call to the Gemini API."""
         try:
             # Add user input to conversation history
             self.conversation_history.append({"role": "user", "content": user_input})
             
-            # Get response from OpenAI
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=self.conversation_history,
-                temperature=temperature
-            )
+            # Prepare the chat session
+            chat = self.model.start_chat(history=self.conversation_history)
+            
+            # Get response from Gemini
+            response = chat.send_message(user_input, temperature=temperature)
             
             # Extract and store the response
-            assistant_response = response.choices[0].message.content
+            assistant_response = response.text
             self.conversation_history.append({"role": "assistant", "content": assistant_response})
             
             return assistant_response

@@ -1,23 +1,31 @@
-```python
 import os
 from typing import Optional
-from openai import OpenAI
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 # kaizen:start:email_agent
 class EmailAgent:
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize the EmailAgent with OpenAI API key."""
+        """Initialize the EmailAgent with Google API key."""
         load_dotenv()  # Load environment variables from .env file
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
-            raise ValueError("OpenAI API key is required. Set it as OPENAI_API_KEY environment variable or pass it to the constructor.")
+            raise ValueError("Google API key is required. Set it as GOOGLE_API_KEY environment variable or pass it to the constructor.")
         
-        self.client = OpenAI(api_key=self.api_key)
+        try:
+            # Configure the API
+            genai.configure(api_key=self.api_key)
+            # Use the same model version as TestRunner
+            self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+            # Test the configuration
+            self.model.generate_content("Test")
+            print("Debug: EmailAgent: Successfully configured Google API")
+        except Exception as e:
+            raise ValueError(f"Failed to configure Google API: {str(e)}")
 
     def improve_email(self, draft: str) -> str:
         """
-        Improve the given email draft using OpenAI's API.
+        Improve the given email draft using Gemini's API.
         
         Args:
             draft (str): The original email draft to improve
@@ -25,16 +33,22 @@ class EmailAgent:
         Returns:
             str: The improved email draft
         """
+        if not draft:
+            return "Please provide either --draft or --file argument"
+            
         prompt = f"Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent. Here's the draft:\n\n{draft}\n\nImproved version:"
 
-        response = self.client.Completion.create(
-            model="text-davinci-003",
-            prompt=prompt,
-            temperature=0.7,
-            max_tokens=1000
-        )
-
-        return response['choices'][0]['text'].strip()
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=1000,
+                )
+            )
+            return response.text.strip()
+        except Exception as e:
+            raise ValueError(f"Failed to generate improved email: {str(e)}")
 # kaizen:end:email_agent
 
 # kaizen:start:cli_interface
@@ -83,4 +97,3 @@ def main():
 if __name__ == "__main__":
     main()
 # kaizen:end:cli_interface
-```

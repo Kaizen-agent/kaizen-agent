@@ -3,7 +3,7 @@ import uuid
 from typing import List, Dict, Tuple
 import subprocess
 from pathlib import Path
-import openai
+import google.generativeai as genai
 from github import Github
 from github.GithubException import GithubException
 from datetime import datetime
@@ -78,7 +78,8 @@ def _generate_pr_info(failure_data: List[Dict], fixed_tests: List[Dict], test_re
     """
     try:
         config = get_config()
-        client = openai.OpenAI(api_key=config.get_api_key("openai"))
+        genai.configure(api_key=config.get_api_key("google"))
+        model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
         
         # Prepare prompt for LLM
         prompt = f"""Based on the following test failures and fixes, generate:
@@ -102,21 +103,11 @@ Requirements:
 - Focus on the most important changes
 """
         
-        # Call OpenAI API
-        response = client.chat.completions.create(
-            model="gpt-4-1106-preview",
-            messages=[
-                {"role": "system", "content": "You are a PR generation expert. Generate meaningful branch names and PR descriptions based on test fixes."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=500
-        )
+        # Call Gemini API
+        response = model.generate_content(prompt)
+        content = response.text.strip()
         
         # Parse response
-        content = response.choices[0].message.content.strip()
-        
-        # Extract branch name, title, and body
         lines = content.split('\n')
         branch_name = lines[0].strip()
         pr_title = lines[1].strip()
@@ -185,7 +176,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str) -> None:
         with open(file_path, 'r') as f:
             original_code = f.read()
         
-        # Prepare the prompt for GPT-4
+        # Prepare the prompt for Gemini
         system_prompt = """You are a senior software engineer. Improve the following code by fixing the issues described. 
         Make only minimal changes necessary to resolve all problems while preserving existing logic."""
         
@@ -197,20 +188,13 @@ failures:
 
 task: Modify the code to resolve all listed issues and return only the full fixed file."""
 
-        # Get the fixed code from GPT-4
-        client = openai.OpenAI(api_key=config.get_api_key("openai"))
-        logger.info("Requesting code fixes from GPT-4")
-        response = client.chat.completions.create(
-            model="gpt-4-1106-preview",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.1
-        )
-        
-        fixed_code = response.choices[0].message.content.strip()
-        logger.info("Received fixed code from GPT-4")
+        # Get the fixed code from Gemini
+        genai.configure(api_key=config.get_api_key("google"))
+        model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+        logger.info("Requesting code fixes from Gemini")
+        response = model.generate_content(user_prompt)
+        fixed_code = response.text.strip()
+        logger.info("Received fixed code from Gemini")
         
         # Run tests again to verify fixes
         logger.info("Running tests to verify fixes")

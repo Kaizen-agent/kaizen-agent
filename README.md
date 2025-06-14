@@ -59,6 +59,34 @@ OPENAI_API_KEY=your_api_key_here
 GITHUB_TOKEN=your_github_token_here
 ```
 
+### Environment Configuration
+
+Kaizen Agent supports multiple LLM providers and models. You can configure them in your `.env` file. Here are some example configurations:
+
+```env
+# OpenAI Configuration
+KAIZEN_CLI_MODEL=gpt-4
+KAIZEN_CLI_API_KEY=your-openai-key
+KAIZEN_CLI_PROVIDER=openai
+
+# Anthropic Configuration
+KAIZEN_CLI_MODEL=claude-3-opus
+KAIZEN_CLI_API_KEY=your-anthropic-key
+KAIZEN_CLI_PROVIDER=anthropic
+
+# Google Configuration (Default)
+KAIZEN_CLI_MODEL=gemini-1.5-flash
+KAIZEN_CLI_API_KEY=your-google-key
+KAIZEN_CLI_PROVIDER=google
+
+# Kaizen Custom Model
+KAIZEN_CLI_MODEL=kaizen-custom-model
+KAIZEN_CLI_API_KEY=your-kaizen-key
+KAIZEN_CLI_PROVIDER=kaizen
+```
+
+You can use any model name supported by your chosen provider. The configuration system is flexible and will work with new models as they become available.
+
 ## 💻 Usage
 
 ### Command Line Interface

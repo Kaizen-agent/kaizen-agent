@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from .agent_runners import AgentRegistry, AgentRunner, PythonAgentRunner, TypeScriptAgentRunner, DynamicRegionRunner
 from .logger import TestLogger
 from .code_region import extract_code_regions
+from .config import get_config
 
 console = Console()
 
@@ -224,26 +225,54 @@ class TestRunner:
 
     def _load_config(self):
         """Load configuration from environment variables and test config."""
-        # Load environment variables
-        load_dotenv()
+        print("Debug: TestRunner: Starting configuration loading...")
+        
+        # Load environment variables using the Config class
+        self.config = get_config()
+        print("Debug: TestRunner: Config instance created")
         
         # Merge with test config if provided
         if self.test_config:
-            self.config = {**self.test_config}
-        else:
-            self.config = {}
+            print(f"Debug: TestRunner: Merging test config: {self.test_config}")
+            self.config.update(self.test_config)
+        
+        print("Debug: TestRunner: Configuration loading completed")
 
     def _validate_api_keys(self):
         """Validate that required API keys are present."""
-        # OpenAI API key is always required
-        if not os.getenv('OPENAI_API_KEY'):
-            console.print("[red]Error: Missing required API key: OPENAI_API_KEY[/red]")
+        print("Debug: TestRunner: Starting API key validation...")
+        
+        # Google API key is required by default
+        google_key = os.getenv('GOOGLE_API_KEY')
+        print(f"Debug: TestRunner: GOOGLE_API_KEY present: {google_key is not None}")
+        
+        if not google_key:
+            console.print("[red]Error: Missing required API key: GOOGLE_API_KEY[/red]")
             console.print("Please add it to your .env file or environment variables")
             sys.exit(1)
+            
+        # Configure Google API
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=google_key)
+            # Test the configuration with a simple model
+            model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+            print("Debug: TestRunner: Successfully configured Google API")
+        except Exception as e:
+            console.print(f"[red]Error configuring Google API: {str(e)}[/red]")
+            sys.exit(1)
+
+        # OpenAI API key is optional - only warn if not present
+        openai_key = os.getenv('OPENAI_API_KEY')
+        print(f"Debug: TestRunner: OPENAI_API_KEY present: {openai_key is not None}")
+        if not openai_key:
+            console.print("[yellow]Note: OPENAI_API_KEY not found - OpenAI-based tests will use Google Gemini instead[/yellow]")
 
         # Anthropic API key is optional - only warn if not present
-        if not os.getenv('ANTHROPIC_API_KEY'):
-            console.print("[yellow]Note: ANTHROPIC_API_KEY not found - Anthropic-based tests will use OpenAI instead[/yellow]")
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+        print(f"Debug: TestRunner: ANTHROPIC_API_KEY present: {anthropic_key is not None}")
+        if not anthropic_key:
+            console.print("[yellow]Note: ANTHROPIC_API_KEY not found - Anthropic-based tests will use Google Gemini instead[/yellow]")
 
     def load_test_file(self, file_path: str) -> Dict:
         """Load and parse a YAML test file."""
