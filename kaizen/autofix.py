@@ -207,21 +207,23 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         
         # Run tests again to verify fixes
         logger.info("Running tests to verify fixes")
-        test_runner = TestRunner()
-        test_logger = TestLogger("Auto-fix Test Run")
         
         # Load test configuration
         with open(test_config_path, 'r') as f:
             test_config = yaml.safe_load(f)
             
+        test_runner = TestRunner(test_config)
+        test_logger = TestLogger("Auto-fix Test Run")
+        
         # Extract file path from the root of the configuration
         test_file_path = test_config.get('file_path')
         if not test_file_path:
             console.print("[red]Error: No file_path found in test configuration[/red]")
             sys.exit(1)
-            
-        test_results = test_runner.run_tests(Path(test_file_path))
         
+        logger.info(f"Running tests for {test_file_path}")
+        test_results = test_runner.run_tests(Path(test_file_path))
+        logger.info(f"Test results: {test_results}")
         # Generate branch name and PR info early
         branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], test_results)
         logger.info(f"Generated branch name: {branch_name}")
@@ -244,7 +246,7 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         
         if not fixed_tests:
             logger.info("No previously failing tests were fixed. Reverting changes.")
-            subprocess.run(["git", "checkout", "main"], check=True)
+            subprocess.run(["git", "checkout", original_branch], check=True)
             # Only try to delete the branch if we created it
             try:
                 # Check if branch exists
