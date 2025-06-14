@@ -3,17 +3,22 @@ import uuid
 from typing import List, Dict, Tuple
 import subprocess
 from pathlib import Path
-import openai
+import google.generativeai as genai
 from github import Github
 from github.GithubException import GithubException
 from datetime import datetime
 import json
+import yaml
+import sys
+from rich.console import Console
 
 from .logger import get_logger
 from .config import get_config
 from .runner import TestRunner
+from .logger import TestLogger
 
 logger = get_logger(__name__)
+console = Console()
 
 def format_test_results_table(test_results: Dict) -> str:
     """Format test results into a markdown table."""
@@ -78,7 +83,8 @@ def _generate_pr_info(failure_data: List[Dict], fixed_tests: List[Dict], test_re
     """
     try:
         config = get_config()
-        client = openai.OpenAI(api_key=config.get_api_key("openai"))
+        genai.configure(api_key=config.get_api_key("google"))
+        model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
         
         # Prepare prompt for LLM
         prompt = f"""Based on the following test failures and fixes, generate:
@@ -102,21 +108,11 @@ Requirements:
 - Focus on the most important changes
 """
         
-        # Call OpenAI API
-        response = client.chat.completions.create(
-            model="gpt-4-1106-preview",
-            messages=[
-                {"role": "system", "content": "You are a PR generation expert. Generate meaningful branch names and PR descriptions based on test fixes."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=500
-        )
+        # Call Gemini API
+        response = model.generate_content(prompt)
+        content = response.text.strip()
         
         # Parse response
-        content = response.choices[0].message.content.strip()
-        
-        # Extract branch name, title, and body
         lines = content.split('\n')
         branch_name = lines[0].strip()
         pr_title = lines[1].strip()
@@ -160,13 +156,16 @@ Requirements:
 """
         return branch_name, pr_title, pr_body
 
-def run_autofix_and_pr(failure_data: List[Dict], file_path: str) -> None:
+def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True) -> None:
     """
-    Automatically fixes code based on test failures and creates a PR.
+    Automatically fixes code based on test failures and optionally creates a PR.
     
     Args:
         failure_data: List of dictionaries containing test failure information
         file_path: Path to the source code file to be fixed
+        test_config_path: Path to the test configuration file
+        max_retries: Maximum number of retry attempts for fixing tests (default: 1)
+        create_pr: Whether to create a pull request with the fixes (default: True)
         
     Raises:
         ValueError: If required environment variables are not set
@@ -174,6 +173,13 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str) -> None:
         GithubException: If GitHub API operations fail
     """
     try:
+        # Store the original branch
+        original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+        logger.info(f"Stored original branch: {original_branch}")
+        
+        # Initialize branch_name with a default value
+        branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        
         config = get_config()
         logger.info(f"Starting auto-fix process for {file_path} with {len(failure_data)} failures")
         
@@ -185,7 +191,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str) -> None:
         with open(file_path, 'r') as f:
             original_code = f.read()
         
-        # Prepare the prompt for GPT-4
+        # Prepare the prompt for Gemini
         system_prompt = """You are a senior software engineer. Improve the following code by fixing the issues described. 
         Make only minimal changes necessary to resolve all problems while preserving existing logic."""
         
@@ -197,57 +203,115 @@ failures:
 
 task: Modify the code to resolve all listed issues and return only the full fixed file."""
 
-        # Get the fixed code from GPT-4
-        client = openai.OpenAI(api_key=config.get_api_key("openai"))
-        logger.info("Requesting code fixes from GPT-4")
-        response = client.chat.completions.create(
-            model="gpt-4-1106-preview",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.1
-        )
-        
-        fixed_code = response.choices[0].message.content.strip()
-        logger.info("Received fixed code from GPT-4")
-        
-        # Run tests again to verify fixes
-        logger.info("Running tests to verify fixes")
-        test_runner = TestRunner()
-        test_results = test_runner.run_tests(Path(file_path))
-        
         # Track which previously failing tests are now passing
         fixed_tests = []
-        for region, result in test_results.items():
-            for test_case in result.get('test_cases', []):
-                test_name = test_case['name']
-                if test_name in failing_test_names and test_case['status'] == 'passed':
-                    fixed_tests.append({
-                        'region': region,
-                        'test_name': test_name
-                    })
+        best_fixed_tests = []
+        best_fixed_code = None
+        
+        for attempt in range(max_retries):
+            logger.info(f"Auto-fix attempt {attempt + 1}/{max_retries}")
+            
+            # Get the fixed code from Gemini
+            genai.configure(api_key=config.get_api_key("google"))
+            model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+            logger.info("Requesting code fixes from Gemini")
+            response = model.generate_content(user_prompt)
+            fixed_code = response.text.strip()
+            logger.info("Received fixed code from Gemini")
+            
+            # Write the fixed code to disk before running tests
+            with open(file_path, 'w') as f:
+                f.write(fixed_code)
+            logger.info(f"Updated file: {file_path}")
+            
+            # Run tests again to verify fixes
+            logger.info("Running tests to verify fixes")
+            
+            # Load test configuration
+            with open(test_config_path, 'r') as f:
+                test_config = yaml.safe_load(f)
+                
+            test_runner = TestRunner(test_config)
+            test_logger = TestLogger(f"Auto-fix Test Run (Attempt {attempt + 1})")
+            
+            # Extract file path from the root of the configuration
+            test_file_path = test_config.get('file_path')
+            if not test_file_path:
+                console.print("[red]Error: No file_path found in test configuration[/red]")
+                sys.exit(1)
+            
+            # Resolve the test file path relative to the YAML config file's directory
+            config_dir = os.path.dirname(os.path.abspath(test_config_path))
+            resolved_test_file_path = os.path.normpath(os.path.join(config_dir, test_file_path))
+            
+            logger.info(f"Running tests for {resolved_test_file_path}")
+            test_results = test_runner.run_tests(Path(resolved_test_file_path))
+            logger.info(f"Test results: {test_results}")
+            
+            # Track which previously failing tests are now passing
+            fixed_tests = []
+            for region, result in test_results.items():
+                print(f"Region: {region}")
+                print(f"Result: {result}")
+                # Skip if result is a string (like 'status') or if region is _status
+                if isinstance(result, str) or region == '_status':
+                    continue
+                for test_case in result.get('test_cases', []):
+                    test_name = test_case['name']
+                    if test_name in failing_test_names and test_case['status'] == 'passed':
+                        fixed_tests.append({
+                            'region': region,
+                            'test_name': test_name
+                        })
+            
+            # Update best attempt if this one fixed more tests
+            if len(fixed_tests) > len(best_fixed_tests):
+                best_fixed_tests = fixed_tests
+                best_fixed_code = fixed_code
+            
+            # If we fixed all tests, we can stop early
+            if len(fixed_tests) == len(failing_test_names):
+                logger.info("All tests fixed! Stopping retries.")
+                break
+            
+            # If this is not the last attempt, continue to next iteration
+            if attempt < max_retries - 1:
+                logger.info(f"Fixed {len(fixed_tests)} tests in attempt {attempt + 1}, trying again...")
+                continue
+        
+        # Use the best attempt's results
+        fixed_tests = best_fixed_tests
+        fixed_code = best_fixed_code
         
         if not fixed_tests:
-            logger.info("No previously failing tests were fixed. Reverting changes.")
-            subprocess.run(["git", "checkout", "main"], check=True)
-            subprocess.run(["git", "branch", "-D", branch_name], check=True)
+            logger.info("No previously failing tests were fixed after all attempts. Reverting changes.")
+            subprocess.run(["git", "checkout", original_branch], check=True)
+            # Only try to delete the branch if we created it
+            try:
+                # Check if branch exists
+                result = subprocess.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"], 
+                                      capture_output=True, check=False)
+                if result.returncode == 0:
+                    subprocess.run(["git", "branch", "-D", branch_name], check=True)
+            except subprocess.CalledProcessError:
+                # Ignore errors if branch doesn't exist
+                pass
             return
         
         logger.info(f"Fixed {len(fixed_tests)} previously failing tests")
         
-        # Generate branch name and PR info
+        # Update PR info with fixed tests
         branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results)
-        logger.info(f"Generated branch name: {branch_name}")
+        logger.info(f"Updated branch name: {branch_name}")
         
         # Create a new branch
         logger.info(f"Creating new branch: {branch_name}")
         subprocess.run(["git", "checkout", "-b", branch_name], check=True)
         
-        # Write the fixed code
+        # Write the best fixed code back to disk before committing
+        logger.info("Writing best fixed code back to disk")
         with open(file_path, 'w') as f:
-            f.write(fixed_code)
-        logger.info(f"Updated file: {file_path}")
+            f.write(best_fixed_code)
         
         # Commit changes
         subprocess.run(["git", "add", file_path], check=True)
@@ -259,46 +323,66 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         logger.info(f"Pushed branch: {branch_name}")
         
         # Create PR using GitHub API
-        github_token = os.environ.get("GITHUB_TOKEN")
-        if not github_token:
-            raise ValueError("GITHUB_TOKEN environment variable not set. Please set it with your GitHub personal access token.")
-        
-        g = Github(github_token)
-        
-        # Get repository information from git config
-        try:
-            repo_url = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], text=True).strip()
-            if repo_url.endswith('.git'):
-                repo_url = repo_url[:-4]
-            repo_name = repo_url.split('/')[-1]
-            repo_owner = repo_url.split('/')[-2]
-            repo = g.get_repo(f"{repo_owner}/{repo_name}")
-        except subprocess.CalledProcessError:
-            raise ValueError("Could not determine repository information. Please ensure you're in a git repository with a remote origin.")
-        except GithubException as e:
-            raise ValueError(f"Error accessing GitHub repository: {str(e)}")
-        
-        # Create PR
-        try:
-            pr = repo.create_pull(
-                title=pr_title,
-                body=pr_body,
-                head=branch_name,
-                base="main"
-            )
+        if create_pr:
+            github_token = os.environ.get("GITHUB_TOKEN")
+            if not github_token:
+                raise ValueError("GITHUB_TOKEN environment variable not set. Please set it with your GitHub personal access token.")
             
-            logger.info(f"Created Pull Request: {pr.html_url}")
-            print(f"Pull Request created: {pr.html_url}")
+            g = Github(github_token)
             
-        except GithubException as e:
-            raise ValueError(f"Error creating pull request: {str(e)}")
+            # Get repository information from git config
+            try:
+                repo_url = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], text=True).strip()
+                if repo_url.endswith('.git'):
+                    repo_url = repo_url[:-4]
+                repo_name = repo_url.split('/')[-1]
+                repo_owner = repo_url.split('/')[-2]
+                repo = g.get_repo(f"{repo_owner}/{repo_name}")
+            except subprocess.CalledProcessError:
+                raise ValueError("Could not determine repository information. Please ensure you're in a git repository with a remote origin.")
+            except GithubException as e:
+                raise ValueError(f"Error accessing GitHub repository: {str(e)}")
+            
+            # Create PR
+            try:
+                pr = repo.create_pull(
+                    title=pr_title,
+                    body=pr_body,
+                    head=branch_name,
+                    base="main"
+                )
+                
+                logger.info(f"Created Pull Request: {pr.html_url}")
+                print(f"Pull Request created: {pr.html_url}")
+                
+            except GithubException as e:
+                raise ValueError(f"Error creating pull request: {str(e)}")
+        
+        # Return to the original branch
+        logger.info(f"Returning to original branch: {original_branch}")
+        subprocess.run(["git", "checkout", original_branch], check=True)
         
     except subprocess.CalledProcessError as e:
         logger.error(f"Git command failed: {e}")
+        # Try to return to original branch even if there was an error
+        try:
+            subprocess.run(["git", "checkout", original_branch], check=True)
+        except:
+            pass
         raise
     except GithubException as e:
         logger.error(f"GitHub API error: {e}")
+        # Try to return to original branch even if there was an error
+        try:
+            subprocess.run(["git", "checkout", original_branch], check=True)
+        except:
+            pass
         raise
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
+        # Try to return to original branch even if there was an error
+        try:
+            subprocess.run(["git", "checkout", original_branch], check=True)
+        except:
+            pass
         raise 

@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from .agent_runners import AgentRegistry, AgentRunner, PythonAgentRunner, TypeScriptAgentRunner, DynamicRegionRunner
 from .logger import TestLogger
 from .code_region import extract_code_regions
+from .config import get_config
 
 console = Console()
 
@@ -33,7 +34,7 @@ def create_execution_namespace() -> Dict[str, Any]:
     """
     # Get all built-in modules
     builtins = {name: module for name, module in sys.modules.items() 
-               if name in sys.stdlib_module_names}
+               if name in sys.builtin_module_names}
     
     # Add commonly used imports
     namespace = {
@@ -99,48 +100,64 @@ def execute_code_block(block_code: str, namespace: Dict[str, Any], test_input: O
         test_input (Optional[str]): Input to pass to functions/classes
         
     Returns:
-        str: The execution output
+        str: The execution output (only return values, ignoring printed output)
     """
-    output = io.StringIO()
-    
     try:
         # Parse the block to determine its type
         block_ast = ast.parse(block_code)
         
-        with redirect_stdout(output):
-            # Execute the block in the namespace
-            exec(block_code, namespace)
+        # Execute the block in the namespace (without capturing stdout)
+        exec(block_code, namespace)
+        
+        # Check if it's a function or class
+        if len(block_ast.body) == 1:
+            node = block_ast.body[0]
             
-            # Check if it's a function or class
-            if len(block_ast.body) == 1:
-                node = block_ast.body[0]
-                
-                if isinstance(node, ast.FunctionDef):
-                    # It's a function, call it with test_input
-                    func_name = node.name
-                    if func_name in namespace:
+            if isinstance(node, ast.FunctionDef):
+                # It's a function, call it with test_input
+                func_name = node.name
+                if func_name in namespace:
+                    try:
                         result = namespace[func_name](test_input)
                         if result is not None:
-                            print(result)
-                            
-                elif isinstance(node, ast.ClassDef):
-                    # It's a class, instantiate and call reply if present
-                    class_name = node.name
-                    if class_name in namespace:
+                            return str(result)
+                    except Exception as e:
+                        return f"Error executing function {func_name}: {str(e)}"
+                        
+            elif isinstance(node, ast.ClassDef):
+                # It's a class, try to find and call a method that takes input
+                class_name = node.name
+                if class_name in namespace:
+                    try:
+                        # Create an instance of the class
                         instance = namespace[class_name]()
-                        if hasattr(instance, 'reply'):
-                            result = instance.reply(test_input)
-                            if result is not None:
-                                print(result)
-                                
-        return output.getvalue().strip()
+                        
+                        # Find a method that takes input
+                        for method_name in dir(instance):
+                            method = getattr(instance, method_name)
+                            if callable(method) and not method_name.startswith('_'):
+                                # Check if the method can accept the test_input
+                                try:
+                                    result = method(test_input)
+                                    if result is not None:
+                                        return str(result)
+                                except (TypeError, ValueError):
+                                    # Skip methods that don't accept the input
+                                    continue
+                                    
+                        return f"Error: No suitable method found in class {class_name} that accepts the input"
+                    except Exception as e:
+                        return f"Error executing class {class_name}: {str(e)}"
+        
+        # If we get here, either it wasn't a function/class or there was no return value
+        return "No return value found"
         
     except SyntaxError as e:
         return f"Error: Invalid Python syntax in block: {str(e)}"
     except Exception as e:
         return f"Error executing code block: {str(e)}"
 
-def run_test_block(file_path: str, test_input: Optional[str] = None, region: Optional[str] = None) -> str:
+def run_test_block(file_path: str, test_input: Optional[str] = None, region: Optional[str] = None, config_file: Optional[str] = None) -> str:
     """
     Execute a code block between kaizen markers in a Python file.
     
@@ -148,35 +165,51 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         file_path (str): Path to the Python file
         test_input (Optional[str]): Input to pass to the function/class if applicable
         region (Optional[str]): Name of the region to extract (e.g., 'email_agent')
+        config_file (Optional[str]): Path to the config file for resolving relative paths
         
     Returns:
         str: Output from the code block execution or error message
     """
     try:
+        console.print(f"[blue]Debug: run_test_block called with file_path={file_path}, config_file={config_file}[/blue]")
+        
+        # Convert test file path to actual code file path
+        if file_path.endswith('.yaml'):
+            # If it's a test file, look for the corresponding Python file
+            # Remove the test file extension and directory structure
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            # Remove common test prefixes/suffixes
+            base_name = base_name.replace('test_', '').replace('_test', '')
+            # Look for the corresponding Python file in the same directory
+            code_file = os.path.join(os.path.dirname(file_path), f"{base_name}.py")
+            console.print(f"[blue]Debug: Resolved YAML test file to code file: {code_file}[/blue]")
+            if not os.path.exists(code_file):
+                return f"Error: Could not find code file at {code_file}"
+        else:
+            # If the file path is absolute, use it directly
+            if os.path.isabs(file_path):
+                code_file = file_path
+                console.print(f"[blue]Debug: Using absolute path: {code_file}[/blue]")
+            # If config_file is provided, resolve the file_path relative to it
+            elif config_file:
+                config_dir = os.path.dirname(os.path.abspath(config_file))
+                code_file = os.path.normpath(os.path.join(config_dir, file_path))
+                console.print(f"[blue]Debug: Resolved relative path using config_dir={config_dir}[/blue]")
+                console.print(f"[blue]Debug: Final resolved code_file={code_file}[/blue]")
+            else:
+                code_file = file_path
+                console.print(f"[blue]Debug: Using relative path: {code_file}[/blue]")
+
+        # Check if file exists
+        if not os.path.exists(code_file):
+            return f"Error: File not found at {code_file} (resolved from {file_path})"
+
         # Read the full file
-        with open(file_path, 'r') as f:
+        with open(code_file, 'r') as f:
             content = f.read()
             
         # Create execution namespace with all necessary imports
         namespace = create_execution_namespace()
-        
-        # Add imports from the file to the namespace
-        try:
-            # Execute imports first
-            import_lines = []
-            for line in content.split('\n'):
-                if line.startswith('import ') or line.startswith('from '):
-                    import_lines.append(line)
-                elif line.strip() and not line.startswith('#'):
-                    break
-            
-            if import_lines:
-                exec('\n'.join(import_lines), namespace)
-            
-            # Now execute the full file
-            exec(content, namespace)
-        except Exception as e:
-            return f"Error setting up imports: {str(e)}"
         
         # Extract the block between markers
         if region:
@@ -190,14 +223,31 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         
         start_idx = content.find(start_marker)
         if start_idx == -1:
-            return f"Error: Start marker '{start_marker}' not found"
+            return f"Error: Start marker '{start_marker}' not found in file {code_file}"
             
         end_idx = content.find(end_marker, start_idx)
         if end_idx == -1:
-            return f"Error: End marker '{end_marker}' not found"
+            return f"Error: End marker '{end_marker}' not found in file {code_file}"
             
         # Extract the block code
         block_code = content[start_idx + len(start_marker):end_idx].strip()
+        
+        # Extract imports from the full file
+        import_lines = []
+        for line in content.split('\n'):
+            line = line.strip()
+            if line.startswith('import ') or line.startswith('from '):
+                import_lines.append(line)
+            elif line and not line.startswith('#'):
+                break
+        
+        # Add imports to the namespace
+        if import_lines:
+            try:
+                import_block = '\n'.join(import_lines)
+                exec(import_block, namespace)
+            except Exception as e:
+                return f"Error setting up imports: {str(e)}"
         
         # Execute the block
         return execute_code_block(block_code, namespace, test_input)
@@ -224,26 +274,54 @@ class TestRunner:
 
     def _load_config(self):
         """Load configuration from environment variables and test config."""
-        # Load environment variables
-        load_dotenv()
+        print("Debug: TestRunner: Starting configuration loading...")
+        
+        # Load environment variables using the Config class
+        self.config = get_config()
+        print("Debug: TestRunner: Config instance created")
         
         # Merge with test config if provided
         if self.test_config:
-            self.config = {**self.test_config}
-        else:
-            self.config = {}
+            print(f"Debug: TestRunner: Merging test config: {self.test_config}")
+            self.config.update(self.test_config)
+        
+        print("Debug: TestRunner: Configuration loading completed")
 
     def _validate_api_keys(self):
         """Validate that required API keys are present."""
-        # OpenAI API key is always required
-        if not os.getenv('OPENAI_API_KEY'):
-            console.print("[red]Error: Missing required API key: OPENAI_API_KEY[/red]")
+        print("Debug: TestRunner: Starting API key validation...")
+        
+        # Google API key is required by default
+        google_key = os.getenv('GOOGLE_API_KEY')
+        print(f"Debug: TestRunner: GOOGLE_API_KEY present: {google_key is not None}")
+        
+        if not google_key:
+            console.print("[red]Error: Missing required API key: GOOGLE_API_KEY[/red]")
             console.print("Please add it to your .env file or environment variables")
             sys.exit(1)
+            
+        # Configure Google API
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=google_key)
+            # Test the configuration with a simple model
+            model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+            print("Debug: TestRunner: Successfully configured Google API")
+        except Exception as e:
+            console.print(f"[red]Error configuring Google API: {str(e)}[/red]")
+            sys.exit(1)
+
+        # OpenAI API key is optional - only warn if not present
+        openai_key = os.getenv('OPENAI_API_KEY')
+        print(f"Debug: TestRunner: OPENAI_API_KEY present: {openai_key is not None}")
+        if not openai_key:
+            console.print("[yellow]Note: OPENAI_API_KEY not found - OpenAI-based tests will use Google Gemini instead[/yellow]")
 
         # Anthropic API key is optional - only warn if not present
-        if not os.getenv('ANTHROPIC_API_KEY'):
-            console.print("[yellow]Note: ANTHROPIC_API_KEY not found - Anthropic-based tests will use OpenAI instead[/yellow]")
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+        print(f"Debug: TestRunner: ANTHROPIC_API_KEY present: {anthropic_key is not None}")
+        if not anthropic_key:
+            console.print("[yellow]Note: ANTHROPIC_API_KEY not found - Anthropic-based tests will use Google Gemini instead[/yellow]")
 
     def load_test_file(self, file_path: str) -> Dict:
         """Load and parse a YAML test file."""
@@ -304,8 +382,15 @@ class TestRunner:
                     logger.log_step_result(step_index, None, False, error_msg)
                     return False
 
-                # Run the agent
-                result = runner.run(input_data)
+                # Create a copy of input_data with the resolved file path
+                resolved_input = input_data.copy()
+                if 'file_path' in resolved_input:
+                    # Use the file_path from test_config which is already resolved
+                    resolved_input['file_path'] = self.test_config.get('file_path')
+                    console.print(f"[blue]Debug: Using resolved file path: {resolved_input['file_path']}[/blue]")
+
+                # Run the agent with resolved input
+                result = runner.run(resolved_input)
                 
                 if result.get('status') == 'error':
                     error_msg = result.get('error', 'Unknown error')
@@ -421,41 +506,147 @@ class TestRunner:
         """
         file_path = Path(file_path)
         results = {}
+        all_steps_passed = True
         
         # Get the agent type from config
         agent_type = self.test_config.get('agent_type', 'dynamic_region')
         
+        # Store the resolved file path in the test configuration
+        self.test_config['file_path'] = str(file_path)
+        
         # Create logger
         logger = TestLogger(self.test_config.get('name', 'Unnamed Test'))
         
-        # Run each test step
-        for step in self.test_config.get('steps', []):
-            step_index = step.get('step_index')
-            step_name = step.get('name', f'Step {step_index}')
+        try:
+            # Log configuration details
+            console.print(f"[blue]Debug: Test configuration: {self.test_config}[/blue]")
+            console.print(f"[blue]Debug: Test file path: {file_path}[/blue]")
+            console.print(f"[blue]Debug: Config file path: {self.test_config.get('config_file')}[/blue]")
             
-            logger.log_step_start(step_index, step.get('input', {}))
+            # Initialize LLM evaluator if evaluation criteria are specified
+            evaluator = None
+            if 'evaluation' in self.test_config:
+                from .evaluator import LLMEvaluator
+                evaluator = LLMEvaluator(
+                    provider=self.test_config['evaluation'].get('llm_provider', 'google'),
+                    logger=logger
+                )
             
-            # Run the step
-            passed = self.run_step(step, agent_type, logger)
+            # Run each test step
+            for step in self.test_config.get('steps', []):
+                step_index = step.get('step_index')
+                step_name = step.get('name', f'Step {step_index}')
+                
+                logger.log_step_start(step_index, step.get('input', {}))
+                
+                # Run the step and capture output
+                output = None
+                if 'region' in step.get('input', {}):
+                    console.print(f"[blue]Debug: Running test block for step {step_index}[/blue]")
+                    console.print(f"[blue]Debug: Step input: {step.get('input', {})}[/blue]")
+                    
+                    # Use the main test file path instead of the step's file_path
+                    output = run_test_block(
+                        str(file_path),  # Use the resolved main test file path
+                        step.get('input', {}).get('input'),
+                        step.get('input', {}).get('region'),
+                        self.test_config.get('config_file')
+                    )
+                    
+                    console.print(f"[blue]Debug: Test block output: {output}[/blue]")
+                
+                # Use run_step to properly validate all test criteria
+                passed = self.run_step(step, agent_type, logger)
+                
+                # Store results by region
+                region = step.get('input', {}).get('region', 'default')
+                if region not in results:
+                    results[region] = {
+                        'test_cases': [],
+                        'status': 'passed'  # Initialize status for each region
+                    }
+                
+                # If we have an output and evaluator, evaluate it immediately
+                evaluation_result = None
+                if output and evaluator and 'evaluation' in self.test_config:
+                    try:
+                        # Create a temporary results structure for evaluation
+                        temp_results = {
+                            region: {
+                                'test_cases': [{
+                                    'name': step_name,
+                                    'output': output,
+                                    'details': logger.get_last_step_details()
+                                }]
+                            }
+                        }
+                        
+                        # print(f"Debug: Temp results: {temp_results}")
+                        
+                        # Run evaluation
+                        evaluation_result = evaluator.evaluate(
+                            results=temp_results,
+                            criteria=self.test_config['evaluation'].get('criteria', [])
+                        )
+                        
+                        # Update passed status based on evaluation
+                        if isinstance(evaluation_result, dict):
+                            if evaluation_result.get('status') == 'failed':
+                                passed = False
+                                all_steps_passed = False
+                                results[region]['status'] = 'failed'  # Update region status
+                        elif isinstance(evaluation_result, str):
+                            # If evaluation_result is a string, treat it as an error
+                            passed = False
+                            all_steps_passed = False
+                            results[region]['status'] = 'failed'  # Update region status
+                            evaluation_result = {
+                                'status': 'error',
+                                'error': evaluation_result
+                            }
+                            
+                    except Exception as e:
+                        logger.logger.error(f"Error during output evaluation: {str(e)}")
+                        evaluation_result = {
+                            'status': 'error',
+                            'error': str(e)
+                        }
+                        results[region]['status'] = 'failed'  # Update region status
+                
+                # Add test case result
+                test_case = {
+                    'name': step_name,
+                    'status': 'passed' if passed else 'failed',
+                    'output': output,
+                    'details': logger.get_last_step_details()
+                }
+                
+                # Add evaluation result if available
+                if evaluation_result:
+                    test_case['evaluation'] = evaluation_result
+                
+                results[region]['test_cases'].append(test_case)
+                
+                # Update region status if test case failed
+                if not passed:
+                    results[region]['status'] = 'failed'
             
-            # Log the result
-            logger.log_step_result(
-                step_index,
-                {'status': 'passed' if passed else 'failed'},
-                passed
-            )
+            # Set overall status in a separate field
+            results['overall_status'] = 'failed' if not all_steps_passed else 'passed'
             
-            # Store results by region
-            region = step.get('input', {}).get('region', 'default')
-            if region not in results:
-                results[region] = {'test_cases': []}
+            if not all_steps_passed:
+                logger.logger.error("Test failed due to failed steps or evaluations")
+            else:
+                logger.logger.info("All tests passed")
             
-            results[region]['test_cases'].append({
-                'name': step_name,
-                'status': 'passed' if passed else 'failed'
-            })
-        
-        # Save test results
-        logger.save_results()
-        
-        return results 
+            # Save test results
+            logger.save_results()
+            
+            return results
+            
+        except Exception as e:
+            logger.logger.error(f"Error running tests: {str(e)}")
+            return {
+                'status': 'error',
+                'error': str(e)
+            } 

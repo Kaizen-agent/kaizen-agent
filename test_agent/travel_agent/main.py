@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Requires: pip install openai python-dotenv
+# Requires: pip install google-generativeai python-dotenv
 
 import os
 from dotenv import load_dotenv
@@ -13,7 +13,12 @@ def main():
     print("I can help you plan your next trip. Type 'bye' or 'exit' to end the conversation.")
     print("What would you like to do?")
     
-    agent = TravelAgent()
+    # Get Google API key from environment
+    api_key = os.getenv('GOOGLE_API_KEY')
+    if not api_key:
+        raise ValueError("GOOGLE_API_KEY environment variable is required")
+    
+    agent = TravelAgent(api_key=api_key)
     
     while True:
         user_input = input("\nYou: ").strip()

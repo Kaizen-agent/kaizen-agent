@@ -4,17 +4,15 @@
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/downloads/)
 [![OpenAI GPT-4](https://img.shields.io/badge/OpenAI-GPT--4-purple)](https://openai.com/gpt-4)
 
-Kaizen Agent is an AI-powered code improvement tool that leverages OpenAI's GPT-4 to enhance code quality, fix issues, and automatically create pull requests for improvements. The name "Kaizen" comes from the Japanese philosophy of continuous improvement, reflecting our tool's purpose of helping developers write better code.
+Kaizen Agent is an AI-powered testing framework that helps you run tests, analyze failures, and automatically fix issues in your code. The name "Kaizen" comes from the Japanese philosophy of continuous improvement, reflecting our tool's purpose of helping developers write better code.
 
 ## 🌟 Features
 
-- 🤖 AI-powered code analysis and improvements
-- 🔍 Automated security and performance checks
-- 🛠️ Interactive code testing and fixing
-- 🔄 Automatic pull request creation
-- 📊 Comprehensive test coverage
-- 🎯 Multiple testing modes (automated, interactive)
-- 🧪 AI-powered test generation
+- 🧪 Run multiple tests from YAML files
+- 🔍 Analyze test failures
+- 🛠️ Automatically fix failing tests
+- 🔄 Rerun tests after fixes
+- 📊 Create pull requests for successful improvements
 
 ## 📋 Prerequisites
 
@@ -59,117 +57,64 @@ OPENAI_API_KEY=your_api_key_here
 GITHUB_TOKEN=your_github_token_here
 ```
 
+### Environment Configuration
+
+Kaizen Agent supports multiple LLM providers and models. You can configure them in your `.env` file. Here are some example configurations:
+
+```env
+# OpenAI Configuration
+KAIZEN_CLI_MODEL=gpt-4
+KAIZEN_CLI_API_KEY=your-openai-key
+KAIZEN_CLI_PROVIDER=openai
+
+# Anthropic Configuration
+KAIZEN_CLI_MODEL=claude-3-opus
+KAIZEN_CLI_API_KEY=your-anthropic-key
+KAIZEN_CLI_PROVIDER=anthropic
+
+# Google Configuration (Default)
+KAIZEN_CLI_MODEL=gemini-1.5-flash
+KAIZEN_CLI_API_KEY=your-google-key
+KAIZEN_CLI_PROVIDER=google
+```
+
 ## 💻 Usage
 
 ### Command Line Interface
 
-Kaizen provides several commands for testing and improving your code:
+Kaizen provides two main commands for testing and fixing your code:
 
-1. Test a specific file:
+1. Run tests from YAML files:
 ```bash
-kaizen test path/to/your/file.py --config path/to/test.yaml
+kaizen run-tests test1.yaml test2.yaml --project path/to/project --results path/to/results
 ```
 
-2. Start an interactive test session:
+2. Fix failing tests and create a PR:
 ```bash
-kaizen interactive "your code here" --language python --turns 5
+kaizen fix-tests test1.yaml test2.yaml --project path/to/project --results path/to/results --make-pr
 ```
 
-3. Run a specific test file:
-```bash
-kaizen run-test path/to/test.yaml
-```
-
-4. Run multiple tests with auto-fix and PR creation:
-```bash
-# Run all tests in a directory
-kaizen test-all --config path/to/tests/ --auto-fix --create-pr
-
-# Run specific test files
-kaizen test-all test1.yaml test2.yaml --auto-fix --create-pr
-```
-
-5. Generate new test cases:
-```bash
-# Basic test generation
-kaizen generate-tests \
-  --project ./my-agent \
-  --results ./test-results/ \
-  --output ./test-examples/
-
-# Generate tests with existing configuration
-kaizen generate-tests \
-  --project ./my-agent \
-  --results ./test-results/ \
-  --output ./test-examples/ \
-  --config ./existing-tests/
-
-# Generate tests with rationale and create PR
-kaizen generate-tests \
-  --project ./my-agent \
-  --results ./test-results/ \
-  --output ./test-examples/ \
-  --config ./existing-tests/ \
-  --suggestions \
-  --make-pr
-```
-
-### Auto-Fix and PR Features
-
-The auto-fix feature streamlines the improvement process by:
-1. Collecting test failures
-2. Analyzing issues using GPT-4
-3. Creating a new Git branch
-4. Committing fixes
-5. Creating a detailed Pull Request
+### Test Configuration
 
 Example test configuration:
 ```yaml
-name: Security and Performance Test
-agent_type: test
-learning_mode: automated
-learning_focus:
-  - security
-  - performance
-  - code_quality
-
-evaluation:
-  llm_provider: openai
-  criteria:
-    - name: security
-      description: "Check for security issues"
-    - name: performance
-      description: "Check for performance issues"
-```
-
-### Test Generation
-
-The test generation feature analyzes your codebase and existing test results to:
-1. Identify untested functions and classes
-2. Find complex code regions that need more test coverage
-3. Analyze existing test failures
-4. Generate new YAML test cases using GPT-4
-5. Optionally create a pull request with the new tests
-
-When using the `--config` option, the generator will:
-1. Analyze existing test configurations
-2. Extract patterns and test scenarios
-3. Ensure new tests follow the same structure
-4. Avoid duplicating existing test cases
-5. Complement existing test coverage
-
-Example generated test case:
-```yaml
-name: Test Email Agent Response
-agent_type: python
+name: Email Agent Test
+agent_type: dynamic_region
 steps:
-  - name: Test basic email improvement
+  - name: Basic Email Test
     input:
-      text: "hi, can we meet tomorrow?"
+      file_path: email_agent.py
+      region: email_agent
+      method: improve_email
+      input: "hey, can we meet tomorrow?"
     expected_output_contains:
       - "Dear"
-      - "Would you be available"
-    # Reason: Tests basic email formalization and time reference handling
+      - "meeting"
+      - "schedule"
+    validation:
+      type: contains
+      min_length: 100
+      max_length: 500
 ```
 
 ### Using as a Python Module
@@ -177,13 +122,14 @@ steps:
 You can integrate Kaizen into your Python projects:
 
 ```python
-from kaizen import run_autofix_and_pr
+from kaizen import TestRunner, auto_fix_tests
 
-failures = [
-    {"test_name": "Security Test", "error_message": "Code is missing input validation"},
-    {"test_name": "Performance Test", "error_message": "Inefficient loop found in line 24"}
-]
-run_autofix_and_pr(failures, "path/to/file.py")
+# Run tests
+runner = TestRunner("path/to/project", "path/to/results")
+results = runner.run_tests(["test1.yaml", "test2.yaml"])
+
+# Fix failing tests
+fixed_tests = auto_fix_tests(["test1.yaml", "test2.yaml"], "path/to/project", "path/to/results", make_pr=True)
 ```
 
 ## 🧪 Testing
@@ -238,9 +184,9 @@ If you need help or have questions:
 ## 🔄 Roadmap
 
 - [ ] Support for more programming languages
-- [ ] Enhanced security analysis
+- [ ] Enhanced test failure analysis
 - [ ] Integration with more CI/CD platforms
-- [ ] Custom rule creation interface
+- [ ] Custom test validation rules
 - [ ] Performance optimization suggestions
 
 ---

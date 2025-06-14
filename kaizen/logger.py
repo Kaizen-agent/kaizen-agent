@@ -90,6 +90,20 @@ class TestLogger:
                 })
                 break
     
+    def get_last_step_details(self) -> Optional[str]:
+        """Get the details of the last executed step.
+        
+        Returns:
+            Optional[str]: The error message if the last step failed, None otherwise
+        """
+        if not self.results["steps"]:
+            return None
+            
+        last_step = self.results["steps"][-1]
+        if last_step["status"] == "failed":
+            return last_step.get("error", "Test failed")
+        return None
+    
     def save_results(self):
         """Save test results to a JSON file."""
         self.results["end_time"] = datetime.now().isoformat()
