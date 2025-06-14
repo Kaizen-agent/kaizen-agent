@@ -17,17 +17,17 @@ class BaseLLMAgent:
     def _call_llm(self, user_input: str, temperature: float = 0.7) -> str:
         """Make a call to the Gemini API."""
         try:
-            # Add user input to conversation history
-            self.conversation_history.append({"role": "user", "content": user_input})
-            
             # Prepare the chat session
             chat = self.model.start_chat(history=self.conversation_history)
             
             # Get response from Gemini
             response = chat.send_message(user_input, temperature=temperature)
             
-            # Extract and store the response
+            # Extract the response
             assistant_response = response.text
+            
+            # Add both user input and assistant response to conversation history
+            self.conversation_history.append({"role": "user", "content": user_input})
             self.conversation_history.append({"role": "assistant", "content": assistant_response})
             
             return assistant_response

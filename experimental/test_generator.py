@@ -14,7 +14,7 @@ from rich.console import Console
 from .config import get_config
 import random
 import time
-from google import genai
+import google.generativeai as genai
 
 console = Console()
 

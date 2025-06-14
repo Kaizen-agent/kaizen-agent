@@ -12,7 +12,7 @@ console = Console()
 def main():
     try:
         # Initialize configuration
-        config = get_config()
+        get_config()
         
         # Run CLI
         cli()

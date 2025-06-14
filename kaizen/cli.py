@@ -10,7 +10,7 @@ from rich.console import Console
 
 from .runner import TestRunner, run_test_block
 from .logger import TestLogger
-from .autofix import auto_fix_tests, run_autofix_and_pr
+from .autofix import run_autofix_and_pr
 
 console = Console()
 
