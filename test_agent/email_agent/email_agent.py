@@ -1,7 +1,9 @@
+```python
 import os
 from typing import Optional
 import google.generativeai as genai
 from dotenv import load_dotenv
+import sys # Added this import for sys.stdin.read()
 
 # kaizen:start:email_agent
 class EmailAgent:
@@ -17,9 +19,10 @@ class EmailAgent:
             genai.configure(api_key=self.api_key)
             # Use the same model version as TestRunner
             self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
-            # Test the configuration
+            # Test the configuration by generating content
+            # This helps catch issues like invalid API keys or network problems early
             self.model.generate_content("Test")
-            print("Debug: EmailAgent: Successfully configured Google API")
+            # Removed debug print: print("Debug: EmailAgent: Successfully configured Google API")
         except Exception as e:
             raise ValueError(f"Failed to configure Google API: {str(e)}")
 
@@ -33,8 +36,11 @@ class EmailAgent:
         Returns:
             str: The improved email draft
         """
-        if not draft:
-            return "Please provide either --draft or --file argument"
+        # Modified to raise a ValueError for empty/whitespace drafts, making the method's
+        # behavior more consistent with typical API functions (raising errors for invalid input).
+        # The CLI interface handles this case before calling this method.
+        if not draft or not draft.strip():
+            raise ValueError("Email draft cannot be empty or contain only whitespace.")
             
         # Add safety instructions to the prompt
         prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
@@ -51,12 +57,12 @@ class EmailAgent:
         Improved version:"""
 
         try:
-            print(f"Debug: Prompt: {prompt}")
+            # Removed debug print: print(f"Debug: Prompt: {prompt}")
             response = self.model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.7,
-                    max_output_tokens=2048,  # Increased token limit
+                    max_output_tokens=2048, # Increased token limit for longer emails
                     top_p=0.8,
                     top_k=40,
                 ),
@@ -79,37 +85,38 @@ class EmailAgent:
                     }
                 ]
             )
-            print(f"Debug: Response: {response}")
+            # Removed debug print: print(f"Debug: Response: {response}")
             
-            # Check for safety issues
+            # Check for safety issues in the prompt feedback
             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
                 if hasattr(response.prompt_feedback, 'block_reason'):
                     raise ValueError(f"Content was blocked due to: {response.prompt_feedback.block_reason}")
             
-            # Check for candidates
+            # Ensure candidates were generated
             if not hasattr(response, 'candidates') or not response.candidates:
-                raise ValueError("No response candidates were generated")
+                raise ValueError("No response candidates were generated from the model.")
             
             # Get the first candidate
             candidate = response.candidates[0]
             
-            # Check finish reason
+            # Check for finish reasons indicating issues
             if hasattr(candidate, 'finish_reason'):
                 if candidate.finish_reason == "MAX_TOKENS":
-                    raise ValueError("Response was cut off due to token limit. Please try with a shorter email draft.")
+                    raise ValueError("Response was cut off due to token limit. Please try with a shorter email draft or adjust max_output_tokens.")
                 elif candidate.finish_reason == "BLOCKED":
-                    raise ValueError("Content was blocked by safety filters")
+                    raise ValueError("Content was blocked by safety filters during generation.")
             
-            # Try to get the text content
-            if hasattr(candidate, 'content'):
-                if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                    return candidate.content.parts[0].text.strip()
-                elif hasattr(candidate.content, 'text'):
-                    return candidate.content.text.strip()
+            # Attempt to extract the text content from the response
+            # Modified this section for robustness to rely directly on parts[0].text
+            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts') and candidate.content.parts:
+                # Access the text from the first part
+                return candidate.content.parts[0].text.strip()
             
-            raise ValueError("Could not extract text from the response")
+            # If text could not be extracted, raise an error
+            raise ValueError("Could not extract text from the model's response.")
             
         except Exception as e:
+            # Catch any other exceptions during content generation and re-raise as ValueError
             raise ValueError(f"Failed to generate improved email: {str(e)}")
 # kaizen:end:email_agent
 
@@ -130,18 +137,21 @@ def main():
         if args.draft:
             draft = args.draft
         elif args.file:
-            with open(args.file, 'r') as f:
-                draft = f.read()
+            try:
+                with open(args.file, 'r') as f:
+                    draft = f.read()
+            except FileNotFoundError:
+                print(f"Error: File not found at '{args.file}'")
+                return
+            except Exception as e:
+                print(f"Error reading file '{args.file}': {str(e)}")
+                return
 
         if draft is None:
+            # If no --draft or --file is provided, read from stdin
             print("Please enter your email draft (press Ctrl+D or Ctrl+Z on Windows when finished):")
-            draft = ""
-            try:
-                while True:
-                    line = input()
-                    draft += line + "\n"
-            except EOFError:
-                pass
+            # Changed to use sys.stdin.read() for more robust input handling
+            draft = sys.stdin.read()
 
         if not draft.strip():
             print("No email draft provided.")
@@ -159,3 +169,4 @@ def main():
 if __name__ == "__main__":
     main()
 # kaizen:end:cli_interface
+```

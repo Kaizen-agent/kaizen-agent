@@ -157,7 +157,7 @@ def execute_code_block(block_code: str, namespace: Dict[str, Any], test_input: O
     except Exception as e:
         return f"Error executing code block: {str(e)}"
 
-def run_test_block(file_path: str, test_input: Optional[str] = None, region: Optional[str] = None) -> str:
+def run_test_block(file_path: str, test_input: Optional[str] = None, region: Optional[str] = None, config_file: Optional[str] = None) -> str:
     """
     Execute a code block between kaizen markers in a Python file.
     
@@ -165,11 +165,14 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         file_path (str): Path to the Python file
         test_input (Optional[str]): Input to pass to the function/class if applicable
         region (Optional[str]): Name of the region to extract (e.g., 'email_agent')
+        config_file (Optional[str]): Path to the config file for resolving relative paths
         
     Returns:
         str: Output from the code block execution or error message
     """
     try:
+        console.print(f"[blue]Debug: run_test_block called with file_path={file_path}, config_file={config_file}[/blue]")
+        
         # Convert test file path to actual code file path
         if file_path.endswith('.yaml'):
             # If it's a test file, look for the corresponding Python file
@@ -179,10 +182,27 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
             base_name = base_name.replace('test_', '').replace('_test', '')
             # Look for the corresponding Python file in the same directory
             code_file = os.path.join(os.path.dirname(file_path), f"{base_name}.py")
+            console.print(f"[blue]Debug: Resolved YAML test file to code file: {code_file}[/blue]")
             if not os.path.exists(code_file):
                 return f"Error: Could not find code file at {code_file}"
         else:
-            code_file = file_path
+            # If the file path is absolute, use it directly
+            if os.path.isabs(file_path):
+                code_file = file_path
+                console.print(f"[blue]Debug: Using absolute path: {code_file}[/blue]")
+            # If config_file is provided, resolve the file_path relative to it
+            elif config_file:
+                config_dir = os.path.dirname(os.path.abspath(config_file))
+                code_file = os.path.normpath(os.path.join(config_dir, file_path))
+                console.print(f"[blue]Debug: Resolved relative path using config_dir={config_dir}[/blue]")
+                console.print(f"[blue]Debug: Final resolved code_file={code_file}[/blue]")
+            else:
+                code_file = file_path
+                console.print(f"[blue]Debug: Using relative path: {code_file}[/blue]")
+
+        # Check if file exists
+        if not os.path.exists(code_file):
+            return f"Error: File not found at {code_file} (resolved from {file_path})"
 
         # Read the full file
         with open(code_file, 'r') as f:
@@ -362,8 +382,15 @@ class TestRunner:
                     logger.log_step_result(step_index, None, False, error_msg)
                     return False
 
-                # Run the agent
-                result = runner.run(input_data)
+                # Create a copy of input_data with the resolved file path
+                resolved_input = input_data.copy()
+                if 'file_path' in resolved_input:
+                    # Use the file_path from test_config which is already resolved
+                    resolved_input['file_path'] = self.test_config.get('file_path')
+                    console.print(f"[blue]Debug: Using resolved file path: {resolved_input['file_path']}[/blue]")
+
+                # Run the agent with resolved input
+                result = runner.run(resolved_input)
                 
                 if result.get('status') == 'error':
                     error_msg = result.get('error', 'Unknown error')
@@ -484,10 +511,18 @@ class TestRunner:
         # Get the agent type from config
         agent_type = self.test_config.get('agent_type', 'dynamic_region')
         
+        # Store the resolved file path in the test configuration
+        self.test_config['file_path'] = str(file_path)
+        
         # Create logger
         logger = TestLogger(self.test_config.get('name', 'Unnamed Test'))
         
         try:
+            # Log configuration details
+            console.print(f"[blue]Debug: Test configuration: {self.test_config}[/blue]")
+            console.print(f"[blue]Debug: Test file path: {file_path}[/blue]")
+            console.print(f"[blue]Debug: Config file path: {self.test_config.get('config_file')}[/blue]")
+            
             # Initialize LLM evaluator if evaluation criteria are specified
             evaluator = None
             if 'evaluation' in self.test_config:
@@ -507,11 +542,18 @@ class TestRunner:
                 # Run the step and capture output
                 output = None
                 if 'region' in step.get('input', {}):
+                    console.print(f"[blue]Debug: Running test block for step {step_index}[/blue]")
+                    console.print(f"[blue]Debug: Step input: {step.get('input', {})}[/blue]")
+                    
+                    # Use the main test file path instead of the step's file_path
                     output = run_test_block(
-                        str(file_path),
+                        str(file_path),  # Use the resolved main test file path
                         step.get('input', {}).get('input'),
-                        step.get('input', {}).get('region')
+                        step.get('input', {}).get('region'),
+                        self.test_config.get('config_file')
                     )
+                    
+                    console.print(f"[blue]Debug: Test block output: {output}[/blue]")
                 
                 # Use run_step to properly validate all test criteria
                 passed = self.run_step(step, agent_type, logger)
@@ -539,7 +581,7 @@ class TestRunner:
                             }
                         }
                         
-                        print(f"Debug: Temp results: {temp_results}")
+                        # print(f"Debug: Temp results: {temp_results}")
                         
                         # Run evaluation
                         evaluation_result = evaluator.evaluate(

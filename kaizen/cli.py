@@ -35,6 +35,9 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
         with open(config_path, 'r') as f:
             test_config = yaml.safe_load(f)
             
+        # Add config file path to test configuration
+        test_config['config_file'] = str(config_path)
+            
         # Create test runner
         runner = TestRunner(test_config)
         logger = TestLogger(test_config.get('name', 'Unnamed Test'))
@@ -50,6 +53,8 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
             
         # Resolve file_path relative to config file's directory
         resolved_file_path = (config_path.parent / file_path).resolve()
+        console.print(f"[blue]Debug: Resolved file path: {resolved_file_path}[/blue]")
+        
         if not resolved_file_path.exists():
             console.print(f"[red]Error: File not found: {resolved_file_path}[/red]")
             sys.exit(1)
