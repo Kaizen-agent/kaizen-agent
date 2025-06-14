@@ -523,6 +523,11 @@ class TestRunner:
             console.print(f"[blue]Debug: Test file path: {file_path}[/blue]")
             console.print(f"[blue]Debug: Config file path: {self.test_config.get('config_file')}[/blue]")
             
+            # Log file contents for debugging
+            with open(file_path, 'r') as f:
+                file_contents = f.read()
+                console.print(f"[blue]Debug: File contents:\n{file_contents}[/blue]")
+            
             # Initialize LLM evaluator if evaluation criteria are specified
             evaluator = None
             if 'evaluation' in self.test_config:

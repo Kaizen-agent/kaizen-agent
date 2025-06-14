@@ -400,17 +400,39 @@ class DynamicRegionRunner(AgentRunner):
     
     def process_code(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process code regions and execute them."""
-        file_path = input_data.get('file_path')
-        if not file_path:
-            return {
-                "status": "error",
-                "error": "No file_path provided in input_data"
-            }
-        
         try:
-            # Read the file content
+            file_path = input_data.get('file_path')
+            if not file_path:
+                return {
+                    "status": "error",
+                    "error": "No file path provided"
+                }
+
+            # Read the code from the file
             with open(file_path, 'r') as f:
                 code = f.read()
+
+            # Create a new namespace for execution
+            namespace = {}
+
+            # Handle imports first
+            import_lines = []
+            for line in code.split('\n'):
+                if line.startswith('import ') or line.startswith('from '):
+                    import_lines.append(line)
+                elif line.strip() and not line.startswith('#'):
+                    break
+            
+            if import_lines:
+                exec('\n'.join(import_lines), namespace)
+
+            # Force reload of the module if it exists
+            module_name = Path(file_path).stem
+            if module_name in sys.modules:
+                importlib.reload(sys.modules[module_name])
+            
+            # Execute the full file to set up the context
+            exec(code, namespace)
             
             # Extract the specified region
             region = input_data.get('region')
@@ -437,23 +459,6 @@ class DynamicRegionRunner(AgentRunner):
             
             # Extract the code block
             block_code = code[start_idx + len(start_marker):end_idx].strip()
-            
-            # Create execution namespace
-            namespace = {}
-            
-            # Execute imports first
-            import_lines = []
-            for line in code.split('\n'):
-                if line.startswith('import ') or line.startswith('from '):
-                    import_lines.append(line)
-                elif line.strip() and not line.startswith('#'):
-                    break
-            
-            if import_lines:
-                exec('\n'.join(import_lines), namespace)
-            
-            # Execute the full file to set up the context
-            exec(code, namespace)
             
             # Execute the block
             exec(block_code, namespace)
