@@ -203,6 +203,10 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         test_logger = TestLogger("Auto-fix Test Run")
         test_results = test_runner.run_tests(Path(file_path))
         
+        # Generate branch name and PR info early
+        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], test_results)
+        logger.info(f"Generated branch name: {branch_name}")
+        
         # Track which previously failing tests are now passing
         fixed_tests = []
         for region, result in test_results.items():
@@ -227,9 +231,9 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         
         logger.info(f"Fixed {len(fixed_tests)} previously failing tests")
         
-        # Generate branch name and PR info
+        # Update PR info with fixed tests
         branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results)
-        logger.info(f"Generated branch name: {branch_name}")
+        logger.info(f"Updated branch name: {branch_name}")
         
         # Create a new branch
         logger.info(f"Creating new branch: {branch_name}")
