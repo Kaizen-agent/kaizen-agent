@@ -21,7 +21,9 @@ evaluation:
       description: |
         - the return should only contain email draft, nothing else only one email draft
         - not grammar errors
+        - if the input is not a valid email, the output should be "I'm sorry, I can't help with that."
       weight: 1
+
 steps:
   - step_index: 1
     name: Basic Email Improvement
@@ -32,4 +34,12 @@ steps:
       method: improve_email
       input: "hey, can we meet tomorrow to discuss the project? let me know when you're free."
 
- 
+ steps:
+  - step_index: 2
+    name: Edge case of random input
+    description: Test random input functionality
+    input:
+      file_path: email_agent.py
+      region: email_agent
+      method: improve_email
+      input: "Where is the nearest hotel?"

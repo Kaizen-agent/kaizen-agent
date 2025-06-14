@@ -87,26 +87,111 @@ def _generate_pr_info(failure_data: List[Dict], fixed_tests: List[Dict], test_re
         model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
         
         # Prepare prompt for LLM
-        prompt = f"""Based on the following test failures and fixes, generate:
-1. A short, descriptive branch name (max 50 chars, use hyphens)
-2. A clear PR title (max 100 chars)
-3. A detailed PR body explaining the changes
+        prompt = f"""You are a senior software engineer specializing in AI agent development. Your task is to improve the following code by fixing the issues described in the test failures. Make only minimal changes necessary to resolve all problems while preserving existing logic.
+
+Context:
+1. This is an AI agent code that needs to be fixed
+2. The test configuration provides evaluation criteria and test steps
+3. Each test failure includes specific error messages and expected outputs
+
+Test Configuration:
+{json.dumps(test_config, indent=2)}
+
+Original Code:
+{original_code}
 
 Test Failures:
-{json.dumps(failure_data, indent=2)}
-
-Fixed Tests:
-{json.dumps(fixed_tests, indent=2)}
-
-Test Results:
-{json.dumps(test_results, indent=2)}
+{chr(10).join(f'  - test_name: {failure["test_name"]}{chr(10)}    error_message: {failure["error_message"]}' for failure in failure_data)}
 
 Requirements:
-- Branch name should reflect the main purpose of the fixes
-- PR title should be clear and concise
-- PR body should explain what was fixed and why
-- Focus on the most important changes
-"""
+1. Fix all test failures while maintaining the agent's core functionality
+2. Follow the evaluation criteria from the test configuration
+3. Ensure proper error handling and input validation
+4. Maintain code quality standards (type hints, documentation, etc.)
+5. Keep changes minimal and focused on fixing the specific issues
+6. Return only the complete fixed code file, no explanations
+
+Code Improvement Guidelines:
+1. Error Handling:
+   - Add proper error handling for API calls and external services
+   - Include specific error messages for different failure scenarios
+   - Handle edge cases gracefully with appropriate fallbacks
+   - Validate inputs before processing
+
+2. AI Agent Best Practices:
+   - Ensure proper initialization of AI models and services
+   - Handle API rate limits and timeouts
+   - Implement proper logging for debugging
+   - Add retry mechanisms for transient failures
+   - Validate model outputs before returning
+
+3. Code Structure:
+   - Keep methods focused and single-purpose
+   - Use clear and descriptive variable names
+   - Add type hints for all parameters and return values
+   - Include docstrings explaining method purpose and parameters
+   - Follow consistent code style
+
+4. Testing Considerations:
+   - Make code testable by avoiding hard-coded values
+   - Use dependency injection where appropriate
+   - Add proper mocking points for external services
+   - Ensure error cases are testable
+   - Make validation logic explicit and testable
+
+5. Performance:
+   - Optimize API calls and external service interactions
+   - Cache results where appropriate
+   - Handle large inputs efficiently
+   - Implement proper resource cleanup
+
+6. Security:
+   - Never expose API keys or sensitive data
+   - Validate and sanitize all inputs
+   - Implement proper access controls
+   - Handle sensitive data appropriately
+
+7. AI Agent Prompt Engineering:
+   When test failures indicate output quality issues (e.g., missing expected content, incorrect format, or poor response quality):
+   
+   a) Analyze the Failure:
+      - Identify which specific aspects of the output failed (content, format, style, etc.)
+      - Check if the failure is due to missing context or unclear instructions
+      - Determine if the model needs more specific guidance or constraints
+   
+   b) Improve the Prompt:
+      - Add clear output format requirements
+      - Include specific examples of expected outputs
+      - Specify required content elements
+      - Add constraints for response length and style
+      - Include validation criteria in the prompt
+   
+   c) Add Output Validation:
+      - Implement checks for required content elements
+      - Validate output format and structure
+      - Add length and style validation
+      - Include fallback responses for invalid outputs
+   
+   d) Enhance Context:
+      - Add relevant background information
+      - Include domain-specific terminology
+      - Specify the target audience
+      - Add style and tone requirements
+   
+   e) Add Safety and Quality Checks:
+      - Include content filtering requirements
+      - Add fact-checking instructions
+      - Specify ethical guidelines
+      - Include quality assurance steps
+
+8. Output Quality Improvements:
+   - Add post-processing for output formatting
+   - Implement content validation
+   - Add response enhancement logic
+   - Include output sanitization
+   - Add quality scoring mechanisms
+
+Return the complete fixed code file that addresses all test failures while following these guidelines."""
         
         # Call Gemini API
         response = model.generate_content(prompt)
@@ -192,16 +277,111 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             original_code = f.read()
         
         # Prepare the prompt for Gemini
-        system_prompt = """You are a senior software engineer. Improve the following code by fixing the issues described. 
-        Make only minimal changes necessary to resolve all problems while preserving existing logic."""
-        
-        user_prompt = f"""original_code: |
+        prompt = f"""You are a senior software engineer specializing in AI agent development. Your task is to improve the following code by fixing the issues described in the test failures. Make only minimal changes necessary to resolve all problems while preserving existing logic.
+
+Context:
+1. This is an AI agent code that needs to be fixed
+2. The test configuration provides evaluation criteria and test steps
+3. Each test failure includes specific error messages and expected outputs
+
+Test Configuration:
+{json.dumps(test_config, indent=2)}
+
+Original Code:
 {original_code}
 
-failures:
+Test Failures:
 {chr(10).join(f'  - test_name: {failure["test_name"]}{chr(10)}    error_message: {failure["error_message"]}' for failure in failure_data)}
 
-task: Modify the code to resolve all listed issues and return only the full fixed file."""
+Requirements:
+1. Fix all test failures while maintaining the agent's core functionality
+2. Follow the evaluation criteria from the test configuration
+3. Ensure proper error handling and input validation
+4. Maintain code quality standards (type hints, documentation, etc.)
+5. Keep changes minimal and focused on fixing the specific issues
+6. Return only the complete fixed code file, no explanations
+
+Code Improvement Guidelines:
+1. Error Handling:
+   - Add proper error handling for API calls and external services
+   - Include specific error messages for different failure scenarios
+   - Handle edge cases gracefully with appropriate fallbacks
+   - Validate inputs before processing
+
+2. AI Agent Best Practices:
+   - Ensure proper initialization of AI models and services
+   - Handle API rate limits and timeouts
+   - Implement proper logging for debugging
+   - Add retry mechanisms for transient failures
+   - Validate model outputs before returning
+
+3. Code Structure:
+   - Keep methods focused and single-purpose
+   - Use clear and descriptive variable names
+   - Add type hints for all parameters and return values
+   - Include docstrings explaining method purpose and parameters
+   - Follow consistent code style
+
+4. Testing Considerations:
+   - Make code testable by avoiding hard-coded values
+   - Use dependency injection where appropriate
+   - Add proper mocking points for external services
+   - Ensure error cases are testable
+   - Make validation logic explicit and testable
+
+5. Performance:
+   - Optimize API calls and external service interactions
+   - Cache results where appropriate
+   - Handle large inputs efficiently
+   - Implement proper resource cleanup
+
+6. Security:
+   - Never expose API keys or sensitive data
+   - Validate and sanitize all inputs
+   - Implement proper access controls
+   - Handle sensitive data appropriately
+
+7. AI Agent Prompt Engineering:
+   When test failures indicate output quality issues (e.g., missing expected content, incorrect format, or poor response quality):
+   
+   a) Analyze the Failure:
+      - Identify which specific aspects of the output failed (content, format, style, etc.)
+      - Check if the failure is due to missing context or unclear instructions
+      - Determine if the model needs more specific guidance or constraints
+   
+   b) Improve the Prompt:
+      - Add clear output format requirements
+      - Include specific examples of expected outputs
+      - Specify required content elements
+      - Add constraints for response length and style
+      - Include validation criteria in the prompt
+   
+   c) Add Output Validation:
+      - Implement checks for required content elements
+      - Validate output format and structure
+      - Add length and style validation
+      - Include fallback responses for invalid outputs
+   
+   d) Enhance Context:
+      - Add relevant background information
+      - Include domain-specific terminology
+      - Specify the target audience
+      - Add style and tone requirements
+   
+   e) Add Safety and Quality Checks:
+      - Include content filtering requirements
+      - Add fact-checking instructions
+      - Specify ethical guidelines
+      - Include quality assurance steps
+
+8. Output Quality Improvements:
+   - Add post-processing for output formatting
+   - Implement content validation
+   - Add response enhancement logic
+   - Include output sanitization
+   - Add quality scoring mechanisms
+
+Return the complete fixed code file that addresses all test failures while following these guidelines."""
 
         # Track which previously failing tests are now passing
         fixed_tests = []
@@ -215,7 +395,7 @@ task: Modify the code to resolve all listed issues and return only the full fixe
             genai.configure(api_key=config.get_api_key("google"))
             model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
             logger.info("Requesting code fixes from Gemini")
-            response = model.generate_content(user_prompt)
+            response = model.generate_content(prompt)
             fixed_code = response.text.strip()
             logger.info("Received fixed code from Gemini")
             
