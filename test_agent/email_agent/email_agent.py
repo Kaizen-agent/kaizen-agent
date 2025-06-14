@@ -1,4 +1,3 @@
-```python
 import os
 from typing import Optional
 import google.generativeai as genai
@@ -108,7 +107,9 @@ class EmailAgent:
             
             # Attempt to extract the text content from the response
             # Modified this section for robustness to rely directly on parts[0].text
-            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts') and candidate.content.parts:
+            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                if not candidate.content.parts:
+                    raise ValueError("Model response contained no content parts.")
                 # Access the text from the first part
                 return candidate.content.parts[0].text.strip()
             
@@ -169,4 +170,3 @@ def main():
 if __name__ == "__main__":
     main()
 # kaizen:end:cli_interface
-```

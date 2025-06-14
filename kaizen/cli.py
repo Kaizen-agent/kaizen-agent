@@ -181,8 +181,54 @@ def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: 
     TEST_FILES: One or more YAML test files to fix
     """
     try:
-        # Run auto-fix
-        fixed_tests = auto_fix_tests(test_files, project, results, make_pr)
+        fixed_tests = []
+        for test_file in test_files:
+            # Load test configuration
+            with open(test_file, 'r') as f:
+                test_config = yaml.safe_load(f)
+            
+            # Get file path from test configuration
+            file_path = test_config.get('file_path')
+            if not file_path:
+                console.print(f"[red]Error: No file_path found in test configuration: {test_file}[/red]")
+                continue
+                
+            # Resolve file path relative to test file's directory
+            resolved_file_path = (Path(test_file).parent / file_path).resolve()
+            if not resolved_file_path.exists():
+                console.print(f"[red]Error: File not found: {resolved_file_path}[/red]")
+                continue
+            
+            # Run tests to get failures
+            runner = TestRunner(test_config)
+            results = runner.run_tests(resolved_file_path)
+            
+            # Collect failed tests
+            failed_tests = []
+            for region, result in results.items():
+                if not isinstance(result, dict):
+                    continue
+                    
+                test_cases = result.get('test_cases', [])
+                if not isinstance(test_cases, list):
+                    continue
+                    
+                for test_case in test_cases:
+                    if not isinstance(test_case, dict):
+                        continue
+                        
+                    if test_case.get('status') != 'passed':
+                        failed_tests.append({
+                            'region': region,
+                            'test_name': test_case.get('name', 'Unknown Test'),
+                            'error_message': test_case.get('details', 'Test failed'),
+                            'output': test_case.get('output', 'No output available')
+                        })
+            
+            if failed_tests:
+                # Run auto-fix
+                run_autofix_and_pr(failed_tests, str(resolved_file_path), test_file, max_retries=1, create_pr=make_pr)
+                fixed_tests.extend(failed_tests)
         
         if fixed_tests:
             console.print(f"\n[green]Successfully fixed {len(fixed_tests)} tests![/green]")
