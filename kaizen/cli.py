@@ -1,22 +1,22 @@
 import click
 import yaml
 import json
-from typing import Dict, Any, Optional
-from .agent_runners import TestLogger
-from .code_region import extract_code_regions
 import os
-from datetime import datetime
-import types
-from pathlib import Path
-from .runner import TestRunner, run_test_block
-from .autofix import run_autofix_and_pr
-from .test_generator import TestGenerator
 import sys
-from rich import print as console_print
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Any, Optional
+from rich.console import Console
+
+from .runner import TestRunner, run_test_block
+from .logger import TestLogger
+from .autofix import auto_fix_tests, run_autofix_and_pr
+
+console = Console()
 
 @click.group()
 def cli():
-    """Kaizen Agent - A testing framework for AI agents."""
+    """Kaizen Agent CLI for running and fixing tests."""
     pass
 
 @cli.command()
@@ -45,13 +45,13 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
         # Extract file path from the root of the configuration and resolve it relative to config file
         file_path = test_config.get('file_path')
         if not file_path:
-            console_print("[red]Error: No file_path found in test configuration[/red]")
+            console.print("[red]Error: No file_path found in test configuration[/red]")
             sys.exit(1)
             
         # Resolve file_path relative to config file's directory
         resolved_file_path = (config_path.parent / file_path).resolve()
         if not resolved_file_path.exists():
-            console_print(f"[red]Error: File not found: {resolved_file_path}[/red]")
+            console.print(f"[red]Error: File not found: {resolved_file_path}[/red]")
             sys.exit(1)
             
         results = runner.run_tests(resolved_file_path)
@@ -161,58 +161,31 @@ def run_test(test_file: str):
         click.echo(f"Error running test: {str(e)}")
         raise click.Abort()
 
+# TODO: Future test generation functionality will be moved to experimental/test_generator.py
+# The core CLI now focuses on running tests, analyzing failures, and creating PRs for fixes
+
 @cli.command()
+@click.argument('test_files', nargs=-1, type=click.Path(exists=True))
 @click.option('--project', '-p', type=click.Path(exists=True), required=True, help='Path to agent project')
-@click.option('--results', '-r', type=click.Path(exists=True), help='Path to test results directory')
-@click.option('--output', '-o', type=click.Path(), default='./test-examples', help='Directory to write new YAML test files')
-@click.option('--config', '-c', type=click.Path(exists=True), help='Path to existing test configuration file or directory')
-@click.option('--suggestions', is_flag=True, help='Include rationale/comments in YAML')
+@click.option('--results', '-r', type=click.Path(), help='Path to save test results')
 @click.option('--make-pr', is_flag=True, help='Create a GitHub pull request')
-def generate_tests(project: str, results: Optional[str], output: str, config: Optional[str], suggestions: bool, make_pr: bool):
+def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: bool):
     """
-    Generate new YAML-based test cases for an agent project.
+    Automatically fix failing tests.
     
-    PROJECT: Path to agent code (Python or TypeScript)
-    RESULTS: Path to existing test results folder (JSON or logs)
-    OUTPUT: Directory to write new YAML test files (default: ./test-examples)
+    TEST_FILES: One or more YAML test files to fix
     """
     try:
-        # Initialize test generator
-        generator = TestGenerator(project, results, output)
+        # Run auto-fix
+        fixed_tests = auto_fix_tests(test_files, project, results, make_pr)
         
-        # Generate test cases
-        click.echo("Analyzing codebase and test results...")
-        test_cases = generator.generate_tests(
-            include_suggestions=suggestions,
-            config_path=config
-        )
-        
-        if not test_cases:
-            click.echo("No test cases were generated.")
-            return
-        
-        # Save test cases
-        click.echo(f"Saving {len(test_cases)} test cases...")
-        saved_files = generator.save_test_cases(test_cases)
-        
-        if not saved_files:
-            click.echo("No test files were saved.")
-            return
-        
-        click.echo(f"Saved test files to: {', '.join(saved_files)}")
-        
-        # Create pull request if requested
-        if make_pr:
-            click.echo("Creating pull request...")
-            branch_name = f"auto/gen-tests-{datetime.now().strftime('%Y%m%d')}"
+        if fixed_tests:
+            console.print(f"\n[green]Successfully fixed {len(fixed_tests)} tests![/green]")
+        else:
+            console.print("\n[yellow]No tests were fixed.[/yellow]")
             
-            if generator.create_pull_request(branch_name, saved_files):
-                click.echo(f"Successfully created pull request from branch: {branch_name}")
-            else:
-                click.echo("Failed to create pull request.")
-        
     except Exception as e:
-        click.echo(f"Error generating tests: {str(e)}")
+        console.print(f"[red]Error fixing tests: {str(e)}[/red]")
         raise click.Abort()
 
 if __name__ == '__main__':

@@ -4,16 +4,15 @@
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/downloads/)
 [![OpenAI GPT-4](https://img.shields.io/badge/OpenAI-GPT--4-purple)](https://openai.com/gpt-4)
 
-Kaizen Agent is an AI-powered code improvement tool that leverages OpenAI's GPT-4 to enhance code quality, fix issues, and automatically create pull requests for improvements. The name "Kaizen" comes from the Japanese philosophy of continuous improvement, reflecting our tool's purpose of helping developers write better code.
+Kaizen Agent is an AI-powered testing framework that helps you run tests, analyze failures, and automatically fix issues in your code. The name "Kaizen" comes from the Japanese philosophy of continuous improvement, reflecting our tool's purpose of helping developers write better code.
 
 ## 🌟 Features
 
-- 🤖 AI-powered code analysis and improvements
-- 🔍 Automated security and performance checks
-- 🛠️ Interactive code testing and fixing
-- 🔄 Automatic pull request creation
-- 📊 Comprehensive test coverage
-- 🎯 Multiple testing modes (automated, interactive)
+- 🧪 Run multiple tests from YAML files
+- 🔍 Analyze test failures
+- 🛠️ Automatically fix failing tests
+- 🔄 Rerun tests after fixes
+- 📊 Create pull requests for successful improvements
 
 ## 📋 Prerequisites
 
@@ -77,75 +76,45 @@ KAIZEN_CLI_PROVIDER=anthropic
 KAIZEN_CLI_MODEL=gemini-1.5-flash
 KAIZEN_CLI_API_KEY=your-google-key
 KAIZEN_CLI_PROVIDER=google
-
-# Kaizen Custom Model
-KAIZEN_CLI_MODEL=kaizen-custom-model
-KAIZEN_CLI_API_KEY=your-kaizen-key
-KAIZEN_CLI_PROVIDER=kaizen
 ```
-
-You can use any model name supported by your chosen provider. The configuration system is flexible and will work with new models as they become available.
 
 ## 💻 Usage
 
 ### Command Line Interface
 
-Kaizen provides several commands for testing and improving your code:
+Kaizen provides two main commands for testing and fixing your code:
 
-1. Test a specific file:
+1. Run tests from YAML files:
 ```bash
-kaizen test path/to/your/file.py --config path/to/test.yaml
+kaizen run-tests test1.yaml test2.yaml --project path/to/project --results path/to/results
 ```
 
-2. Start an interactive test session:
+2. Fix failing tests and create a PR:
 ```bash
-kaizen interactive "your code here" --language python --turns 5
+kaizen fix-tests test1.yaml test2.yaml --project path/to/project --results path/to/results --make-pr
 ```
 
-3. Run a specific test file:
-```bash
-kaizen run-test path/to/test.yaml
-```
-
-4. Run multiple tests with auto-fix and PR creation:
-```bash
-# Run all tests in a directory with default settings
-kaizen test-all --config path/to/tests/ --auto-fix --create-pr
-
-# Run with multiple retry attempts for auto-fix
-kaizen test-all --config path/to/tests/ --auto-fix --max-retries 3
-
-# Run specific test files with custom retry settings
-kaizen test-all test1.yaml test2.yaml --auto-fix --max-retries 5 --create-pr
-```
-
-### Auto-Fix and PR Features
-
-The auto-fix feature streamlines the improvement process by:
-1. Collecting test failures
-2. Analyzing issues using GPT-4
-3. Making multiple attempts to fix the code (configurable via --max-retries)
-4. Creating a new Git branch
-5. Committing fixes
-6. Creating a detailed Pull Request
+### Test Configuration
 
 Example test configuration:
 ```yaml
-name: Security and Performance Test
-agent_type: test
-learning_mode: automated
-learning_focus:
-  - security
-  - performance
-  - code_quality
-
-evaluation:
-  llm_provider: openai
-  criteria:
-    - name: security
-      description: "Check for security issues"
-    - name: performance
-      description: "Check for performance issues"
+name: Email Agent Test
+agent_type: dynamic_region
+steps:
+  - name: Basic Email Test
+    input:
+      file_path: email_agent.py
+      region: email_agent
+      method: improve_email
+      input: "hey, can we meet tomorrow?"
+    expected_output_contains:
+      - "Dear"
+      - "meeting"
+      - "schedule"
+    validation:
+      type: contains
+      min_length: 100
+      max_length: 500
 ```
 
 ### Using as a Python Module
@@ -153,13 +122,14 @@ evaluation:
 You can integrate Kaizen into your Python projects:
 
 ```python
-from kaizen import run_autofix_and_pr
+from kaizen import TestRunner, auto_fix_tests
 
-failures = [
-    {"test_name": "Security Test", "error_message": "Code is missing input validation"},
-    {"test_name": "Performance Test", "error_message": "Inefficient loop found in line 24"}
-]
-run_autofix_and_pr(failures, "path/to/file.py")
+# Run tests
+runner = TestRunner("path/to/project", "path/to/results")
+results = runner.run_tests(["test1.yaml", "test2.yaml"])
+
+# Fix failing tests
+fixed_tests = auto_fix_tests(["test1.yaml", "test2.yaml"], "path/to/project", "path/to/results", make_pr=True)
 ```
 
 ## 🧪 Testing
@@ -214,9 +184,9 @@ If you need help or have questions:
 ## 🔄 Roadmap
 
 - [ ] Support for more programming languages
-- [ ] Enhanced security analysis
+- [ ] Enhanced test failure analysis
 - [ ] Integration with more CI/CD platforms
-- [ ] Custom rule creation interface
+- [ ] Custom test validation rules
 - [ ] Performance optimization suggestions
 
 ---

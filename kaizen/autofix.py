@@ -308,7 +308,12 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         logger.info(f"Creating new branch: {branch_name}")
         subprocess.run(["git", "checkout", "-b", branch_name], check=True)
         
-        # Commit changes (file is already updated from earlier)
+        # Write the best fixed code back to disk before committing
+        logger.info("Writing best fixed code back to disk")
+        with open(file_path, 'w') as f:
+            f.write(best_fixed_code)
+        
+        # Commit changes
         subprocess.run(["git", "add", file_path], check=True)
         subprocess.run(["git", "commit", "-m", pr_title, "-m", pr_body], check=True)
         logger.info("Committed changes")
