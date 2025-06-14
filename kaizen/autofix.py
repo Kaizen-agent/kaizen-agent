@@ -210,8 +210,24 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         test_runner = TestRunner()
         test_logger = TestLogger("Auto-fix Test Run")
         
+        # Find the test configuration file
+        test_config_path = None
+        for test_file in Path('.').rglob('*.yaml'):
+            try:
+                with open(test_file, 'r') as f:
+                    test_config = yaml.safe_load(f)
+                    if test_config.get('file_path') == file_path:
+                        test_config_path = test_file
+                        break
+            except yaml.YAMLError:
+                continue
+        
+        if not test_config_path:
+            console.print("[red]Error: Could not find test configuration file for the source file[/red]")
+            sys.exit(1)
+            
         # Load test configuration
-        with open(file_path, 'r') as f:
+        with open(test_config_path, 'r') as f:
             test_config = yaml.safe_load(f)
             
         # Extract file path from the root of the configuration
