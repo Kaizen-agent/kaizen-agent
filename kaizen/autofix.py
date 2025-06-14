@@ -156,13 +156,15 @@ Requirements:
 """
         return branch_name, pr_title, pr_body
 
-def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str) -> None:
+def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1) -> None:
     """
     Automatically fixes code based on test failures and creates a PR.
     
     Args:
         failure_data: List of dictionaries containing test failure information
         file_path: Path to the source code file to be fixed
+        test_config_path: Path to the test configuration file
+        max_retries: Maximum number of retry attempts for fixing tests (default: 1)
         
     Raises:
         ValueError: If required environment variables are not set
@@ -197,55 +199,79 @@ failures:
 
 task: Modify the code to resolve all listed issues and return only the full fixed file."""
 
-        # Get the fixed code from Gemini
-        genai.configure(api_key=config.get_api_key("google"))
-        model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
-        logger.info("Requesting code fixes from Gemini")
-        response = model.generate_content(user_prompt)
-        fixed_code = response.text.strip()
-        logger.info("Received fixed code from Gemini")
-        
-        # Run tests again to verify fixes
-        logger.info("Running tests to verify fixes")
-        
-        # Load test configuration
-        with open(test_config_path, 'r') as f:
-            test_config = yaml.safe_load(f)
-            
-        test_runner = TestRunner(test_config)
-        test_logger = TestLogger("Auto-fix Test Run")
-        
-        # Extract file path from the root of the configuration
-        test_file_path = test_config.get('file_path')
-        if not test_file_path:
-            console.print("[red]Error: No file_path found in test configuration[/red]")
-            sys.exit(1)
-        
-        logger.info(f"Running tests for {test_file_path}")
-        test_results = test_runner.run_tests(Path(test_file_path))
-        logger.info(f"Test results: {test_results}")
-        # Generate branch name and PR info early
-        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], test_results)
-        logger.info(f"Generated branch name: {branch_name}")
-        
         # Track which previously failing tests are now passing
         fixed_tests = []
-        for region, result in test_results.items():
-            print(f"Region: {region}")
-            print(f"Result: {result}")
-            # Skip if result is a string (like 'status') or if region is _status
-            if isinstance(result, str) or region == '_status':
+        best_fixed_tests = []
+        best_fixed_code = None
+        
+        for attempt in range(max_retries):
+            logger.info(f"Auto-fix attempt {attempt + 1}/{max_retries}")
+            
+            # Get the fixed code from Gemini
+            genai.configure(api_key=config.get_api_key("google"))
+            model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+            logger.info("Requesting code fixes from Gemini")
+            response = model.generate_content(user_prompt)
+            fixed_code = response.text.strip()
+            logger.info("Received fixed code from Gemini")
+            
+            # Run tests again to verify fixes
+            logger.info("Running tests to verify fixes")
+            
+            # Load test configuration
+            with open(test_config_path, 'r') as f:
+                test_config = yaml.safe_load(f)
+                
+            test_runner = TestRunner(test_config)
+            test_logger = TestLogger(f"Auto-fix Test Run (Attempt {attempt + 1})")
+            
+            # Extract file path from the root of the configuration
+            test_file_path = test_config.get('file_path')
+            if not test_file_path:
+                console.print("[red]Error: No file_path found in test configuration[/red]")
+                sys.exit(1)
+            
+            logger.info(f"Running tests for {test_file_path}")
+            test_results = test_runner.run_tests(Path(test_file_path))
+            logger.info(f"Test results: {test_results}")
+            
+            # Track which previously failing tests are now passing
+            fixed_tests = []
+            for region, result in test_results.items():
+                print(f"Region: {region}")
+                print(f"Result: {result}")
+                # Skip if result is a string (like 'status') or if region is _status
+                if isinstance(result, str) or region == '_status':
+                    continue
+                for test_case in result.get('test_cases', []):
+                    test_name = test_case['name']
+                    if test_name in failing_test_names and test_case['status'] == 'passed':
+                        fixed_tests.append({
+                            'region': region,
+                            'test_name': test_name
+                        })
+            
+            # Update best attempt if this one fixed more tests
+            if len(fixed_tests) > len(best_fixed_tests):
+                best_fixed_tests = fixed_tests
+                best_fixed_code = fixed_code
+            
+            # If we fixed all tests, we can stop early
+            if len(fixed_tests) == len(failing_test_names):
+                logger.info("All tests fixed! Stopping retries.")
+                break
+            
+            # If this is not the last attempt, continue to next iteration
+            if attempt < max_retries - 1:
+                logger.info(f"Fixed {len(fixed_tests)} tests in attempt {attempt + 1}, trying again...")
                 continue
-            for test_case in result.get('test_cases', []):
-                test_name = test_case['name']
-                if test_name in failing_test_names and test_case['status'] == 'passed':
-                    fixed_tests.append({
-                        'region': region,
-                        'test_name': test_name
-                    })
+        
+        # Use the best attempt's results
+        fixed_tests = best_fixed_tests
+        fixed_code = best_fixed_code
         
         if not fixed_tests:
-            logger.info("No previously failing tests were fixed. Reverting changes.")
+            logger.info("No previously failing tests were fixed after all attempts. Reverting changes.")
             subprocess.run(["git", "checkout", original_branch], check=True)
             # Only try to delete the branch if we created it
             try:

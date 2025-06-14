@@ -109,11 +109,14 @@ kaizen run-test path/to/test.yaml
 
 4. Run multiple tests with auto-fix and PR creation:
 ```bash
-# Run all tests in a directory
+# Run all tests in a directory with default settings
 kaizen test-all --config path/to/tests/ --auto-fix --create-pr
 
-# Run specific test files
-kaizen test-all test1.yaml test2.yaml --auto-fix --create-pr
+# Run with multiple retry attempts for auto-fix
+kaizen test-all --config path/to/tests/ --auto-fix --max-retries 3
+
+# Run specific test files with custom retry settings
+kaizen test-all test1.yaml test2.yaml --auto-fix --max-retries 5 --create-pr
 ```
 
 ### Auto-Fix and PR Features
@@ -121,9 +124,10 @@ kaizen test-all test1.yaml test2.yaml --auto-fix --create-pr
 The auto-fix feature streamlines the improvement process by:
 1. Collecting test failures
 2. Analyzing issues using GPT-4
-3. Creating a new Git branch
-4. Committing fixes
-5. Creating a detailed Pull Request
+3. Making multiple attempts to fix the code (configurable via --max-retries)
+4. Creating a new Git branch
+5. Committing fixes
+6. Creating a detailed Pull Request
 
 Example test configuration:
 ```yaml

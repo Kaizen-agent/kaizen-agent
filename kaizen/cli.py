@@ -23,7 +23,8 @@ def cli():
 @click.option('--config', '-c', type=click.Path(exists=True), required=True, help='Test configuration file')
 @click.option('--auto-fix', is_flag=True, help='Automatically fix failing tests')
 @click.option('--create-pr', is_flag=True, help='Create a pull request with fixes')
-def test_all(config: str, auto_fix: bool, create_pr: bool):
+@click.option('--max-retries', type=int, default=1, help='Maximum number of retry attempts for auto-fix (default: 1)')
+def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
     """
     Run all tests specified in the configuration file.
     
@@ -81,10 +82,10 @@ def test_all(config: str, auto_fix: bool, create_pr: bool):
                     click.echo(f"  Output: {test['output']}")
             
             if auto_fix:
-                click.echo("\nAttempting to fix failing tests...")
+                click.echo(f"\nAttempting to fix failing tests (max retries: {max_retries})...")
                 file_path = test_config.get('file_path')
                 if file_path:
-                    run_autofix_and_pr(failed_tests, file_path, config)
+                    run_autofix_and_pr(failed_tests, file_path, config, max_retries=max_retries)
                     if create_pr:
                         click.echo("Pull request created with fixes")
                 else:
