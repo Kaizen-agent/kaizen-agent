@@ -173,7 +173,12 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         # Convert test file path to actual code file path
         if file_path.endswith('.yaml'):
             # If it's a test file, look for the corresponding Python file
-            code_file = file_path.replace('test_simple.yaml', 'email_agent.py')
+            # Remove the test file extension and directory structure
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            # Remove common test prefixes/suffixes
+            base_name = base_name.replace('test_', '').replace('_test', '')
+            # Look for the corresponding Python file in the same directory
+            code_file = os.path.join(os.path.dirname(file_path), f"{base_name}.py")
             if not os.path.exists(code_file):
                 return f"Error: Could not find code file at {code_file}"
         else:

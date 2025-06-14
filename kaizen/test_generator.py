@@ -415,9 +415,9 @@ Requirements:
        steps:
          - name: "Step Name"
            input:
-             file_path: "test_agent/email_agent/email_agent.py"
-             region: "email_agent"
-             method: "improve_email"
+             file_path: "{os.path.join('test_agent', '{agent_name}', '{agent_name}.py')}"
+             region: "{'{agent_name}'}"
+             method: "{'{method_name}'}"
              input: "hey, can we meet tomorrow to discuss the project?"
            expected_output_contains:
              - "Dear"
@@ -461,9 +461,9 @@ Requirements:
        steps:
          - name: "Step Name"
            input:
-             file_path: "test_agent/email_agent/email_agent.py"
-             region: "email_agent"
-             method: "improve_email"
+             file_path: "{os.path.join('test_agent', '{agent_name}', '{agent_name}.py')}"
+             region: "{'{agent_name}'}"
+             method: "{'{method_name}'}"
              input: "hey, can we meet tomorrow to discuss the project?"
            expected_output_contains:
              - "Dear"
