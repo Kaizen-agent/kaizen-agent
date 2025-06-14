@@ -14,7 +14,6 @@ Kaizen Agent is an AI-powered code improvement tool that leverages OpenAI's GPT-
 - 🔄 Automatic pull request creation
 - 📊 Comprehensive test coverage
 - 🎯 Multiple testing modes (automated, interactive)
-- 🧪 AI-powered test generation
 
 ## 📋 Prerequisites
 
@@ -117,31 +116,6 @@ kaizen test-all --config path/to/tests/ --auto-fix --create-pr
 kaizen test-all test1.yaml test2.yaml --auto-fix --create-pr
 ```
 
-5. Generate new test cases:
-```bash
-# Basic test generation
-kaizen generate-tests \
-  --project ./my-agent \
-  --results ./test-results/ \
-  --output ./test-examples/
-
-# Generate tests with existing configuration
-kaizen generate-tests \
-  --project ./my-agent \
-  --results ./test-results/ \
-  --output ./test-examples/ \
-  --config ./existing-tests/
-
-# Generate tests with rationale and create PR
-kaizen generate-tests \
-  --project ./my-agent \
-  --results ./test-results/ \
-  --output ./test-examples/ \
-  --config ./existing-tests/ \
-  --suggestions \
-  --make-pr
-```
-
 ### Auto-Fix and PR Features
 
 The auto-fix feature streamlines the improvement process by:
@@ -168,36 +142,6 @@ evaluation:
       description: "Check for security issues"
     - name: performance
       description: "Check for performance issues"
-```
-
-### Test Generation
-
-The test generation feature analyzes your codebase and existing test results to:
-1. Identify untested functions and classes
-2. Find complex code regions that need more test coverage
-3. Analyze existing test failures
-4. Generate new YAML test cases using GPT-4
-5. Optionally create a pull request with the new tests
-
-When using the `--config` option, the generator will:
-1. Analyze existing test configurations
-2. Extract patterns and test scenarios
-3. Ensure new tests follow the same structure
-4. Avoid duplicating existing test cases
-5. Complement existing test coverage
-
-Example generated test case:
-```yaml
-name: Test Email Agent Response
-agent_type: python
-steps:
-  - name: Test basic email improvement
-    input:
-      text: "hi, can we meet tomorrow?"
-    expected_output_contains:
-      - "Dear"
-      - "Would you be available"
-    # Reason: Tests basic email formalization and time reference handling
 ```
 
 ### Using as a Python Module

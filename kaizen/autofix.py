@@ -156,7 +156,7 @@ Requirements:
 """
         return branch_name, pr_title, pr_body
 
-def run_autofix_and_pr(failure_data: List[Dict], file_path: str) -> None:
+def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str) -> None:
     """
     Automatically fixes code based on test failures and creates a PR.
     
@@ -210,22 +210,6 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         test_runner = TestRunner()
         test_logger = TestLogger("Auto-fix Test Run")
         
-        # Find the test configuration file
-        test_config_path = None
-        for test_file in Path('.').rglob('*.yaml'):
-            try:
-                with open(test_file, 'r') as f:
-                    test_config = yaml.safe_load(f)
-                    if test_config.get('file_path') == file_path:
-                        test_config_path = test_file
-                        break
-            except yaml.YAMLError:
-                continue
-        
-        if not test_config_path:
-            console.print("[red]Error: Could not find test configuration file for the source file[/red]")
-            sys.exit(1)
-            
         # Load test configuration
         with open(test_config_path, 'r') as f:
             test_config = yaml.safe_load(f)
@@ -247,8 +231,8 @@ task: Modify the code to resolve all listed issues and return only the full fixe
         for region, result in test_results.items():
             print(f"Region: {region}")
             print(f"Result: {result}")
-            # Skip if result is a string (like 'status')
-            if isinstance(result, str):
+            # Skip if result is a string (like 'status') or if region is _status
+            if isinstance(result, str) or region == '_status':
                 continue
             for test_case in result.get('test_cases', []):
                 test_name = test_case['name']

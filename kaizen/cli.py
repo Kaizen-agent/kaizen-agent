@@ -84,7 +84,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool):
                 click.echo("\nAttempting to fix failing tests...")
                 file_path = test_config.get('file_path')
                 if file_path:
-                    run_autofix_and_pr(failed_tests, file_path)
+                    run_autofix_and_pr(failed_tests, file_path, config)
                     if create_pr:
                         click.echo("Pull request created with fixes")
                 else:
