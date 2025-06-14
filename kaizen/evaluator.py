@@ -19,7 +19,7 @@ class LLMEvaluator:
         if not self.api_key:
             raise ValueError(f"API key not found for provider: {provider}. Please add it to your .env file as GOOGLE_API_KEY.")
         
-        self.logger = logger or TestLogger()
+        self.logger = logger or TestLogger("LLMEvaluator")
         self._setup_provider()
     
     def _setup_provider(self):

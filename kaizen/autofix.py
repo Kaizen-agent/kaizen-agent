@@ -240,8 +240,12 @@ task: Modify the code to resolve all listed issues and return only the full fixe
                 console.print("[red]Error: No file_path found in test configuration[/red]")
                 sys.exit(1)
             
-            logger.info(f"Running tests for {test_file_path}")
-            test_results = test_runner.run_tests(Path(test_file_path))
+            # Resolve the test file path relative to the YAML config file's directory
+            config_dir = os.path.dirname(os.path.abspath(test_config_path))
+            resolved_test_file_path = os.path.normpath(os.path.join(config_dir, test_file_path))
+            
+            logger.info(f"Running tests for {resolved_test_file_path}")
+            test_results = test_runner.run_tests(Path(resolved_test_file_path))
             logger.info(f"Test results: {test_results}")
             
             # Track which previously failing tests are now passing

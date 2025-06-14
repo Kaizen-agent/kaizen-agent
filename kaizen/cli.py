@@ -90,9 +90,8 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
             
             if auto_fix:
                 click.echo(f"\nAttempting to fix failing tests (max retries: {max_retries})...")
-                file_path = test_config.get('file_path')
                 if file_path:
-                    run_autofix_and_pr(failed_tests, file_path, config, max_retries=max_retries, create_pr=create_pr)
+                    run_autofix_and_pr(failed_tests, str(resolved_file_path), config, max_retries=max_retries, create_pr=create_pr)
                     if create_pr:
                         click.echo("Pull request created with fixes")
                 else:
