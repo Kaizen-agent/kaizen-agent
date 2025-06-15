@@ -509,6 +509,7 @@ def _validate_and_improve_code(code: str, original_code: str) -> str:
     # If code is empty or just whitespace, log a warning
     if not code.strip():
         logger.warning("Generated code is empty after extraction attempts")
+        raise CodeValidationError("Generated code is empty or contains only whitespace")
     
     # If we still don't have valid code, try to fix common syntax issues
     try:
@@ -788,7 +789,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             })
             
             # Check if test results indicate an error
-            if isinstance(test_results, dict) and test_results.get('status') == 'error':
+            if isinstance(test_results, dict) and test_results.get('overall_status') == 'error':
                 error_msg = test_results.get('error', 'Unknown error')
                 logger.error(f"Test execution failed: {error_msg}")
                 raise RuntimeError(f"Test execution failed: {error_msg}")
