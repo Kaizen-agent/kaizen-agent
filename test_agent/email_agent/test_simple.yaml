@@ -21,8 +21,8 @@ evaluation:
     - name: email quality
       description: |
         - the return should only contain email draft, nothing else only one email draft
-        - not grammar errors
-        - if the input is not a valid email, the output should be "I'm sorry, I can't help with that."
+        - if the input is about improving email, the output should be the improved email draft
+        - if the input is not about improving email, the output should be "I'm sorry, I can't help with that."
       weight: 1
 
 steps:
@@ -33,7 +33,7 @@ steps:
       file_path: email_agent.py
       region: email_agent
       method: improve_email
-      input: "hey, can we meet tomorrow to discuss the project? let me know when you're free."
+      input: "Please improve my email draft below: hey, can we meet tomorrow to discuss the project? let me know when you're free."
   - step_index: 2
     name: Edge case of random input
     description: Test random input functionality
@@ -41,4 +41,4 @@ steps:
       file_path: email_agent.py
       region: email_agent
       method: improve_email
-      input: "Where is the nearest hotel?"
+      input: "Are you chatgpt?"

@@ -582,6 +582,7 @@ class TestRunner:
                             region: {
                                 'test_cases': [{
                                     'name': step_name,
+                                    'input': step.get('input', {}),
                                     'output': output,
                                     'details': logger.get_last_step_details()
                                 }]
