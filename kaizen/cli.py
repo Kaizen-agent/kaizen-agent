@@ -119,8 +119,108 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
             click.echo("\nAll tests passed!")
         
         # Output results
-        click.echo("\nTest Results:")
-        click.echo(json.dumps(results, indent=2))
+        click.echo("\nTest Results Summary")
+        click.echo("=" * 50)
+        
+        # Print test configuration details
+        click.echo(f"\nTest Configuration:")
+        click.echo(f"- Name: {test_config.get('name', 'Unnamed Test')}")
+        click.echo(f"- File: {resolved_file_path}")
+        click.echo(f"- Config: {config_path}")
+        
+        # Print overall status
+        overall_status = results.get('overall_status', 'unknown')
+        status_emoji = "✅" if overall_status == 'passed' else "❌"
+        click.echo(f"\nOverall Status: {status_emoji} {overall_status.upper()}")
+        
+        # Print test results table
+        click.echo("\nTest Results Table:")
+        click.echo("| Test Name | Region | Status | Details |")
+        click.echo("|-----------|--------|--------|---------|")
+        
+        for region, result in results.items():
+            if region == 'overall_status':
+                continue
+                
+            test_cases = result.get('test_cases', [])
+            for test_case in test_cases:
+                status = "✅ PASS" if test_case.get('status') == 'passed' else "❌ FAIL"
+                details = test_case.get('details', '')
+                if len(details) > 50:
+                    details = details[:47] + "..."
+                click.echo(f"| {test_case.get('name', 'Unknown')} | {region} | {status} | {details} |")
+        
+        # Print failed tests details if any
+        failed_tests = collect_failed_tests(results)
+        if failed_tests:
+            click.echo("\nFailed Tests Details:")
+            click.echo("=" * 50)
+            for test in failed_tests:
+                click.echo(f"\nTest: {test['test_name']} ({test['region']})")
+                click.echo(f"Error: {test['error_message']}")
+                if test['output']:
+                    click.echo(f"Output:\n{test['output']}")
+            
+            if auto_fix:
+                click.echo("\nAuto-fix Attempts:")
+                click.echo("=" * 50)
+                click.echo(f"Maximum retries: {max_retries}")
+                if create_pr:
+                    click.echo("Pull request will be created with fixes")
+        
+        # Save detailed results to file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_file = Path("test-results") / f"{test_config.get('name', 'test')}_{timestamp}_report.txt"
+        result_file.parent.mkdir(exist_ok=True)
+        
+        with open(result_file, 'w') as f:
+            f.write("Test Results Report\n")
+            f.write("=" * 50 + "\n\n")
+            
+            # Write configuration details
+            f.write("Test Configuration:\n")
+            f.write(f"- Name: {test_config.get('name', 'Unnamed Test')}\n")
+            f.write(f"- File: {resolved_file_path}\n")
+            f.write(f"- Config: {config_path}\n\n")
+            
+            # Write overall status
+            f.write(f"Overall Status: {overall_status.upper()}\n\n")
+            
+            # Write detailed test results
+            f.write("Detailed Test Results:\n")
+            f.write("=" * 50 + "\n\n")
+            
+            for region, result in results.items():
+                if region == 'overall_status':
+                    continue
+                    
+                f.write(f"Region: {region}\n")
+                f.write("-" * 30 + "\n")
+                
+                test_cases = result.get('test_cases', [])
+                for test_case in test_cases:
+                    f.write(f"\nTest: {test_case.get('name', 'Unknown')}\n")
+                    f.write(f"Status: {test_case.get('status', 'unknown')}\n")
+                    if test_case.get('details'):
+                        f.write(f"Details: {test_case.get('details')}\n")
+                    if test_case.get('output'):
+                        f.write(f"Output:\n{test_case.get('output')}\n")
+                    if test_case.get('evaluation'):
+                        f.write(f"Evaluation:\n{json.dumps(test_case.get('evaluation'), indent=2)}\n")
+                    f.write("-" * 30 + "\n")
+            
+            # Write failed tests section if any
+            if failed_tests:
+                f.write("\nFailed Tests Analysis:\n")
+                f.write("=" * 50 + "\n\n")
+                for test in failed_tests:
+                    f.write(f"Test: {test['test_name']} ({test['region']})\n")
+                    f.write(f"Error: {test['error_message']}\n")
+                    if test['output']:
+                        f.write(f"Output:\n{test['output']}\n")
+                    f.write("-" * 30 + "\n")
+        
+        click.echo(f"\nDetailed report saved to: {result_file}")
         
     except Exception as e:
         click.echo(f"Error running tests: {str(e)}")

@@ -636,17 +636,34 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             test_results = test_runner.run_tests(Path(resolved_test_file_path))
             logger.info(f"Test results: {test_results}")
             
+            # Check if test results indicate an error
+            if isinstance(test_results, dict) and test_results.get('status') == 'error':
+                error_msg = test_results.get('error', 'Unknown error')
+                logger.error(f"Test execution failed: {error_msg}")
+                raise RuntimeError(f"Test execution failed: {error_msg}")
+            
             # Track which previously failing tests are now passing
             fixed_tests = []
             for region, result in test_results.items():
                 print(f"Region: {region}")
                 print(f"Result: {result}")
                 # Skip if result is a string (like 'status') or if region is _status
-                if isinstance(result, str) or region == '_status':
+                if isinstance(result, str) or region == '_status' or region == 'overall_status':
                     continue
-                for test_case in result.get('test_cases', []):
-                    test_name = test_case['name']
-                    if test_name in failing_test_names and test_case['status'] == 'passed':
+                # Ensure result is a dictionary before accessing test_cases
+                if not isinstance(result, dict):
+                    logger.warning(f"Skipping invalid result format for region {region}: {result}")
+                    continue
+                test_cases = result.get('test_cases', [])
+                if not isinstance(test_cases, list):
+                    logger.warning(f"Skipping invalid test_cases format for region {region}: {test_cases}")
+                    continue
+                for test_case in test_cases:
+                    if not isinstance(test_case, dict):
+                        logger.warning(f"Skipping invalid test case format: {test_case}")
+                        continue
+                    test_name = test_case.get('name')
+                    if test_name in failing_test_names and test_case.get('status') == 'passed':
                         fixed_tests.append({
                             'region': region,
                             'test_name': test_name
