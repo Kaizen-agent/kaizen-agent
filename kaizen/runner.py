@@ -727,17 +727,33 @@ class TestRunner:
                                         package_name = os.path.basename(os.path.dirname(step_file_path))
                                         console.print(f"[blue]Debug: Importing modules for package {package_name}[/blue]")
                                         
+                                        # Ensure the package is in sys.modules
+                                        if package_name not in sys.modules:
+                                            console.print(f"[blue]Debug: Creating package module for {package_name}[/blue]")
+                                            package_spec = importlib.util.find_spec(package_name)
+                                            if package_spec:
+                                                package_module = importlib.util.module_from_spec(package_spec)
+                                                sys.modules[package_name] = package_module
+                                                console.print(f"[blue]Debug: Created package module {package_name}[/blue]")
+                                            else:
+                                                console.print(f"[red]Error: Could not find spec for package {package_name}[/red]")
+                                        
                                         # Import the required modules
+                                        console.print(f"[blue]Debug: Importing prompt module[/blue]")
                                         prompt_module = importlib.import_module(f"{package_name}.prompt")
+                                        console.print(f"[blue]Debug: Importing utils module[/blue]")
                                         utils_module = importlib.import_module(f"{package_name}.utils")
                                         
                                         # Add them to the module namespace
+                                        console.print(f"[blue]Debug: Adding functions to module namespace[/blue]")
                                         module.__dict__['get_prompt'] = getattr(prompt_module, 'get_prompt')
                                         module.__dict__['call_gemini_llm'] = getattr(utils_module, 'call_gemini_llm')
                                         
                                         console.print(f"[blue]Debug: Successfully imported modules[/blue]")
                                     except ImportError as e:
                                         console.print(f"[red]Error importing modules: {str(e)}[/red]")
+                                        console.print(f"[blue]Debug: sys.modules keys: {list(sys.modules.keys())}[/blue]")
+                                        console.print(f"[blue]Debug: sys.path: {sys.path}[/blue]")
                                         # Fall back to executing the import code
                                         console.print("[blue]Debug: Falling back to executing import code[/blue]")
                                         exec(import_code, module.__dict__)
