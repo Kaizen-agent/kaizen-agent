@@ -744,7 +744,7 @@ class TestRunner:
 
                                 if passed:
                                     logger.log_step_result(step_index, output, True)
-                                    
+                                
                                 # Store results by region
                                 region = step.get('input', {}).get('region', 'default')
                                 if region not in results:
@@ -810,9 +810,19 @@ class TestRunner:
                         results['overall_status']['status'] = 'failed'
                         results['overall_status']['error'] = error_msg
                         continue
-            
-            return results
-            
+                
+                return results
+            except Exception as e:
+                error_msg = f"Error running tests: {str(e)}"
+                logger.logger.error(error_msg)
+                results['overall_status']['status'] = 'failed'
+                results['overall_status']['error'] = error_msg
+                return results
+            finally:
+                # Clean up: remove the added path
+                if parent_dir in sys.path:
+                    sys.path.remove(parent_dir)
+                    console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
         except Exception as e:
             error_msg = f"Error running tests: {str(e)}"
             logger.logger.error(error_msg)
