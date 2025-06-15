@@ -929,6 +929,12 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                 raise
             
             try:
+                # Ensure PR title is not empty
+                if not pr_title or not pr_title.strip():
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    pr_title = f"Fix: Resolved test failures ({timestamp})"
+                    logger.warning(f"Empty PR title detected, using default title: {pr_title}")
+                
                 pr = repo.create_pull(
                     title=pr_title,
                     body=enhanced_pr_body,
