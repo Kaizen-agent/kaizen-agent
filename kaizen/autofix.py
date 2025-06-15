@@ -440,23 +440,23 @@ def _validate_and_improve_code(code: str, original_code: str) -> str:
         
     logger.warning("Generated code has invalid syntax, attempting to fix")
     
-    # If code is empty or just whitespace, try to extract code from the response
+    # Try to extract code from code blocks first
+    code_blocks = _extract_code_blocks(code)
+    for block in code_blocks:
+        if _validate_code_syntax(block):
+            logger.info("Found valid code block in response")
+            return block
+    
+    # Try kaizen blocks next
+    kaizen_blocks = _extract_kaizen_blocks(code)
+    for block in kaizen_blocks:
+        if _validate_code_syntax(block):
+            logger.info("Found valid code in kaizen block")
+            return block
+    
+    # If code is empty or just whitespace, log a warning
     if not code.strip():
-        logger.warning("Generated code is empty, attempting to extract code from response")
-        
-        # Try code blocks first
-        code_blocks = _extract_code_blocks(code)
-        for block in code_blocks:
-            if _validate_code_syntax(block):
-                logger.info("Found valid code block in response")
-                return block
-        
-        # Try kaizen blocks next
-        kaizen_blocks = _extract_kaizen_blocks(code)
-        for block in kaizen_blocks:
-            if _validate_code_syntax(block):
-                logger.info("Found valid code in kaizen block")
-                return block
+        logger.warning("Generated code is empty after extraction attempts")
     
     # If we still don't have valid code, try to fix common syntax issues
     try:
