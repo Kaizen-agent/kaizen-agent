@@ -722,7 +722,26 @@ class TestRunner:
                                     
                                     # Then execute the imports
                                     console.print("[blue]Debug: Now executing imports[/blue]")
-                                    exec(import_code, module.__dict__)
+                                    try:
+                                        # Try to import the modules directly first
+                                        package_name = os.path.basename(os.path.dirname(step_file_path))
+                                        console.print(f"[blue]Debug: Importing modules for package {package_name}[/blue]")
+                                        
+                                        # Import the required modules
+                                        prompt_module = importlib.import_module(f"{package_name}.prompt")
+                                        utils_module = importlib.import_module(f"{package_name}.utils")
+                                        
+                                        # Add them to the module namespace
+                                        module.__dict__['get_prompt'] = getattr(prompt_module, 'get_prompt')
+                                        module.__dict__['call_gemini_llm'] = getattr(utils_module, 'call_gemini_llm')
+                                        
+                                        console.print(f"[blue]Debug: Successfully imported modules[/blue]")
+                                    except ImportError as e:
+                                        console.print(f"[red]Error importing modules: {str(e)}[/red]")
+                                        # Fall back to executing the import code
+                                        console.print("[blue]Debug: Falling back to executing import code[/blue]")
+                                        exec(import_code, module.__dict__)
+                                    
                                     console.print(f"[blue]Debug: Module namespace after imports: {list(module.__dict__.keys())}[/blue]")
                                 
                                 # Get the class from the module
