@@ -801,6 +801,28 @@ class TestRunner:
                         else:
                             logger.logger.info("All tests passed")
                         
+                        # Run LLM evaluation if evaluator is available
+                        if evaluator and 'evaluation' in self.test_config:
+                            try:
+                                logger.logger.info("Running LLM evaluation...")
+                                evaluation_results = evaluator.evaluate(
+                                    results,
+                                    self.test_config['evaluation'].get('criteria', [])
+                                )
+                                
+                                # Add evaluation results to the overall status
+                                results['overall_status']['evaluation'] = evaluation_results
+                                
+                                # Update overall status based on evaluation
+                                if evaluation_results['status'] == 'failed':
+                                    results['overall_status']['status'] = 'failed'
+                                    logger.logger.error(f"Test failed LLM evaluation with score: {evaluation_results['overall_score']}")
+                                else:
+                                    logger.logger.info(f"Test passed LLM evaluation with score: {evaluation_results['overall_score']}")
+                            except Exception as e:
+                                logger.logger.error(f"Error during LLM evaluation: {str(e)}")
+                                results['overall_status']['evaluation_error'] = str(e)
+                        
                         # Save test results
                         logger.save_results()
                     except Exception as e:
