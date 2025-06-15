@@ -1,0 +1,44 @@
+name: Summarizer Agent Core Test
+agent_type: dynamic_region
+file_path: agent.py
+description: |
+  Test suite for the SummarizerAgent class that processes text using Google's Gemini API.
+  Tests cover initialization, error handling, and text processing functionality.
+  This is an AI agent that processes and responds to user input.
+
+metadata:
+  version: 1.0.0
+  dependencies:
+    - google-generativeai>=0.1.0
+    - python-dotenv>=0.19.0
+  environment_variables:
+    - GOOGLE_API_KEY
+
+evaluation:
+  llm_provider: gemini
+  model: gemini-2.5-flash-preview-05-20
+  criteria:
+    - name: response quality
+      description: |
+        - the response should be relevant to the input text
+        - the response should be coherent and well-structured
+        - the response should maintain the context of the input
+      weight: 1
+
+steps:
+  - step_index: 1
+    name: Basic Text Processing
+    description: Test basic text processing functionality with a simple input
+    input:
+      file_path: agent.py
+      region: summarizer_agent
+      method: run
+      input: "Can you help me understand the main points of this text: The quick brown fox jumps over the lazy dog. This is a common pangram that contains every letter of the English alphabet at least once."
+  - step_index: 2
+    name: Empty Input Handling
+    description: Test how the agent handles empty input
+    input:
+      file_path: agent.py
+      region: summarizer_agent
+      method: run
+      input: ""

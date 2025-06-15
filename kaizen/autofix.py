@@ -676,6 +676,125 @@ All fixed tests have been verified to pass in the following environments:
 
     return pr_body
 
+def _collect_referenced_files(file_path: str, processed_files: set = None, base_dir: str = None) -> set:
+    """
+    Recursively collect all Python files referenced by imports in the given file.
+    
+    Args:
+        file_path: Path to the main file
+        processed_files: Set of already processed files to avoid cycles
+        base_dir: Base directory for resolving relative imports
+        
+    Returns:
+        set: Set of all referenced file paths
+    """
+    if processed_files is None:
+        processed_files = set()
+    
+    if file_path in processed_files:
+        return processed_files
+    
+    processed_files.add(file_path)
+    
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+            
+        # Parse the file to find imports
+        tree = ast.parse(content)
+        
+        # Get the directory of the current file
+        file_dir = os.path.dirname(os.path.abspath(file_path))
+        if base_dir is None:
+            base_dir = file_dir
+        
+        # Find all imports
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                if isinstance(node, ast.Import):
+                    for name in node.names:
+                        module_name = name.name.split('.')[0]
+                        # Try different possible locations for the module
+                        possible_paths = [
+                            os.path.join(file_dir, f"{module_name}.py"),  # Same directory
+                            os.path.join(file_dir, module_name, "__init__.py"),  # Package
+                            os.path.join(base_dir, f"{module_name}.py"),  # Base directory
+                            os.path.join(base_dir, module_name, "__init__.py"),  # Package in base
+                        ]
+                        for module_path in possible_paths:
+                            if os.path.exists(module_path):
+                                _collect_referenced_files(module_path, processed_files, base_dir)
+                                break
+                else:  # ImportFrom
+                    if node.module:
+                        # Handle relative imports
+                        if node.level > 0:  # Relative import
+                            current_dir = file_dir
+                            for _ in range(node.level - 1):
+                                current_dir = os.path.dirname(current_dir)
+                            module_name = node.module.split('.')[0]
+                            module_path = os.path.join(current_dir, f"{module_name}.py")
+                            if os.path.exists(module_path):
+                                _collect_referenced_files(module_path, processed_files, base_dir)
+                        else:  # Absolute import
+                            module_name = node.module.split('.')[0]
+                            possible_paths = [
+                                os.path.join(file_dir, f"{module_name}.py"),
+                                os.path.join(file_dir, module_name, "__init__.py"),
+                                os.path.join(base_dir, f"{module_name}.py"),
+                                os.path.join(base_dir, module_name, "__init__.py"),
+                            ]
+                            for module_path in possible_paths:
+                                if os.path.exists(module_path):
+                                    _collect_referenced_files(module_path, processed_files, base_dir)
+                                    break
+    
+    except Exception as e:
+        logger.warning(f"Error processing imports in {file_path}: {str(e)}")
+    
+    return processed_files
+
+def _analyze_failure_dependencies(failure_data: List[Dict], referenced_files: set) -> Dict[str, List[Dict]]:
+    """
+    Analyze test failures to determine which files need to be fixed.
+    
+    Args:
+        failure_data: List of test failures
+        referenced_files: Set of referenced files
+        
+    Returns:
+        Dict mapping file paths to lists of failures that affect them
+    """
+    file_failures = {file_path: [] for file_path in referenced_files}
+    
+    for failure in failure_data:
+        error_message = failure.get('error_message', '')
+        test_name = failure.get('test_name', '')
+        
+        # Analyze error message to determine affected files
+        for file_path in referenced_files:
+            file_name = os.path.basename(file_path)
+            if file_name in error_message or file_name in test_name:
+                file_failures[file_path].append(failure)
+    
+    return file_failures
+
+def _reload_modules(file_paths: set) -> None:
+    """
+    Reload all affected modules to ensure changes are properly reflected.
+    
+    Args:
+        file_paths: Set of file paths to reload
+    """
+    for file_path in file_paths:
+        module_name = Path(file_path).stem
+        if module_name in sys.modules:
+            try:
+                importlib.reload(sys.modules[module_name])
+                logger.info(f"Reloaded module: {module_name}")
+            except Exception as e:
+                logger.warning(f"Failed to reload module {module_name}: {str(e)}")
+
 def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True, base_branch: str = 'main') -> None:
     """
     Automatically fixes code based on test failures and optionally creates a PR.
@@ -712,13 +831,23 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         with open(test_config_path, 'r') as f:
             test_config = yaml.safe_load(f)
         
-        # Load original code
-        with open(file_path, 'r') as f:
-            original_code = f.read()
+        # Collect all referenced files
+        referenced_files = _collect_referenced_files(file_path)
+        logger.info(f"Found referenced files: {referenced_files}")
+        
+        # Analyze which files need to be fixed based on failures
+        file_failures = _analyze_failure_dependencies(failure_data, referenced_files)
+        logger.info(f"File failures analysis: {file_failures}")
+        
+        # Load original code for all files
+        original_codes = {}
+        for ref_file in referenced_files:
+            with open(ref_file, 'r') as f:
+                original_codes[ref_file] = f.read()
         
         # Generate PR info with test configuration
         try:
-            branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], {}, test_config, original_code)
+            branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], {}, test_config, original_codes[file_path])
             logger.info(f"Generated PR info: {branch_name}, {pr_title}, {pr_body}")
         except Exception as e:
             logger.warning(f"Failed to generate PR info: {str(e)}")
@@ -731,7 +860,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         # Track which previously failing tests are now passing
         fixed_tests = []
         best_fixed_tests = []
-        best_fixed_code = None
+        best_fixed_codes = {}
         
         # Track all test attempts
         all_test_attempts = []
@@ -739,27 +868,32 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         for attempt in range(max_retries):
             logger.info(f"Auto-fix attempt {attempt + 1}/{max_retries}")
             
-            # Get the fixed code from Gemini
+            # Get the fixed code from Gemini for each file that needs fixing
             genai.configure(api_key=config.get_api_key("google"))
             model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
-            logger.info("Requesting code fixes from Gemini")
-            response = model.generate_content(pr_body)
-            fixed_code = response.text.strip()
-            logger.info(f"Fixed code: {fixed_code}")
-            # Validate and improve the generated code
-            fixed_code = _validate_and_improve_code(fixed_code, original_code)
-            logger.info(f"Validated and improved generated code: {fixed_code}")
-            logger.info("Validated and improved generated code")
             
-            # Write the fixed code to disk before running tests
-            with open(file_path, 'w') as f:
-                f.write(fixed_code)
-            logger.info(f"Updated file: {file_path}")
+            fixed_codes = {}
+            for file_path, failures in file_failures.items():
+                if failures:  # Only fix files with failures
+                    logger.info(f"Requesting code fixes for {file_path}")
+                    response = model.generate_content(pr_body)
+                    fixed_code = response.text.strip()
+                    logger.info(f"Fixed code for {file_path}: {fixed_code}")
+                    
+                    # Validate and improve the generated code
+                    fixed_code = _validate_and_improve_code(fixed_code, original_codes[file_path])
+                    logger.info(f"Validated and improved generated code for {file_path}")
+                    
+                    fixed_codes[file_path] = fixed_code
             
-            # Force reload the module to ensure we're using the new code
-            module_name = Path(file_path).stem
-            if module_name in sys.modules:
-                importlib.reload(sys.modules[module_name])
+            # Write all fixed code to disk before running tests
+            for file_path, code in fixed_codes.items():
+                with open(file_path, 'w') as f:
+                    f.write(code)
+                logger.info(f"Updated file: {file_path}")
+            
+            # Reload all affected modules
+            _reload_modules(set(fixed_codes.keys()))
             
             # Run tests again to verify fixes
             logger.info("Running tests to verify fixes")
@@ -784,7 +918,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             # Store this attempt's results
             all_test_attempts.append({
                 'attempt': attempt + 1,
-                'code': fixed_code,
+                'code': fixed_codes,
                 'results': test_results
             })
             
@@ -797,12 +931,8 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             # Track which previously failing tests are now passing
             fixed_tests = []
             for region, result in test_results.items():
-                print(f"Region: {region}")
-                print(f"Result: {result}")
-                # Skip if result is a string (like 'status') or if region is _status
-                if isinstance(result, str) or region == '_status' or region == 'overall_status':
+                if isinstance(result, str) or region in ('_status', 'overall_status'):
                     continue
-                # Ensure result is a dictionary before accessing test_cases
                 if not isinstance(result, dict):
                     logger.warning(f"Skipping invalid result format for region {region}: {result}")
                     continue
@@ -824,7 +954,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             # Update best attempt if this one fixed more tests
             if len(fixed_tests) > len(best_fixed_tests):
                 best_fixed_tests = fixed_tests
-                best_fixed_code = fixed_code
+                best_fixed_codes = fixed_codes
             
             # If we fixed all tests, we can stop early
             if len(fixed_tests) == len(failing_test_names):
@@ -838,7 +968,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         
         # Use the best attempt's results
         fixed_tests = best_fixed_tests
-        fixed_code = best_fixed_code
+        fixed_codes = best_fixed_codes
         
         if not fixed_tests:
             logger.info("No previously failing tests were fixed after all attempts. Reverting changes.")
@@ -858,7 +988,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         logger.info(f"Fixed {len(fixed_tests)} previously failing tests")
         
         # Update PR info with fixed tests
-        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results, test_config, original_code)
+        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results, test_config, original_codes[file_path])
         logger.info(f"Updated branch name: {branch_name}")
         
         # Create a new branch
@@ -877,11 +1007,12 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         
         # Write the best fixed code back to disk before committing
         logger.info("Writing best fixed code back to disk")
-        with open(file_path, 'w') as f:
-            f.write(best_fixed_code)
+        for file_path, code in fixed_codes.items():
+            with open(file_path, 'w') as f:
+                f.write(code)
         
         # Commit changes with a proper commit message
-        subprocess.run(["git", "add", file_path], check=True)
+        subprocess.run(["git", "add", *fixed_codes.keys()], check=True)
         commit_message = f"Fix: {pr_title}\n\n{pr_body}"
         subprocess.run(["git", "commit", "-m", commit_message], check=True)
         logger.info("Committed changes")

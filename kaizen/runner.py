@@ -204,6 +204,17 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         if not os.path.exists(code_file):
             return f"Error: File not found at {code_file} (resolved from {file_path})"
 
+        # Add the file's directory and parent directories to Python path
+        file_dir = os.path.dirname(os.path.abspath(code_file))
+        parent_dirs = []
+        current_dir = file_dir
+        while current_dir and current_dir != os.path.dirname(current_dir):
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+                parent_dirs.append(current_dir)
+                console.print(f"[blue]Debug: Added {current_dir} to Python path[/blue]")
+            current_dir = os.path.dirname(current_dir)
+
         # Read the full file
         with open(code_file, 'r') as f:
             content = f.read()
@@ -232,14 +243,53 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         # Extract the block code
         block_code = content[start_idx + len(start_marker):end_idx].strip()
         
-        # Extract imports from the full file
+        # Extract imports from the full file and handle them recursively
         import_lines = []
-        for line in content.split('\n'):
-            line = line.strip()
-            if line.startswith('import ') or line.startswith('from '):
-                import_lines.append(line)
-            elif line and not line.startswith('#'):
-                break
+        processed_imports = set()  # Track processed imports to avoid cycles
+        import_errors = []  # Track import errors
+        
+        def process_imports(file_content: str, base_dir: str, depth: int = 0):
+            if depth > 10:  # Prevent excessive recursion
+                console.print("[yellow]Warning: Maximum import depth reached[/yellow]")
+                return
+                
+            for line in file_content.split('\n'):
+                line = line.strip()
+                if line.startswith('import ') or line.startswith('from '):
+                    import_lines.append(line)
+                    # Try to find and process the imported module if it's a local import
+                    try:
+                        if line.startswith('from '):
+                            module_name = line.split()[1].split()[0]  # Handle 'from x import y'
+                        else:
+                            module_name = line.split()[1].split('.')[0]
+                            
+                        # Check if it's a local module
+                        module_path = os.path.join(base_dir, f"{module_name}.py")
+                        if os.path.exists(module_path) and module_path not in processed_imports:
+                            processed_imports.add(module_path)
+                            with open(module_path, 'r') as f:
+                                process_imports(f.read(), base_dir, depth + 1)
+                                
+                            # Force reload the module if it exists
+                            if module_name in sys.modules:
+                                importlib.reload(sys.modules[module_name])
+                                console.print(f"[blue]Debug: Reloaded module {module_name}[/blue]")
+                    except Exception as e:
+                        error_msg = f"Error processing imports for {module_name}: {str(e)}"
+                        import_errors.append(error_msg)
+                        console.print(f"[yellow]Warning: {error_msg}[/yellow]")
+                elif line and not line.startswith('#'):
+                    break
+        
+        # Process imports from the main file
+        process_imports(content, file_dir)
+        
+        # Report any import errors
+        if import_errors:
+            console.print("[yellow]Warning: Some imports had errors:[/yellow]")
+            for error in import_errors:
+                console.print(f"[yellow]  - {error}[/yellow]")
         
         # Add imports to the namespace
         if import_lines:
@@ -254,6 +304,12 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         
     except Exception as e:
         return f"Error executing code block: {str(e)}"
+    finally:
+        # Clean up: remove the added paths
+        for directory in parent_dirs:
+            if directory in sys.path:
+                sys.path.remove(directory)
+                console.print(f"[blue]Debug: Removed {directory} from Python path[/blue]")
 
 class TestRunner:
     def __init__(self, test_config: Optional[Dict] = None):
@@ -552,9 +608,20 @@ class TestRunner:
                     console.print(f"[blue]Debug: Running test block for step {step_index}[/blue]")
                     console.print(f"[blue]Debug: Step input: {step.get('input', {})}[/blue]")
                     
-                    # Use the main test file path instead of the step's file_path
+                    # Use the step's file_path if provided, otherwise use the main test file path
+                    step_file_path = step.get('input', {}).get('file_path')
+                    if step_file_path:
+                        # Resolve the step's file path relative to the config file
+                        if self.test_config.get('config_file'):
+                            config_dir = os.path.dirname(os.path.abspath(self.test_config['config_file']))
+                            step_file_path = os.path.normpath(os.path.join(config_dir, step_file_path))
+                        console.print(f"[blue]Debug: Using step's file path: {step_file_path}[/blue]")
+                    else:
+                        step_file_path = str(file_path)
+                        console.print(f"[blue]Debug: Using main test file path: {step_file_path}[/blue]")
+                    
                     output = run_test_block(
-                        str(file_path),  # Use the resolved main test file path
+                        step_file_path,
                         step.get('input', {}).get('input'),
                         step.get('input', {}).get('region'),
                         self.test_config.get('config_file')
