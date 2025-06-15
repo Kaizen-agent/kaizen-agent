@@ -729,6 +729,7 @@ class TestRunner:
                                 
                                 # Validate the output directly without running again
                                 passed = True
+                                error_msg = None
                                 if expected_contains:
                                     for expected in expected_contains:
                                         if expected not in output:
@@ -758,8 +759,8 @@ class TestRunner:
                                     'name': step_name,
                                     'input': step.get('input', {}),
                                     'status': 'passed' if passed else 'failed',
-                                    'output': output,
-                                    'details': logger.get_last_step_details()
+                                    'output': output if output else 'No output available',
+                                    'details': error_msg if not passed else None
                                 }
                                 
                                 results[region]['test_cases'].append(test_case)
@@ -786,8 +787,8 @@ class TestRunner:
                                     'name': step_name,
                                     'input': step.get('input', {}),
                                     'status': 'failed',
-                                    'output': None,
-                                    'details': logger.get_last_step_details()
+                                    'output': 'No output available',
+                                    'details': error_msg
                                 }
                                 
                                 results[region]['test_cases'].append(test_case)
@@ -843,6 +844,37 @@ class TestRunner:
                         error_msg = f"Error in step {step_index}: {str(e)}"
                         logger.logger.error(error_msg)
                         all_steps_passed = False
+                        
+                        # Get the region from the step
+                        region = step.get('input', {}).get('region', 'default')
+                        
+                        # Initialize region if not exists
+                        if region not in results:
+                            results[region] = {
+                                'test_cases': [],
+                                'status': 'failed'
+                            }
+                        
+                        # Get any output that was generated before the error
+                        output = None
+                        if 'output' in locals():
+                            output = str(output)
+                        elif hasattr(logger, 'get_last_output'):
+                            output = logger.get_last_output()
+                        
+                        # Add the failed test case with error details and any available output
+                        test_case = {
+                            'name': step.get('name', f'Step {step_index}'),
+                            'input': step.get('input', {}),
+                            'status': 'failed',
+                            'output': output if output else 'No output available',
+                            'details': error_msg  # This is what collect_failed_tests looks for
+                        }
+                        
+                        results[region]['test_cases'].append(test_case)
+                        results[region]['status'] = 'failed'
+                        
+                        # Update overall status
                         results['overall_status']['status'] = 'failed'
                         results['overall_status']['error'] = error_msg
                         continue
