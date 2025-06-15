@@ -722,6 +722,10 @@ class TestRunner:
                             # Store the output for validation
                             if output:
                                 console.print("[blue]Debug: Test block output received[/blue]")
+                                # Get expected values from step
+                                expected_contains = step.get('expected_output_contains', [])
+                                expected_exact = step.get('expected_output_exact')
+                                
                                 # Validate the output directly without running again
                                 passed = True
                                 if expected_contains:
