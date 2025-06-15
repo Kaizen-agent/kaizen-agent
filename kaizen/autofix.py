@@ -163,7 +163,7 @@ Original Code:
 {original_code}
 
 Test Failures:
-{chr(10).join(f'  - test_name: {failure["test_name"]}{chr(10)}    error_message: {failure["error_message"]}' for failure in failure_data)}
+{chr(10).join(f'  - test_name: {failure.get("test_name", "")}{chr(10)}    error_message: {failure.get("error_message", "")}' for failure in failure_data)}
 
 Requirements:
 1. Fix all test failures while maintaining the agent's core functionality
