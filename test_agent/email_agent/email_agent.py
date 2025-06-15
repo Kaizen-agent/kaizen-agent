@@ -21,47 +21,46 @@ class EmailAgent:
             # Test the configuration by generating content
             # This helps catch issues like invalid API keys or network problems early
             self.model.generate_content("Test")
-            # Removed debug print: print("Debug: EmailAgent: Successfully configured Google API")
         except Exception as e:
             raise ValueError(f"Failed to configure Google API: {str(e)}")
 
     def improve_email(self, draft: str) -> str:
         """
-        Improve the given email draft using Gemini's API.
+        Improve the given email draft using Gemini's API or provide a specific response for non-email inputs.
         
         Args:
-            draft (str): The original email draft to improve
+            draft (str): The original email draft to improve or a general text input.
             
         Returns:
-            str: The improved email draft
+            str: The improved email draft, or "I'm sorry, I can't help with that." if the input is not an email draft or an issue prevents improvement.
         """
-        # Modified to raise a ValueError for empty/whitespace drafts, making the method's
-        # behavior more consistent with typical API functions (raising errors for invalid input).
-        # The CLI interface handles this case before calling this method.
+        # Rule: "if the input is not a valid email, the output should be 'I'm sorry, I can't help with that.'"
+        # An empty or whitespace-only draft is not considered a valid email draft for improvement.
         if not draft or not draft.strip():
-            raise ValueError("Email draft cannot be empty or contain only whitespace.")
+            return "I'm sorry, I can't help with that."
             
-        # Add safety instructions to the prompt
-        prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
-        Focus on:
-        - Professional tone and language
-        - Clear and concise communication
-        - Proper email etiquette
-        - Maintaining the original message's intent
+        prompt = f"""You are an AI assistant specialized in improving email drafts.
         
-        Here's the draft:
+        Analyze the following text.
+        
+        IF the text provided is clearly an email draft (e.g., it contains salutations like "Hi", "Dear", "Hello", or mentions meetings, projects, scheduling, or typical professional correspondence elements), THEN:
+        Improve it to be more professional, clear, and effective while maintaining its original intent.
+        Your response MUST ONLY contain the improved email draft, with absolutely no additional text, remarks, introductory phrases like "Here is the improved email:", or conversational filler. Start directly with the improved email content.
+        
+        IF the text provided is NOT an email draft (e.g., it's a question about a hotel, a random sentence, a list of items, or content completely unrelated to an email), THEN:
+        Your response MUST ONLY be the exact phrase: "I'm sorry, I can't help with that." Do not add any punctuation or extra characters.
+        
+        Here's the text to analyze and process:
         
         {draft}
-        
-        Improved version:"""
+        """
 
         try:
-            # Removed debug print: print(f"Debug: Prompt: {prompt}")
             response = self.model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
-                    temperature=0.7,
-                    max_output_tokens=2048, # Increased token limit for longer emails
+                    temperature=0.2, # Lowered for more deterministic output and adherence to instructions
+                    max_output_tokens=2048, 
                     top_p=0.8,
                     top_k=40,
                 ),
@@ -84,41 +83,56 @@ class EmailAgent:
                     }
                 ]
             )
-            # Removed debug print: print(f"Debug: Response: {response}")
             
-            # Check for safety issues in the prompt feedback
+            # Check for safety issues in the prompt feedback (input blocking)
             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
                 if hasattr(response.prompt_feedback, 'block_reason'):
-                    raise ValueError(f"Content was blocked due to: {response.prompt_feedback.block_reason}")
+                    return "I'm sorry, I can't help with that."
             
             # Ensure candidates were generated
             if not hasattr(response, 'candidates') or not response.candidates:
-                raise ValueError("No response candidates were generated from the model.")
+                return "I'm sorry, I can't help with that."
             
-            # Get the first candidate
             candidate = response.candidates[0]
             
             # Check for finish reasons indicating issues
             if hasattr(candidate, 'finish_reason'):
                 if candidate.finish_reason == "MAX_TOKENS":
+                    # This is an operational error, not related to input validity, re-raise as error for agent.
                     raise ValueError("Response was cut off due to token limit. Please try with a shorter email draft or adjust max_output_tokens.")
                 elif candidate.finish_reason == "BLOCKED":
-                    raise ValueError("Content was blocked by safety filters during generation.")
+                    # If the generated content was blocked by safety filters, then the agent cannot help with that.
+                    return "I'm sorry, I can't help with that."
             
             # Attempt to extract the text content from the response
-            # Modified this section for robustness to rely directly on parts[0].text
             if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
                 if not candidate.content.parts:
-                    raise ValueError("Model response contained no content parts.")
-                # Access the text from the first part
-                return candidate.content.parts[0].text.strip()
+                    return "I'm sorry, I can't help with that."
+                
+                generated_text = candidate.content.parts[0].text.strip()
+                
+                # Double-check if the model returned the specific "cannot help" phrase
+                # This ensures robustness against minor prompt deviations or if the model's classification
+                # results in this specific output.
+                if generated_text.strip().lower() == "i'm sorry, i can't help with that.":
+                    return "I'm sorry, I can't help with that."
+                
+                return generated_text
             
-            # If text could not be extracted, raise an error
-            raise ValueError("Could not extract text from the model's response.")
+            # If text could not be extracted in the expected format (e.g., content parts missing),
+            # it means the agent cannot provide the improved email.
+            return "I'm sorry, I can't help with that."
             
+        except ValueError as e:
+            # Re-raise if it's the specific token limit error, as this indicates an operational constraint.
+            if "token limit" in str(e):
+                raise e
+            # For any other ValueError during processing, treat as "cannot help".
+            return "I'm sorry, I can't help with that."
         except Exception as e:
-            # Catch any other exceptions during content generation and re-raise as ValueError
-            raise ValueError(f"Failed to generate improved email: {str(e)}")
+            # Catch any other general exceptions (e.g., network issues, unexpected API errors).
+            # If a problem occurs during generation, the agent cannot fulfill the request.
+            return "I'm sorry, I can't help with that."
 # kaizen:end:email_agent
 
 # kaizen:start:cli_interface
