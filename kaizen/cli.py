@@ -145,9 +145,12 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
             test_cases = result.get('test_cases', [])
             for test_case in test_cases:
                 status = "✅ PASS" if test_case.get('status') == 'passed' else "❌ FAIL"
-                details = test_case.get('details', '')
-                if len(details) > 50:
-                    details = details[:47] + "..."
+                try:
+                    details = str(test_case.get('details', ''))
+                    if len(details) > 50:
+                        details = details[:47] + "..."
+                except Exception:
+                    details = "Error displaying details"
                 click.echo(f"| {test_case.get('name', 'Unknown')} | {region} | {status} | {details} |")
         
         # Print failed tests details if any
