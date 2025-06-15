@@ -627,154 +627,139 @@ class TestRunner:
                             step_file_path = str(file_path)
                             console.print(f"[blue]Debug: Using main test file path: {step_file_path}[/blue]")
                         
-                        # Create a module spec for the file
+                        # Create a new module spec
                         module_name = os.path.splitext(os.path.basename(step_file_path))[0]
                         package_name = os.path.basename(os.path.dirname(step_file_path))
                         
-                        # Import the module using the full package path
-                        try:
-                            # First, ensure the package directory has an __init__.py
-                            package_dir = os.path.dirname(step_file_path)
-                            init_file = os.path.join(package_dir, '__init__.py')
-                            if not os.path.exists(init_file):
-                                with open(init_file, 'w') as f:
-                                    f.write(f'"""\n{package_name} package.\n"""\n')
-                            
-                            # Create a new module spec
-                            spec = importlib.util.spec_from_file_location(f"{package_name}.{module_name}", step_file_path)
-                            if spec is None:
-                                raise ImportError(f"Could not create module spec for {step_file_path}")
-                            
-                            # Create and execute the module
-                            module = importlib.util.module_from_spec(spec)
-                            sys.modules[spec.name] = module
-                            module.__file__ = step_file_path
-                            module.__package__ = package_name
-                            
-                            # Execute the module's code
-                            spec.loader.exec_module(module)
-                            
-                            # Get the class from the module
-                            class_name = None
-                            for name, obj in module.__dict__.items():
-                                if isinstance(obj, type) and hasattr(obj, 'run'):
-                                    class_name = name
-                                    break
-                                    
-                            if class_name is None:
-                                raise ImportError(f"Could not find class with run method in {step_file_path}")
-                                
-                            # Get the class and call its run method
-                            cls = getattr(module, class_name)
-                            if isinstance(cls.run, staticmethod):
-                                output = str(cls.run(step.get('input', {}).get('input', '')))
-                            else:
-                                instance = cls()
-                                output = str(instance.run(step.get('input', {}).get('input', '')))
-                            
-                        except Exception as e:
-                            error_msg = f"Error importing module: {str(e)}"
-                            logger.logger.error(error_msg)
-                            results['overall_status']['status'] = 'failed'
-                            results['overall_status']['error'] = error_msg
-                            return results
+                        # Create and execute the module
+                        spec = importlib.util.spec_from_file_location(f"{package_name}.{module_name}", step_file_path)
+                        if spec is None:
+                            raise ImportError(f"Could not create module spec for {step_file_path}")
                         
-                        console.print(f"[blue]Debug: Test block output: {output}[/blue]")
+                        # Create and execute the module
+                        module = importlib.util.module_from_spec(spec)
+                        sys.modules[spec.name] = module
+                        module.__file__ = step_file_path
+                        module.__package__ = package_name
+                        
+                        # Execute the module's code
+                        spec.loader.exec_module(module)
+                        
+                        # Get the class from the module
+                        class_name = None
+                        for name, obj in module.__dict__.items():
+                            if isinstance(obj, type) and hasattr(obj, 'run'):
+                                class_name = name
+                                break
+                                
+                        if class_name is None:
+                            raise ImportError(f"Could not find class with run method in {step_file_path}")
+                            
+                        # Get the class and call its run method
+                        cls = getattr(module, class_name)
+                        if isinstance(cls.run, staticmethod):
+                            output = str(cls.run(step.get('input', {}).get('input', '')))
+                        else:
+                            instance = cls()
+                            output = str(instance.run(step.get('input', {}).get('input', '')))
+                        
+                    except Exception as e:
+                        error_msg = f"Error importing module: {str(e)}"
+                        logger.logger.error(error_msg)
+                        results['overall_status']['status'] = 'failed'
+                        results['overall_status']['error'] = error_msg
+                        return results
                     
-                    # Use run_step to properly validate all test criteria
-                    passed = self.run_step(step, agent_type, logger)
-                    
-                    # Store results by region
-                    region = step.get('input', {}).get('region', 'default')
-                    if region not in results:
-                        results[region] = {
-                            'test_cases': [],
-                            'status': 'passed'  # Initialize status for each region
-                        }
-                    
-                    # If we have an output and evaluator, evaluate it immediately
-                    evaluation_result = None
-                    if output and evaluator and 'evaluation' in self.test_config:
-                        try:
-                            # Create a temporary results structure for evaluation
-                            temp_results = {
-                                region: {
-                                    'test_cases': [{
-                                        'name': step_name,
-                                        'input': step.get('input', {}),
-                                        'output': output,
-                                        'details': logger.get_last_step_details()
-                                    }]
-                                }
+                    console.print(f"[blue]Debug: Test block output: {output}[/blue]")
+                
+                # Use run_step to properly validate all test criteria
+                passed = self.run_step(step, agent_type, logger)
+                
+                # Store results by region
+                region = step.get('input', {}).get('region', 'default')
+                if region not in results:
+                    results[region] = {
+                        'test_cases': [],
+                        'status': 'passed'  # Initialize status for each region
+                    }
+                
+                # If we have an output and evaluator, evaluate it immediately
+                evaluation_result = None
+                if output and evaluator and 'evaluation' in self.test_config:
+                    try:
+                        # Create a temporary results structure for evaluation
+                        temp_results = {
+                            region: {
+                                'test_cases': [{
+                                    'name': step_name,
+                                    'input': step.get('input', {}),
+                                    'output': output,
+                                    'details': logger.get_last_step_details()
+                                }]
                             }
-                            
-                            # Run evaluation
-                            evaluation_result = evaluator.evaluate(
-                                results=temp_results,
-                                criteria=self.test_config['evaluation'].get('criteria', [])
-                            )
-                            
-                            # Update passed status based on evaluation
-                            if isinstance(evaluation_result, dict):
-                                if evaluation_result.get('status') == 'failed':
-                                    passed = False
-                                    all_steps_passed = False
-                                    results[region]['status'] = 'failed'  # Update region status
-                            elif isinstance(evaluation_result, str):
-                                # If evaluation_result is a string, treat it as an error
+                        }
+                        
+                        # Run evaluation
+                        evaluation_result = evaluator.evaluate(
+                            results=temp_results,
+                            criteria=self.test_config['evaluation'].get('criteria', [])
+                        )
+                        
+                        # Update passed status based on evaluation
+                        if isinstance(evaluation_result, dict):
+                            if evaluation_result.get('status') == 'failed':
                                 passed = False
                                 all_steps_passed = False
                                 results[region]['status'] = 'failed'  # Update region status
-                                evaluation_result = {
-                                    'status': 'error',
-                                    'error': evaluation_result
-                                }
-                                
-                        except Exception as e:
-                            logger.logger.error(f"Error during output evaluation: {str(e)}")
+                        elif isinstance(evaluation_result, str):
+                            # If evaluation_result is a string, treat it as an error
+                            passed = False
+                            all_steps_passed = False
+                            results[region]['status'] = 'failed'  # Update region status
                             evaluation_result = {
                                 'status': 'error',
-                                'error': str(e)
+                                'error': evaluation_result
                             }
-                            results[region]['status'] = 'failed'  # Update region status
-                    
-                    # Add test case result
-                    test_case = {
-                        'name': step_name,
-                        'input': step.get('input', {}),
-                        'status': 'passed' if passed else 'failed',
-                        'output': output,
-                        'details': logger.get_last_step_details()
-                    }
-                    
-                    # Add evaluation result if available
-                    if evaluation_result:
-                        test_case['evaluation'] = evaluation_result
-                    
-                    results[region]['test_cases'].append(test_case)
-                    
-                    # Update region status if test case failed
-                    if not passed:
-                        results[region]['status'] = 'failed'
+                            
+                    except Exception as e:
+                        logger.logger.error(f"Error during output evaluation: {str(e)}")
+                        evaluation_result = {
+                            'status': 'error',
+                            'error': str(e)
+                        }
+                        results[region]['status'] = 'failed'  # Update region status
                 
-                # Update overall status
-                results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
+                # Add test case result
+                test_case = {
+                    'name': step_name,
+                    'input': step.get('input', {}),
+                    'status': 'passed' if passed else 'failed',
+                    'output': output,
+                    'details': logger.get_last_step_details()
+                }
                 
-                if not all_steps_passed:
-                    logger.logger.error("Test failed due to failed steps or evaluations")
-                else:
-                    logger.logger.info("All tests passed")
+                # Add evaluation result if available
+                if evaluation_result:
+                    test_case['evaluation'] = evaluation_result
                 
-                # Save test results
-                logger.save_results()
+                results[region]['test_cases'].append(test_case)
                 
-                return results
-                
-            finally:
-                # Clean up: remove the added path
-                if parent_dir in sys.path:
-                    sys.path.remove(parent_dir)
-                    console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
+                # Update region status if test case failed
+                if not passed:
+                    results[region]['status'] = 'failed'
+            
+            # Update overall status
+            results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
+            
+            if not all_steps_passed:
+                logger.logger.error("Test failed due to failed steps or evaluations")
+            else:
+                logger.logger.info("All tests passed")
+            
+            # Save test results
+            logger.save_results()
+            
+            return results
             
         except Exception as e:
             error_msg = f"Error running tests: {str(e)}"
