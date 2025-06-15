@@ -356,18 +356,18 @@ def _validate_and_improve_code(code: str, original_code: str) -> str:
             
             # Create prompt for fixing syntax
             prompt = f"""The following Python code has invalid syntax. Please fix it to be valid Python code that can be executed.
-The code should maintain the same functionality as the original code.
+The code should maintain the improvements and fixes from the invalid code while ensuring it is syntactically correct.
 
-Original Code:
+Original Code (for reference only, do not revert to this):
 {original_code}
 
-Invalid Code:
+Invalid Code (fix this while maintaining its improvements):
 {code}
 
 Requirements:
 1. Return only valid Python code, no explanations
-2. Maintain the same functionality as the original code
-3. Fix any syntax errors
+2. Maintain all improvements and fixes from the invalid code
+3. Fix any syntax errors while preserving the intended functionality
 4. Ensure all imports are at the top of the file
 5. Ensure proper indentation
 6. Ensure all brackets and parentheses are properly closed
@@ -377,7 +377,8 @@ Requirements:
 10. Ensure all functions and classes are properly defined
 11. DO NOT include any markdown formatting or code block markers
 12. DO NOT include any explanations or comments about the code
-13. Return ONLY the fixed code
+13. DO NOT revert to the original code - fix the invalid code instead
+14. Return ONLY the fixed code
 
 Return only the fixed code, no explanations or additional text."""
             
