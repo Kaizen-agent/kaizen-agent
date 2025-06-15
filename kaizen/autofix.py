@@ -517,7 +517,7 @@ def _validate_and_improve_code(code: str, original_code: str) -> str:
         logger.error(f"All attempts to fix code failed: {str(e)}")
         raise
 
-def _enhance_pr_body(failure_data: List[Dict], fixed_tests: List[Dict], test_results: Dict, test_config: Dict) -> str:
+def _enhance_pr_body(failure_data: List[Dict], fixed_tests: List[Dict], test_results: Dict, test_config: Dict, all_test_attempts: List[Dict]) -> str:
     """
     Enhance the PR body with comprehensive test results, analysis, and fix details.
     
@@ -526,6 +526,7 @@ def _enhance_pr_body(failure_data: List[Dict], fixed_tests: List[Dict], test_res
         fixed_tests: List of fixed tests
         test_results: Complete test results
         test_config: Test configuration data
+        all_test_attempts: List of all test attempts
         
     Returns:
         str: Enhanced PR body with detailed information
@@ -541,19 +542,96 @@ def _enhance_pr_body(failure_data: List[Dict], fixed_tests: List[Dict], test_res
 - **Fixed Tests:** {len(fixed_tests)}
 - **Total Tests:** {sum(len(result.get('test_cases', [])) for result in test_results.values()) if isinstance(test_results, dict) else 0}
 - **Test Configuration:** {test_config.get('name', 'Unnamed Test Suite')}
+- **Total Attempts:** {len(all_test_attempts)}
 
-## Test Results
+## Test Results Summary
 {format_test_results_table(test_results) if isinstance(test_results, dict) else "Test results not available"}
 
-{analyze_failures(failure_data)}
-
-## Fix Details
-### Fixed Tests
-{chr(10).join(f'- {test["test_name"]} ({test["region"]})' for test in fixed_tests)}
-
-### Original Failures
-{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failure in failure_data)}
-
+## All Test Attempts
+"""
+    
+    # Add details for each attempt
+    for attempt in all_test_attempts:
+        attempt_num = attempt['attempt']
+        attempt_results = attempt['results']
+        
+        pr_body += f"\n### Attempt {attempt_num}\n"
+        
+        # Add attempt summary
+        if isinstance(attempt_results, dict):
+            total_tests = sum(len(result.get('test_cases', [])) for result in attempt_results.values() 
+                            if isinstance(result, dict) and 'test_cases' in result)
+            passed_tests = sum(len([tc for tc in result.get('test_cases', []) 
+                                  if tc.get('status') == 'passed'])
+                             for result in attempt_results.values()
+                             if isinstance(result, dict) and 'test_cases' in result)
+            
+            pr_body += f"- **Total Tests:** {total_tests}\n"
+            pr_body += f"- **Passed Tests:** {passed_tests}\n"
+            pr_body += f"- **Pass Rate:** {(passed_tests/total_tests*100 if total_tests > 0 else 0):.1f}%\n"
+        
+        # Add detailed test results for each region
+        if isinstance(attempt_results, dict):
+            for region, result in attempt_results.items():
+                if isinstance(result, str) or region in ('_status', 'overall_status'):
+                    continue
+                    
+                pr_body += f"\n#### Region: {region}\n"
+                test_cases = result.get('test_cases', [])
+                for test_case in test_cases:
+                    pr_body += f"\n##### Test: {test_case.get('name', 'Unknown')}\n"
+                    pr_body += f"- **Status:** {'✅ PASS' if test_case.get('status') == 'passed' else '❌ FAIL'}\n"
+                    
+                    # Add input information if available
+                    if 'input' in test_case:
+                        pr_body += f"- **Input:**\n```\n{json.dumps(test_case['input'], indent=2)}\n```\n"
+                    
+                    # Add output information if available
+                    if 'output' in test_case:
+                        pr_body += f"- **Output:**\n```\n{test_case['output']}\n```\n"
+                    
+                    # Add evaluation details if available
+                    if 'evaluation' in test_case:
+                        evaluation = test_case['evaluation']
+                        pr_body += "- **Evaluation:**\n"
+                        if isinstance(evaluation, dict):
+                            pr_body += f"  - **Status:** {evaluation.get('status', 'unknown')}\n"
+                            if 'overall_score' in evaluation:
+                                pr_body += f"  - **Score:** {evaluation['overall_score']}\n"
+                            if 'criteria' in evaluation:
+                                pr_body += "  - **Criteria Results:**\n"
+                                for criterion, result in evaluation['criteria'].items():
+                                    pr_body += f"    - {criterion}: {result.get('status', 'unknown')} (Score: {result.get('score', 'N/A')})\n"
+                                    if 'feedback' in result:
+                                        pr_body += f"      - Feedback: {result['feedback']}\n"
+                        else:
+                            pr_body += f"  - {str(evaluation)}\n"
+                    
+                    # Add error details if available
+                    if 'details' in test_case and test_case['details']:
+                        pr_body += f"- **Error Details:**\n```\n{test_case['details']}\n```\n"
+                    
+                    pr_body += "\n---\n"
+    
+    # Add failure analysis
+    pr_body += f"\n{analyze_failures(failure_data)}"
+    
+    # Add fix details
+    pr_body += "\n## Fix Details\n"
+    pr_body += "### Fixed Tests\n"
+    for test in fixed_tests:
+        pr_body += f"- {test['test_name']} ({test['region']})\n"
+        if 'fix_description' in test:
+            pr_body += f"  - {test['fix_description']}\n"
+    
+    pr_body += "\n### Original Failures\n"
+    for failure in failure_data:
+        pr_body += f"- {failure['test_name']}: {failure['error_message']}\n"
+        if 'output' in failure:
+            pr_body += f"  - Output: {failure['output']}\n"
+    
+    # Add code changes section
+    pr_body += """
 ## Code Changes
 The following changes were made to fix the failing tests:
 
@@ -563,8 +641,11 @@ The following changes were made to fix the failing tests:
    - Enhanced error messages for better debugging
 
 2. Test-Specific Fixes:
-{chr(10).join(f'   - {test["test_name"]}: {test.get("fix_description", "Fixed test failure")}' for test in fixed_tests)}
-
+"""
+    for test in fixed_tests:
+        pr_body += f"   - {test['test_name']}: {test.get('fix_description', 'Fixed test failure')}\n"
+    
+    pr_body += """
 3. General Improvements:
    - Enhanced code robustness
    - Improved error handling
@@ -573,8 +654,13 @@ The following changes were made to fix the failing tests:
 
 ## Verification
 All fixed tests have been verified to pass in the following environments:
-{chr(10).join(f'- {region}' for region in (test_results or {}).keys()) if isinstance(test_results, dict) else "- No environments available"}
-
+"""
+    if isinstance(test_results, dict):
+        for region in test_results.keys():
+            if not isinstance(region, str) or region not in ('_status', 'overall_status'):
+                pr_body += f"- {region}\n"
+    
+    pr_body += """
 ## Next Steps
 1. Review the changes for any potential side effects
 2. Verify the fixes in different environments
@@ -646,6 +732,9 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         best_fixed_tests = []
         best_fixed_code = None
         
+        # Track all test attempts
+        all_test_attempts = []
+        
         for attempt in range(max_retries):
             logger.info(f"Auto-fix attempt {attempt + 1}/{max_retries}")
             
@@ -690,6 +779,13 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             logger.info(f"Running tests for {resolved_test_file_path}")
             test_results = test_runner.run_tests(Path(resolved_test_file_path))
             logger.info(f"Test results: {test_results}")
+            
+            # Store this attempt's results
+            all_test_attempts.append({
+                'attempt': attempt + 1,
+                'code': fixed_code,
+                'results': test_results
+            })
             
             # Check if test results indicate an error
             if isinstance(test_results, dict) and test_results.get('status') == 'error':
@@ -824,7 +920,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             logger.info(f"Test config: {test_config}")
             
             try:
-                enhanced_pr_body = _enhance_pr_body(failure_data, fixed_tests, test_results, test_config)
+                enhanced_pr_body = _enhance_pr_body(failure_data, fixed_tests, test_results, test_config, all_test_attempts)
                 logger.info("Successfully enhanced PR body")
             except Exception as e:
                 logger.error(f"Error enhancing PR body: {str(e)}")
