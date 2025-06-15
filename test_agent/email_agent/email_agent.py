@@ -21,7 +21,6 @@ class EmailAgent:
             # Test the configuration by generating content
             # This helps catch issues like invalid API keys or network problems early
             self.model.generate_content("Test")
-            # Removed debug print: print("Debug: EmailAgent: Successfully configured Google API")
         except Exception as e:
             raise ValueError(f"Failed to configure Google API: {str(e)}")
 
@@ -35,14 +34,74 @@ class EmailAgent:
         Returns:
             str: The improved email draft
         """
-        # Modified to raise a ValueError for empty/whitespace drafts, making the method's
-        # behavior more consistent with typical API functions (raising errors for invalid input).
-        # The CLI interface handles this case before calling this method.
-        if not draft or not draft.strip():
-            raise ValueError("Email draft cannot be empty or contain only whitespace.")
+        # --- Input Classification ---
+        try:
+            classification_prompt = f"""Classify the following text as either "EMAIL_DRAFT" or "NOT_EMAIL". Respond with ONLY one of these two phrases.
+
+            Text:
+            {draft}
+
+            Classification:"""
+
+            classification_response = self.model.generate_content(
+                classification_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.0,
+                    max_output_tokens=20,
+                ),
+                safety_settings=[
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_NONE"
+                    }
+                ]
+            )
+
+            # Check for safety issues in the prompt feedback for classification
+            if hasattr(classification_response, 'prompt_feedback') and classification_response.prompt_feedback:
+                if hasattr(classification_response.prompt_feedback, 'block_reason'):
+                    return "I'm sorry, I can't help with that."
             
-        # Add safety instructions to the prompt
-        prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
+            if not hasattr(classification_response, 'candidates') or not classification_response.candidates:
+                return "I'm sorry, I can't help with that."
+
+            classification_candidate = classification_response.candidates[0]
+            if hasattr(classification_candidate, 'finish_reason') and classification_candidate.finish_reason == "BLOCKED":
+                return "I'm sorry, I can't help with that."
+
+            if hasattr(classification_candidate, 'content') and hasattr(classification_candidate.content, 'parts'):
+                if not classification_candidate.content.parts:
+                    return "I'm sorry, I can't help with that."
+                classification_result = classification_candidate.content.parts[0].text.strip().upper()
+            else:
+                classification_result = "" # Fallback if content not found or structured unexpectedly
+
+            if "NOT_EMAIL" in classification_result:
+                return "I'm sorry, I can't help with that."
+            elif "EMAIL_DRAFT" not in classification_result: # Handles garbled, empty, or unexpected classification responses
+                return "I'm sorry, I can't help with that."
+
+        except Exception as e:
+            # Any error during classification (e.g., API issues) should result in the specific message
+            return "I'm sorry, I can't help with that."
+        # --- End Input Classification ---
+
+        # The prompt below is for the actual email improvement
+        improvement_prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
+        Your response must *only* contain the improved email draft itself. Do not include any conversational text, introductions like 'Here's the improved email:', headings (e.g., 'Subject:', 'Body:'), or conclusions (e.g., 'I hope this helps!' or signatures like 'Sincerely,'). Just the plain, improved email content.
+
         Focus on:
         - Professional tone and language
         - Clear and concise communication
@@ -56,9 +115,8 @@ class EmailAgent:
         Improved version:"""
 
         try:
-            # Removed debug print: print(f"Debug: Prompt: {prompt}")
             response = self.model.generate_content(
-                prompt,
+                improvement_prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.7,
                     max_output_tokens=2048, # Increased token limit for longer emails
@@ -84,7 +142,6 @@ class EmailAgent:
                     }
                 ]
             )
-            # Removed debug print: print(f"Debug: Response: {response}")
             
             # Check for safety issues in the prompt feedback
             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
@@ -106,7 +163,6 @@ class EmailAgent:
                     raise ValueError("Content was blocked by safety filters during generation.")
             
             # Attempt to extract the text content from the response
-            # Modified this section for robustness to rely directly on parts[0].text
             if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
                 if not candidate.content.parts:
                     raise ValueError("Model response contained no content parts.")
@@ -151,7 +207,6 @@ def main():
         if draft is None:
             # If no --draft or --file is provided, read from stdin
             print("Please enter your email draft (press Ctrl+D or Ctrl+Z on Windows when finished):")
-            # Changed to use sys.stdin.read() for more robust input handling
             draft = sys.stdin.read()
 
         if not draft.strip():
