@@ -663,19 +663,42 @@ class TestRunner:
                             # Create a new module for execution
                             module_name = os.path.splitext(os.path.basename(step_file_path))[0]
                             package_name = os.path.basename(os.path.dirname(step_file_path))
-                            console.print(f"[blue]Debug: Creating module {module_name} in package {package_name}[/blue]")
+                            parent_package = os.path.basename(os.path.dirname(os.path.dirname(step_file_path)))
+                            console.print(f"[blue]Debug: Creating module {module_name} in package {package_name} (parent: {parent_package})[/blue]")
+                            
+                            # Add parent directory to Python path if not already there
+                            parent_dir = os.path.dirname(os.path.dirname(step_file_path))
+                            if parent_dir not in sys.path:
+                                sys.path.insert(0, parent_dir)
+                                console.print(f"[blue]Debug: Added parent directory {parent_dir} to Python path[/blue]")
                             
                             # Create module spec and module
-                            spec = importlib.util.spec_from_file_location(f"{package_name}.{module_name}", step_file_path)
+                            spec = importlib.util.spec_from_file_location(f"{parent_package}.{package_name}.{module_name}", step_file_path)
                             if spec is None:
                                 raise ImportError(f"Could not create module spec for {step_file_path}")
                             
                             module = importlib.util.module_from_spec(spec)
                             sys.modules[spec.name] = module
                             
-                            # Set up the module's namespace
+                            # Set up the module's namespace with proper package structure
                             module.__file__ = step_file_path
-                            module.__package__ = package_name
+                            module.__package__ = f"{parent_package}.{package_name}"
+                            module.__name__ = f"{parent_package}.{package_name}.{module_name}"
+                            
+                            # Create parent package modules if they don't exist
+                            if parent_package not in sys.modules:
+                                parent_spec = importlib.util.find_spec(parent_package)
+                                if parent_spec:
+                                    parent_module = importlib.util.module_from_spec(parent_spec)
+                                    sys.modules[parent_package] = parent_module
+                                    console.print(f"[blue]Debug: Created parent package module {parent_package}[/blue]")
+                            
+                            if f"{parent_package}.{package_name}" not in sys.modules:
+                                package_spec = importlib.util.find_spec(f"{parent_package}.{package_name}")
+                                if package_spec:
+                                    package_module = importlib.util.module_from_spec(package_spec)
+                                    sys.modules[f"{parent_package}.{package_name}"] = package_module
+                                    console.print(f"[blue]Debug: Created package module {parent_package}.{package_name}[/blue]")
                             
                             # Now handle the imports
                             import_lines = []
@@ -683,10 +706,8 @@ class TestRunner:
                                 if line.strip().startswith('from ') or line.strip().startswith('import '):
                                     # Convert relative imports to absolute imports
                                     if line.strip().startswith('from .'):
-                                        # Get the package name from the file path
-                                        package_name = os.path.basename(os.path.dirname(step_file_path))
                                         # Replace relative import with absolute import
-                                        line = line.replace('from .', f'from {package_name}.')
+                                        line = line.replace('from .', f'from {parent_package}.{package_name}.')
                                     import_lines.append(line)
                                 elif line.strip() and not line.strip().startswith('#'):
                                     break
@@ -698,31 +719,16 @@ class TestRunner:
                                 # First, execute the code block to define the class
                                 console.print("[blue]Debug: Executing code block first to define the class[/blue]")
                                 exec(code_block, module.__dict__)
-                                console.print(f"[blue]Debug: Module namespace after code block execution: {list(module.__dict__.keys())}[/blue]")
+                                console.print(f"[blue]Debug: Module namespace after code block execution: {[k for k in module.__dict__.keys() if not k.startswith('_')]}[/blue]")
                                 
                                 # Then execute the imports
                                 console.print("[blue]Debug: Now executing imports[/blue]")
                                 try:
-                                    # Try to import the modules directly first
-                                    package_name = os.path.basename(os.path.dirname(step_file_path))
-                                    console.print(f"[blue]Debug: Importing modules for package {package_name}[/blue]")
-                                    
-                                    # Ensure the package is in sys.modules
-                                    if package_name not in sys.modules:
-                                        console.print(f"[blue]Debug: Creating package module for {package_name}[/blue]")
-                                        package_spec = importlib.util.find_spec(package_name)
-                                        if package_spec:
-                                            package_module = importlib.util.module_from_spec(package_spec)
-                                            sys.modules[package_name] = package_module
-                                            console.print(f"[blue]Debug: Created package module {package_name}[/blue]")
-                                        else:
-                                            console.print(f"[red]Error: Could not find spec for package {package_name}[/red]")
-                                    
                                     # Import the required modules
                                     console.print(f"[blue]Debug: Importing prompt module[/blue]")
-                                    prompt_module = importlib.import_module(f"{package_name}.prompt")
+                                    prompt_module = importlib.import_module(f"{parent_package}.{package_name}.prompt")
                                     console.print(f"[blue]Debug: Importing utils module[/blue]")
-                                    utils_module = importlib.import_module(f"{package_name}.utils")
+                                    utils_module = importlib.import_module(f"{parent_package}.{package_name}.utils")
                                     
                                     # Add them to the module namespace
                                     console.print(f"[blue]Debug: Adding functions to module namespace[/blue]")
@@ -732,13 +738,15 @@ class TestRunner:
                                     console.print(f"[blue]Debug: Successfully imported modules[/blue]")
                                 except ImportError as e:
                                     console.print(f"[red]Error importing modules: {str(e)}[/red]")
-                                    console.print(f"[blue]Debug: sys.modules keys: {list(sys.modules.keys())}[/blue]")
+                                    # Only log relevant modules in sys.modules
+                                    relevant_modules = [k for k in sys.modules.keys() if k.startswith(parent_package)]
+                                    console.print(f"[blue]Debug: Relevant modules in sys.modules: {relevant_modules}[/blue]")
                                     console.print(f"[blue]Debug: sys.path: {sys.path}[/blue]")
                                     # Fall back to executing the import code
                                     console.print("[blue]Debug: Falling back to executing import code[/blue]")
                                     exec(import_code, module.__dict__)
                                 
-                                console.print(f"[blue]Debug: Module namespace after imports: {list(module.__dict__.keys())}[/blue]")
+                                console.print(f"[blue]Debug: Module namespace after imports: {[k for k in module.__dict__.keys() if not k.startswith('_')]}[/blue]")
                             
                             # Get the class from the module
                             console.print("[blue]Debug: Looking for class with run method in module namespace[/blue]")
@@ -771,7 +779,7 @@ class TestRunner:
                             console.print(f"[blue]Debug: Run method output: {output}[/blue]")
                             
                             # Store the module in sys.modules to prevent it from being garbage collected
-                            module_name = f"{package_name}.{os.path.splitext(os.path.basename(step_file_path))[0]}"
+                            module_name = f"{parent_package}.{package_name}.{os.path.splitext(os.path.basename(step_file_path))[0]}"
                             sys.modules[module_name] = module
                             console.print(f"[blue]Debug: Stored module {module_name} in sys.modules[/blue]")
                             
