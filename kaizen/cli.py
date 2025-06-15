@@ -131,7 +131,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
         # Print overall status
         overall_status = results.get('overall_status', 'unknown')
         status_emoji = "✅" if overall_status == 'passed' else "❌"
-        click.echo(f"\nOverall Status: {status_emoji} {overall_status.upper()}")
+        click.echo(f"\nOverall Status: {status_emoji} {overall_status.get('status', 'unknown').upper()}")
         
         # Print test results table
         click.echo("\nTest Results Table:")
@@ -184,7 +184,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
             f.write(f"- Config: {config_path}\n\n")
             
             # Write overall status
-            f.write(f"Overall Status: {overall_status.upper()}\n\n")
+            f.write(f"Overall Status: {overall_status.get('status', 'unknown').upper()}\n\n")
             
             # Write detailed test results
             f.write("Detailed Test Results:\n")
