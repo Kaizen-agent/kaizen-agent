@@ -6,6 +6,8 @@ import sys
 
 # kaizen:start:email_agent
 class EmailAgent:
+    REFUSAL_MESSAGE = "I'm sorry, I can't help with that." # Define refusal message as a class constant
+
     def __init__(self, api_key: Optional[str] = None):
         """Initialize the EmailAgent with Google API key."""
         load_dotenv()  # Load environment variables from .env file
@@ -21,9 +23,9 @@ class EmailAgent:
             # Test the configuration by generating content
             # This helps catch issues like invalid API keys or network problems early
             self.model.generate_content("Test")
-            # Removed debug print: print("Debug: EmailAgent: Successfully configured Google API")
         except Exception as e:
-            raise ValueError(f"Failed to configure Google API: {str(e)}")
+            # More specific error message for API configuration issues
+            raise ValueError(f"Failed to configure Google API or test model. Check API key and network connection: {str(e)}")
 
     def improve_email(self, draft: str) -> str:
         """
@@ -33,35 +35,37 @@ class EmailAgent:
             draft (str): The original email draft to improve
             
         Returns:
-            str: The improved email draft
+            str: The improved email draft or a refusal message if the input is not a valid email draft.
         """
-        # Modified to raise a ValueError for empty/whitespace drafts, making the method's
-        # behavior more consistent with typical API functions (raising errors for invalid input).
-        # The CLI interface handles this case before calling this method.
         if not draft or not draft.strip():
+            # For empty or whitespace-only drafts, raise an error as it's not a semantically valid draft to process.
+            # The "I'm sorry, I can't help with that." is specifically for non-email *content*.
             raise ValueError("Email draft cannot be empty or contain only whitespace.")
             
-        # Add safety instructions to the prompt
-        prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
-        Focus on:
-        - Professional tone and language
-        - Clear and concise communication
-        - Proper email etiquette
-        - Maintaining the original message's intent
-        
-        Here's the draft:
-        
-        {draft}
-        
-        Improved version:"""
+        # Modified prompt to include conditional behavior for non-email drafts and strict output formatting
+        prompt = f"""You are an AI assistant specialized in improving email drafts.
+If the provided text is clearly NOT an email draft (e.g., it's a general question, a random sentence, a poem, or a very short, non-email like phrase), your ONLY response MUST be: '{EmailAgent.REFUSAL_MESSAGE}'
+If the provided text IS an email draft, then please improve it. Make it more professional, clear, and effective while maintaining its original intent.
+Crucially, ensure the improved version contains ONLY the email content. Do NOT include any conversational lead-ins (e.g., "Here's the improved email:", "Subject:", "Body:"), or any other extraneous text around the email itself. The output should be the raw email draft, ready to be copied and pasted.
+
+Focus on:
+- Professional tone and language
+- Clear and concise communication
+- Proper email etiquette
+- Maintaining the original message's intent
+
+Here's the draft:
+
+{draft}
+
+Improved version (if applicable, otherwise the exact refusal message specified above):"""
 
         try:
-            # Removed debug print: print(f"Debug: Prompt: {prompt}")
             response = self.model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
-                    temperature=0.7,
-                    max_output_tokens=2048, # Increased token limit for longer emails
+                    temperature=0.2, # Lower temperature for more deterministic output, especially for the refusal
+                    max_output_tokens=2048,
                     top_p=0.8,
                     top_k=40,
                 ),
@@ -84,12 +88,11 @@ class EmailAgent:
                     }
                 ]
             )
-            # Removed debug print: print(f"Debug: Response: {response}")
             
-            # Check for safety issues in the prompt feedback
-            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                if hasattr(response.prompt_feedback, 'block_reason'):
-                    raise ValueError(f"Content was blocked due to: {response.prompt_feedback.block_reason}")
+            # Check for prompt feedback blocking
+            if hasattr(response, 'prompt_feedback') and response.prompt_feedback and \
+               hasattr(response.prompt_feedback, 'block_reason') and response.prompt_feedback.block_reason:
+                raise ValueError(f"Content was blocked due to: {response.prompt_feedback.block_reason}")
             
             # Ensure candidates were generated
             if not hasattr(response, 'candidates') or not response.candidates:
@@ -98,7 +101,7 @@ class EmailAgent:
             # Get the first candidate
             candidate = response.candidates[0]
             
-            # Check for finish reasons indicating issues
+            # Check for finish reasons indicating issues during generation
             if hasattr(candidate, 'finish_reason'):
                 if candidate.finish_reason == "MAX_TOKENS":
                     raise ValueError("Response was cut off due to token limit. Please try with a shorter email draft or adjust max_output_tokens.")
@@ -106,14 +109,18 @@ class EmailAgent:
                     raise ValueError("Content was blocked by safety filters during generation.")
             
             # Attempt to extract the text content from the response
-            # Modified this section for robustness to rely directly on parts[0].text
             if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
                 if not candidate.content.parts:
                     raise ValueError("Model response contained no content parts.")
-                # Access the text from the first part
-                return candidate.content.parts[0].text.strip()
+                
+                generated_text = candidate.content.parts[0].text.strip()
+                
+                # Check if the generated text is the exact refusal message
+                if generated_text == EmailAgent.REFUSAL_MESSAGE:
+                    return generated_text
+                
+                return generated_text
             
-            # If text could not be extracted, raise an error
             raise ValueError("Could not extract text from the model's response.")
             
         except Exception as e:
@@ -155,17 +162,26 @@ def main():
             draft = sys.stdin.read()
 
         if not draft.strip():
+            # If the draft is empty or just whitespace after reading, print an error and exit.
+            # This is distinct from the semantic "not a valid email" handled by the LLM.
             print("No email draft provided.")
             return
 
         improved_email = agent.improve_email(draft)
-        print("\nImproved Email:")
-        print("-" * 50)
-        print(improved_email)
-        print("-" * 50)
+        
+        # Check if the output is the specific refusal message
+        if improved_email == EmailAgent.REFUSAL_MESSAGE: # Use the constant here as well
+            print(f"\n{improved_email}")
+        else:
+            print("\nImproved Email:")
+            print("-" * 50)
+            print(improved_email)
+            print("-" * 50)
 
-    except Exception as e:
-        print(f"Error: {str(e)}")
+    except ValueError as ve: # Catch specific ValueErrors from EmailAgent for cleaner output
+        print(f"Error: {str(ve)}")
+    except Exception as e: # Catch any other unexpected errors
+        print(f"An unexpected error occurred: {str(e)}")
 
 if __name__ == "__main__":
     main()
