@@ -643,56 +643,73 @@ class TestRunner:
                             module.__file__ = step_file_path
                             module.__package__ = package_name
                             
-                            # Add the package directory to sys.path if not already there
+                            # Add both the package directory and its parent to sys.path
                             package_dir = os.path.dirname(step_file_path)
+                            parent_dir = os.path.dirname(package_dir)  # This should be test_agent directory
+                            
+                            # Add parent directory first (test_agent)
+                            if parent_dir not in sys.path:
+                                sys.path.insert(0, parent_dir)
+                                console.print(f"[blue]Debug: Added parent directory {parent_dir} to Python path[/blue]")
+                            
+                            # Then add package directory
                             if package_dir not in sys.path:
                                 sys.path.insert(0, package_dir)
+                                console.print(f"[blue]Debug: Added package directory {package_dir} to Python path[/blue]")
                             
-                            # Execute the module's code
-                            spec.loader.exec_module(module)
-                            
-                            # Get the class from the module
-                            class_name = None
-                            for name, obj in module.__dict__.items():
-                                if isinstance(obj, type) and hasattr(obj, 'run'):
-                                    class_name = name
-                                    break
+                            try:
+                                # Execute the module's code
+                                spec.loader.exec_module(module)
+                                
+                                # Get the class from the module
+                                class_name = None
+                                for name, obj in module.__dict__.items():
+                                    if isinstance(obj, type) and hasattr(obj, 'run'):
+                                        class_name = name
+                                        break
+                                        
+                                if class_name is None:
+                                    # Try importing from the package directly
+                                    try:
+                                        # Import using the full package path
+                                        full_package_path = f"test_agent.{package_name}"
+                                        console.print(f"[blue]Debug: Trying to import from {full_package_path}[/blue]")
+                                        package = importlib.import_module(full_package_path)
+                                        for name, obj in package.__dict__.items():
+                                            if isinstance(obj, type) and hasattr(obj, 'run'):
+                                                class_name = name
+                                                cls = obj
+                                                break
+                                    except ImportError as e:
+                                        console.print(f"[blue]Debug: Import error: {str(e)}[/blue]")
+                                        raise ImportError(f"Could not find class with run method in {step_file_path}")
                                     
-                            if class_name is None:
-                                # Try importing from the package directly
-                                try:
-                                    package_name = os.path.basename(os.path.dirname(step_file_path))
-                                    package = importlib.import_module(package_name)
-                                    for name, obj in package.__dict__.items():
-                                        if isinstance(obj, type) and hasattr(obj, 'run'):
-                                            class_name = name
-                                            cls = obj
-                                            break
-                                except ImportError:
+                                if class_name is None:
                                     raise ImportError(f"Could not find class with run method in {step_file_path}")
-                                
-                            if class_name is None:
-                                raise ImportError(f"Could not find class with run method in {step_file_path}")
-                                
-                            # Get the class and call its run method
-                            if 'cls' not in locals():
-                                cls = getattr(module, class_name)
-                            if isinstance(cls.run, staticmethod):
-                                output = str(cls.run(step.get('input', {}).get('input', '')))
-                            else:
-                                instance = cls()
-                                output = str(instance.run(step.get('input', {}).get('input', '')))
-                                
+                                    
+                                # Get the class and call its run method
+                                if 'cls' not in locals():
+                                    cls = getattr(module, class_name)
+                                if isinstance(cls.run, staticmethod):
+                                    output = str(cls.run(step.get('input', {}).get('input', '')))
+                                else:
+                                    instance = cls()
+                                    output = str(instance.run(step.get('input', {}).get('input', '')))
+                            finally:
+                                # Clean up: remove both directories from sys.path
+                                if package_dir in sys.path:
+                                    sys.path.remove(package_dir)
+                                    console.print(f"[blue]Debug: Removed package directory {package_dir} from Python path[/blue]")
+                                if parent_dir in sys.path:
+                                    sys.path.remove(parent_dir)
+                                    console.print(f"[blue]Debug: Removed parent directory {parent_dir} from Python path[/blue]")
+                        
                         except Exception as e:
                             error_msg = f"Error importing module: {str(e)}"
                             logger.logger.error(error_msg)
                             results['overall_status']['status'] = 'failed'
                             results['overall_status']['error'] = error_msg
                             return results
-                        finally:
-                            # Clean up: remove the package directory from sys.path
-                            if package_dir in sys.path:
-                                sys.path.remove(package_dir)
                         
                         console.print(f"[blue]Debug: Test block output: {output}[/blue]")
                     
