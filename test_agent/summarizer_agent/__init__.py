@@ -1,3 +1,8 @@
 """
-Summarizer Agent package for interacting with Gemini 2.5 Flash model.
-""" 
+Summarizer Agent package.
+This package contains the SummarizerAgent class and its dependencies.
+"""
+
+from .agent import SummarizerAgent
+
+__all__ = ['SummarizerAgent'] 

@@ -412,90 +412,107 @@ class DynamicRegionRunner(AgentRunner):
             with open(file_path, 'r') as f:
                 code = f.read()
 
-            # Create a new namespace for execution
-            namespace = {}
+            # Create a new namespace for execution with proper module attributes
+            namespace = {
+                '__name__': '__main__',
+                '__file__': file_path,
+                '__package__': None,
+                '__builtins__': __builtins__
+            }
 
-            # Handle imports first
-            import_lines = []
-            for line in code.split('\n'):
-                if line.startswith('import ') or line.startswith('from '):
-                    import_lines.append(line)
-                elif line.strip() and not line.startswith('#'):
-                    break
-            
-            if import_lines:
-                exec('\n'.join(import_lines), namespace)
+            # Add the file's directory to Python path
+            file_dir = os.path.dirname(os.path.abspath(file_path))
+            if file_dir not in sys.path:
+                sys.path.insert(0, file_dir)
 
-            # Force reload of the module if it exists
-            module_name = Path(file_path).stem
-            if module_name in sys.modules:
-                importlib.reload(sys.modules[module_name])
-            
-            # Extract the specified region
-            region = input_data.get('region')
-            if region:
-                start_marker = f'# kaizen:start:{region}'
-                end_marker = f'# kaizen:end:{region}'
-            else:
-                start_marker = '# kaizen:start'
-                end_marker = '# kaizen:end'
-            
-            start_idx = code.find(start_marker)
-            if start_idx == -1:
-                return {
-                    "status": "error",
-                    "error": f"Start marker '{start_marker}' not found"
-                }
-            
-            end_idx = code.find(end_marker, start_idx)
-            if end_idx == -1:
-                return {
-                    "status": "error",
-                    "error": f"End marker '{end_marker}' not found"
-                }
-            
-            # Extract the code block
-            block_code = code[start_idx + len(start_marker):end_idx].strip()
-            
-            # Execute either the full file or just the block based on whether a region was specified
-            if not region:
-                # If no specific region was requested, execute the full file
-                exec(code, namespace)
-            else:
-                # If a specific region was requested, only execute that block
-                exec(block_code, namespace)
-            
-            # If a method is specified, call it with the input
-            method = input_data.get('method')
-            test_input = input_data.get('input')
-            
-            if method and test_input is not None:
-                # Find the class in the namespace
-                class_name = None
-                for name, obj in namespace.items():
-                    if isinstance(obj, type) and hasattr(obj, method):
-                        class_name = name
+            try:
+                # Handle imports first
+                import_lines = []
+                for line in code.split('\n'):
+                    if line.startswith('import ') or line.startswith('from '):
+                        import_lines.append(line)
+                    elif line.strip() and not line.startswith('#'):
                         break
                 
-                if class_name:
-                    # Instantiate the class
-                    instance = namespace[class_name]()
-                    # Call the method
-                    result = getattr(instance, method)(test_input)
-                    return {
-                        "status": "success",
-                        "output": str(result)
-                    }
+                if import_lines:
+                    import_block = '\n'.join(import_lines)
+                    exec(import_block, namespace)
+
+                # Force reload of the module if it exists
+                module_name = Path(file_path).stem
+                if module_name in sys.modules:
+                    importlib.reload(sys.modules[module_name])
+                
+                # Extract the specified region
+                region = input_data.get('region')
+                if region:
+                    start_marker = f'# kaizen:start:{region}'
+                    end_marker = f'# kaizen:end:{region}'
                 else:
+                    start_marker = '# kaizen:start'
+                    end_marker = '# kaizen:end'
+                
+                start_idx = code.find(start_marker)
+                if start_idx == -1:
                     return {
                         "status": "error",
-                        "error": f"Class with method '{method}' not found in namespace"
+                        "error": f"Start marker '{start_marker}' not found"
                     }
-            
-            return {
-                "status": "success",
-                "output": "Region executed successfully"
-            }
+                
+                end_idx = code.find(end_marker, start_idx)
+                if end_idx == -1:
+                    return {
+                        "status": "error",
+                        "error": f"End marker '{end_marker}' not found"
+                    }
+                
+                # Extract the code block
+                block_code = code[start_idx + len(start_marker):end_idx].strip()
+                
+                # Execute either the full file or just the block based on whether a region was specified
+                if not region:
+                    # If no specific region was requested, execute the full file
+                    exec(code, namespace)
+                else:
+                    # If a specific region was requested, only execute that block
+                    exec(block_code, namespace)
+                
+                # If a method is specified, call it with the input
+                method = input_data.get('method')
+                test_input = input_data.get('input')
+                
+                if method and test_input is not None:
+                    # Find the class in the namespace
+                    class_name = None
+                    for name, obj in namespace.items():
+                        if isinstance(obj, type) and hasattr(obj, method):
+                            class_name = name
+                            break
+                    
+                    if class_name:
+                        # Instantiate the class
+                        instance = namespace[class_name]()
+                        # Call the method
+                        result = getattr(instance, method)(test_input)
+                        return {
+                            "status": "success",
+                            "output": str(result)
+                        }
+                    else:
+                        return {
+                            "status": "error",
+                            "error": f"Class with method '{method}' not found in namespace"
+                        }
+                
+                return {
+                    "status": "success",
+                    "output": "Region executed successfully"
+                }
+                
+            finally:
+                # Clean up: remove the added path
+                if file_dir in sys.path:
+                    sys.path.remove(file_dir)
             
         except Exception as e:
             return {

@@ -170,9 +170,6 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
     Returns:
         str: Output from the code block execution or error message
     """
-    # Initialize parent_dirs before the try block
-    parent_dirs = []
-    
     try:
         console.print(f"[blue]Debug: run_test_block called with file_path={file_path}, config_file={config_file}[/blue]")
         
@@ -209,21 +206,15 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
 
         # Add the file's directory and parent directories to Python path
         file_dir = os.path.dirname(os.path.abspath(code_file))
-        current_dir = file_dir
-        while current_dir and current_dir != os.path.dirname(current_dir):
-            if current_dir not in sys.path:
-                sys.path.insert(0, current_dir)
-                parent_dirs.append(current_dir)
-                console.print(f"[blue]Debug: Added {current_dir} to Python path[/blue]")
-            current_dir = os.path.dirname(current_dir)
+        parent_dir = os.path.dirname(file_dir)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+            console.print(f"[blue]Debug: Added {parent_dir} to Python path[/blue]")
 
         # Read the full file
         with open(code_file, 'r') as f:
             content = f.read()
             
-        # Create execution namespace with all necessary imports
-        namespace = create_execution_namespace()
-        
         # Extract the block between markers
         if region:
             # Use named region markers
@@ -245,78 +236,74 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         # Extract the block code
         block_code = content[start_idx + len(start_marker):end_idx].strip()
         
-        # Extract imports from the full file and handle them recursively
-        import_lines = []
-        processed_imports = set()  # Track processed imports to avoid cycles
-        import_errors = []  # Track import errors
+        # Create a temporary module to execute the code
+        module_name = os.path.splitext(os.path.basename(code_file))[0]
+        package_name = os.path.basename(os.path.dirname(code_file))
         
-        def process_imports(file_content: str, base_dir: str, depth: int = 0):
-            if depth > 10:  # Prevent excessive recursion
-                console.print("[yellow]Warning: Maximum import depth reached[/yellow]")
-                return
-                
-            for line in file_content.split('\n'):
-                line = line.strip()
-                if line.startswith('import ') or line.startswith('from '):
-                    import_lines.append(line)
-                    # Try to find and process the imported module if it's a local import
-                    try:
-                        if line.startswith('from '):
-                            # Handle 'from x import y' and strip leading dots
-                            module_name = line.split()[1].split()[0]  # Get the module name
-                            module_name = module_name.lstrip('.')  # Remove leading dots
+        # Create a new module
+        spec = importlib.util.spec_from_file_location(f"{package_name}.{module_name}", code_file)
+        if spec is None:
+            return f"Error: Could not create module spec for {code_file}"
+            
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        
+        # Set up the module's namespace
+        module.__file__ = code_file
+        module.__package__ = package_name
+        
+        # Execute the module's code
+        try:
+            spec.loader.exec_module(module)
+        except Exception as e:
+            return f"Error executing module: {str(e)}"
+            
+        # Now execute the specific block
+        try:
+            # Create a new namespace for the block execution
+            block_namespace = {
+                '__name__': f'{package_name}.{module_name}',
+                '__file__': code_file,
+                '__package__': package_name,
+                '__builtins__': __builtins__,
+                # Copy all names from the module
+                **{name: getattr(module, name) for name in dir(module) if not name.startswith('_')}
+            }
+            
+            # Execute the block in the new namespace
+            exec(block_code, block_namespace)
+            
+            # If there's a test input, try to call the main function/class
+            if test_input:
+                # Look for a class with a run method
+                for name, obj in block_namespace.items():
+                    if isinstance(obj, type) and hasattr(obj, 'run'):
+                        # If it's a static method, call it directly
+                        if isinstance(obj.run, staticmethod):
+                            return str(obj.run(test_input))
+                        # Otherwise create an instance and call run
                         else:
-                            # Handle 'import x' and strip leading dots
-                            module_name = line.split()[1].split('.')[0]
-                            module_name = module_name.lstrip('.')  # Remove leading dots
+                            instance = obj()
+                            return str(instance.run(test_input))
                             
-                        # Check if it's a local module
-                        module_path = os.path.join(base_dir, f"{module_name}.py")
-                        if os.path.exists(module_path) and module_path not in processed_imports:
-                            processed_imports.add(module_path)
-                            with open(module_path, 'r') as f:
-                                process_imports(f.read(), base_dir, depth + 1)
-                                
-                            # Force reload the module if it exists
-                            if module_name in sys.modules:
-                                importlib.reload(sys.modules[module_name])
-                                console.print(f"[blue]Debug: Reloaded module {module_name}[/blue]")
-                    except Exception as e:
-                        error_msg = f"Error processing imports for {module_name}: {str(e)}"
-                        import_errors.append(error_msg)
-                        console.print(f"[yellow]Warning: {error_msg}[/yellow]")
-                elif line and not line.startswith('#'):
-                    break
-        
-        # Process imports from the main file
-        process_imports(content, file_dir)
-        
-        # Report any import errors
-        if import_errors:
-            console.print("[yellow]Warning: Some imports had errors:[/yellow]")
-            for error in import_errors:
-                console.print(f"[yellow]  - {error}[/yellow]")
-        
-        # Add imports to the namespace
-        if import_lines:
-            try:
-                import_block = '\n'.join(import_lines)
-                exec(import_block, namespace)
-            except Exception as e:
-                return f"Error setting up imports: {str(e)}"
-        
-        # Execute the block
-        return execute_code_block(block_code, namespace, test_input)
-        
+                # If no class with run method found, look for a main function
+                if 'main' in block_namespace:
+                    main_func = block_namespace['main']
+                    if callable(main_func):
+                        return str(main_func(test_input))
+                        
+            return "Code block executed successfully"
+            
+        except Exception as e:
+            return f"Error executing code block: {str(e)}"
+            
     except Exception as e:
-        return f"Error executing code block: {str(e)}"
+        return f"Error: {str(e)}"
     finally:
-        # Clean up: remove the added paths only if parent_dirs is not empty
-        if parent_dirs:
-            for directory in parent_dirs:
-                if directory in sys.path:
-                    sys.path.remove(directory)
-                    console.print(f"[blue]Debug: Removed {directory} from Python path[/blue]")
+        # Clean up: remove the added path
+        if parent_dir in sys.path:
+            sys.path.remove(parent_dir)
+            console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
 
 class TestRunner:
     def __init__(self, test_config: Optional[Dict] = None):
@@ -568,7 +555,12 @@ class TestRunner:
             Dict[str, Any]: Test results for each region
         """
         file_path = Path(file_path)
-        results = {}
+        results = {
+            'overall_status': {
+                'test_cases': [],
+                'status': 'failed'
+            }
+        }
         all_steps_passed = True
         
         # Get the agent type from config
@@ -602,137 +594,191 @@ class TestRunner:
                     logger=logger
                 )
             
-            # Run each test step
-            for step in self.test_config.get('steps', []):
-                step_index = step.get('step_index')
-                step_name = step.get('name', f'Step {step_index}')
-                
-                logger.log_step_start(step_index, step.get('input', {}))
-                
-                # Run the step and capture output
-                output = None
-                if 'region' in step.get('input', {}):
-                    console.print(f"[blue]Debug: Running test block for step {step_index}[/blue]")
-                    console.print(f"[blue]Debug: Step input: {step.get('input', {})}[/blue]")
+            # Add the file's directory and parent directories to Python path
+            file_dir = os.path.dirname(os.path.abspath(file_path))
+            parent_dir = os.path.dirname(file_dir)
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+                console.print(f"[blue]Debug: Added {parent_dir} to Python path[/blue]")
+            
+            try:
+                # Run each test step
+                for step in self.test_config.get('steps', []):
+                    step_index = step.get('step_index')
+                    step_name = step.get('name', f'Step {step_index}')
                     
-                    # Use the step's file_path if provided, otherwise use the main test file path
-                    step_file_path = step.get('input', {}).get('file_path')
-                    if step_file_path:
-                        # Resolve the step's file path relative to the config file
-                        if self.test_config.get('config_file'):
-                            config_dir = os.path.dirname(os.path.abspath(self.test_config['config_file']))
-                            step_file_path = os.path.normpath(os.path.join(config_dir, step_file_path))
-                        console.print(f"[blue]Debug: Using step's file path: {step_file_path}[/blue]")
-                    else:
-                        step_file_path = str(file_path)
-                        console.print(f"[blue]Debug: Using main test file path: {step_file_path}[/blue]")
+                    logger.log_step_start(step_index, step.get('input', {}))
                     
-                    output = run_test_block(
-                        step_file_path,
-                        step.get('input', {}).get('input'),
-                        step.get('input', {}).get('region'),
-                        self.test_config.get('config_file')
-                    )
+                    # Run the step and capture output
+                    output = None
+                    if 'region' in step.get('input', {}):
+                        console.print(f"[blue]Debug: Running test block for step {step_index}[/blue]")
+                        console.print(f"[blue]Debug: Step input: {step.get('input', {})}[/blue]")
+                        
+                        # Use the step's file_path if provided, otherwise use the main test file path
+                        step_file_path = step.get('input', {}).get('file_path')
+                        if step_file_path:
+                            # Resolve the step's file path relative to the config file
+                            if self.test_config.get('config_file'):
+                                config_dir = os.path.dirname(os.path.abspath(self.test_config['config_file']))
+                                step_file_path = os.path.normpath(os.path.join(config_dir, step_file_path))
+                            console.print(f"[blue]Debug: Using step's file path: {step_file_path}[/blue]")
+                        else:
+                            step_file_path = str(file_path)
+                            console.print(f"[blue]Debug: Using main test file path: {step_file_path}[/blue]")
+                        
+                        # Create a module spec for the file
+                        module_name = os.path.splitext(os.path.basename(step_file_path))[0]
+                        package_name = os.path.basename(os.path.dirname(step_file_path))
+                        
+                        # Import the module using the full package path
+                        try:
+                            # First, ensure the package directory has an __init__.py
+                            package_dir = os.path.dirname(step_file_path)
+                            init_file = os.path.join(package_dir, '__init__.py')
+                            if not os.path.exists(init_file):
+                                with open(init_file, 'w') as f:
+                                    f.write(f'"""\n{package_name} package.\n"""\n')
+                            
+                            # Create a new module spec
+                            spec = importlib.util.spec_from_file_location(f"{package_name}.{module_name}", step_file_path)
+                            if spec is None:
+                                raise ImportError(f"Could not create module spec for {step_file_path}")
+                            
+                            # Create and execute the module
+                            module = importlib.util.module_from_spec(spec)
+                            sys.modules[spec.name] = module
+                            module.__file__ = step_file_path
+                            module.__package__ = package_name
+                            
+                            # Execute the module's code
+                            spec.loader.exec_module(module)
+                            
+                            # Get the class from the module
+                            class_name = None
+                            for name, obj in module.__dict__.items():
+                                if isinstance(obj, type) and hasattr(obj, 'run'):
+                                    class_name = name
+                                    break
+                                    
+                            if class_name is None:
+                                raise ImportError(f"Could not find class with run method in {step_file_path}")
+                                
+                            # Get the class and call its run method
+                            cls = getattr(module, class_name)
+                            if isinstance(cls.run, staticmethod):
+                                output = str(cls.run(step.get('input', {}).get('input', '')))
+                            else:
+                                instance = cls()
+                                output = str(instance.run(step.get('input', {}).get('input', '')))
+                            
+                        except Exception as e:
+                            error_msg = f"Error importing module: {str(e)}"
+                            logger.logger.error(error_msg)
+                            results['overall_status']['status'] = 'failed'
+                            results['overall_status']['error'] = error_msg
+                            return results
+                        
+                        console.print(f"[blue]Debug: Test block output: {output}[/blue]")
                     
-                    console.print(f"[blue]Debug: Test block output: {output}[/blue]")
-                
-                # Use run_step to properly validate all test criteria
-                passed = self.run_step(step, agent_type, logger)
-                
-                # Store results by region
-                region = step.get('input', {}).get('region', 'default')
-                if region not in results:
-                    results[region] = {
-                        'test_cases': [],
-                        'status': 'passed'  # Initialize status for each region
-                    }
-                
-                # If we have an output and evaluator, evaluate it immediately
-                evaluation_result = None
-                if output and evaluator and 'evaluation' in self.test_config:
-                    try:
-                        # Create a temporary results structure for evaluation
-                        temp_results = {
-                            region: {
-                                'test_cases': [{
-                                    'name': step_name,
-                                    'input': step.get('input', {}),
-                                    'output': output,
-                                    'details': logger.get_last_step_details()
-                                }]
-                            }
+                    # Use run_step to properly validate all test criteria
+                    passed = self.run_step(step, agent_type, logger)
+                    
+                    # Store results by region
+                    region = step.get('input', {}).get('region', 'default')
+                    if region not in results:
+                        results[region] = {
+                            'test_cases': [],
+                            'status': 'passed'  # Initialize status for each region
                         }
-                        
-                        # print(f"Debug: Temp results: {temp_results}")
-                        
-                        # Run evaluation
-                        evaluation_result = evaluator.evaluate(
-                            results=temp_results,
-                            criteria=self.test_config['evaluation'].get('criteria', [])
-                        )
-                        
-                        # Update passed status based on evaluation
-                        if isinstance(evaluation_result, dict):
-                            if evaluation_result.get('status') == 'failed':
+                    
+                    # If we have an output and evaluator, evaluate it immediately
+                    evaluation_result = None
+                    if output and evaluator and 'evaluation' in self.test_config:
+                        try:
+                            # Create a temporary results structure for evaluation
+                            temp_results = {
+                                region: {
+                                    'test_cases': [{
+                                        'name': step_name,
+                                        'input': step.get('input', {}),
+                                        'output': output,
+                                        'details': logger.get_last_step_details()
+                                    }]
+                                }
+                            }
+                            
+                            # Run evaluation
+                            evaluation_result = evaluator.evaluate(
+                                results=temp_results,
+                                criteria=self.test_config['evaluation'].get('criteria', [])
+                            )
+                            
+                            # Update passed status based on evaluation
+                            if isinstance(evaluation_result, dict):
+                                if evaluation_result.get('status') == 'failed':
+                                    passed = False
+                                    all_steps_passed = False
+                                    results[region]['status'] = 'failed'  # Update region status
+                            elif isinstance(evaluation_result, str):
+                                # If evaluation_result is a string, treat it as an error
                                 passed = False
                                 all_steps_passed = False
                                 results[region]['status'] = 'failed'  # Update region status
-                        elif isinstance(evaluation_result, str):
-                            # If evaluation_result is a string, treat it as an error
-                            passed = False
-                            all_steps_passed = False
-                            results[region]['status'] = 'failed'  # Update region status
+                                evaluation_result = {
+                                    'status': 'error',
+                                    'error': evaluation_result
+                                }
+                                
+                        except Exception as e:
+                            logger.logger.error(f"Error during output evaluation: {str(e)}")
                             evaluation_result = {
                                 'status': 'error',
-                                'error': evaluation_result
+                                'error': str(e)
                             }
-                            
-                    except Exception as e:
-                        logger.logger.error(f"Error during output evaluation: {str(e)}")
-                        evaluation_result = {
-                            'status': 'error',
-                            'error': str(e)
-                        }
-                        results[region]['status'] = 'failed'  # Update region status
+                            results[region]['status'] = 'failed'  # Update region status
+                    
+                    # Add test case result
+                    test_case = {
+                        'name': step_name,
+                        'input': step.get('input', {}),
+                        'status': 'passed' if passed else 'failed',
+                        'output': output,
+                        'details': logger.get_last_step_details()
+                    }
+                    
+                    # Add evaluation result if available
+                    if evaluation_result:
+                        test_case['evaluation'] = evaluation_result
+                    
+                    results[region]['test_cases'].append(test_case)
+                    
+                    # Update region status if test case failed
+                    if not passed:
+                        results[region]['status'] = 'failed'
                 
-                # Add test case result
-                test_case = {
-                    'name': step_name,
-                    'input': step.get('input', {}),
-                    'status': 'passed' if passed else 'failed',
-                    'output': output,
-                    'details': logger.get_last_step_details()
-                }
+                # Update overall status
+                results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
                 
-                # Add evaluation result if available
-                if evaluation_result:
-                    test_case['evaluation'] = evaluation_result
+                if not all_steps_passed:
+                    logger.logger.error("Test failed due to failed steps or evaluations")
+                else:
+                    logger.logger.info("All tests passed")
                 
-                results[region]['test_cases'].append(test_case)
+                # Save test results
+                logger.save_results()
                 
-                # Update region status if test case failed
-                if not passed:
-                    results[region]['status'] = 'failed'
-            
-            # Set overall status in a separate field with consistent structure
-            results['overall_status'] = {
-                'test_cases': [],
-                'status': 'failed' if not all_steps_passed else 'passed'
-            }
-            
-            if not all_steps_passed:
-                logger.logger.error("Test failed due to failed steps or evaluations")
-            else:
-                logger.logger.info("All tests passed")
-            
-            # Save test results
-            logger.save_results()
-            
-            return results
+                return results
+                
+            finally:
+                # Clean up: remove the added path
+                if parent_dir in sys.path:
+                    sys.path.remove(parent_dir)
+                    console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
             
         except Exception as e:
-            logger.logger.error(f"Error running tests: {str(e)}")
-            return {
-                'status': 'error',
-                'error': str(e)
-            } 
+            error_msg = f"Error running tests: {str(e)}"
+            logger.logger.error(error_msg)
+            results['overall_status']['status'] = 'failed'
+            results['overall_status']['error'] = error_msg
+            return results 
