@@ -637,15 +637,22 @@ class TestRunner:
                             if spec is None:
                                 raise ImportError(f"Could not create module spec for {step_file_path}")
                             
+                            console.print(f"[blue]Debug: Created module spec for {package_name}.{module_name}[/blue]")
+                            
                             # Create and execute the module
                             module = importlib.util.module_from_spec(spec)
                             sys.modules[spec.name] = module
                             module.__file__ = step_file_path
                             module.__package__ = package_name
                             
+                            console.print(f"[blue]Debug: Created module with file={step_file_path}, package={package_name}[/blue]")
+                            
                             # Add both the package directory and its parent to sys.path
                             package_dir = os.path.dirname(step_file_path)
                             parent_dir = os.path.dirname(package_dir)  # This should be test_agent directory
+                            
+                            console.print(f"[blue]Debug: Package directory: {package_dir}[/blue]")
+                            console.print(f"[blue]Debug: Parent directory: {parent_dir}[/blue]")
                             
                             # Add parent directory first (test_agent)
                             if parent_dir not in sys.path:
@@ -658,43 +665,78 @@ class TestRunner:
                                 console.print(f"[blue]Debug: Added package directory {package_dir} to Python path[/blue]")
                             
                             try:
-                                # Execute the module's code
-                                spec.loader.exec_module(module)
+                                # Read the file content
+                                console.print(f"[blue]Debug: Reading file content from {step_file_path}[/blue]")
+                                with open(step_file_path, 'r') as f:
+                                    content = f.read()
+                                
+                                # Extract the code between kaizen markers
+                                region = step.get('input', {}).get('region')
+                                if region:
+                                    start_marker = f'# kaizen:start:{region}'
+                                    end_marker = f'# kaizen:end:{region}'
+                                else:
+                                    start_marker = '# kaizen:start'
+                                    end_marker = '# kaizen:end'
+                                
+                                console.print(f"[blue]Debug: Looking for markers: start='{start_marker}', end='{end_marker}'[/blue]")
+                                
+                                start_idx = content.find(start_marker)
+                                if start_idx == -1:
+                                    console.print(f"[red]Error: Start marker '{start_marker}' not found in file[/red]")
+                                    console.print(f"[blue]Debug: File content:\n{content}[/blue]")
+                                    raise ImportError(f"Start marker '{start_marker}' not found in {step_file_path}")
+                                
+                                end_idx = content.find(end_marker, start_idx)
+                                if end_idx == -1:
+                                    console.print(f"[red]Error: End marker '{end_marker}' not found in file[/red]")
+                                    console.print(f"[blue]Debug: File content from start marker:\n{content[start_idx:]}[/blue]")
+                                    raise ImportError(f"End marker '{end_marker}' not found in {step_file_path}")
+                                
+                                # Extract the code between markers
+                                code_block = content[start_idx + len(start_marker):end_idx].strip()
+                                console.print(f"[blue]Debug: Extracted code block:\n{code_block}[/blue]")
+                                
+                                # Execute the code block in the module's namespace
+                                console.print("[blue]Debug: Executing code block in module namespace[/blue]")
+                                exec(code_block, module.__dict__)
                                 
                                 # Get the class from the module
+                                console.print("[blue]Debug: Looking for class with run method in module namespace[/blue]")
+                                console.print(f"[blue]Debug: Available names in module: {list(module.__dict__.keys())}[/blue]")
+                                
                                 class_name = None
                                 for name, obj in module.__dict__.items():
                                     if isinstance(obj, type) and hasattr(obj, 'run'):
                                         class_name = name
+                                        console.print(f"[blue]Debug: Found class {name} with run method[/blue]")
                                         break
                                         
                                 if class_name is None:
-                                    # Try importing from the package directly
-                                    try:
-                                        # Import using the full package path
-                                        full_package_path = f"test_agent.{package_name}"
-                                        console.print(f"[blue]Debug: Trying to import from {full_package_path}[/blue]")
-                                        package = importlib.import_module(full_package_path)
-                                        for name, obj in package.__dict__.items():
-                                            if isinstance(obj, type) and hasattr(obj, 'run'):
-                                                class_name = name
-                                                cls = obj
-                                                break
-                                    except ImportError as e:
-                                        console.print(f"[blue]Debug: Import error: {str(e)}[/blue]")
-                                        raise ImportError(f"Could not find class with run method in {step_file_path}")
-                                    
-                                if class_name is None:
-                                    raise ImportError(f"Could not find class with run method in {step_file_path}")
+                                    console.print("[red]Error: No class with run method found in module namespace[/red]")
+                                    raise ImportError(f"Could not find class with run method in the extracted code block")
                                     
                                 # Get the class and call its run method
-                                if 'cls' not in locals():
-                                    cls = getattr(module, class_name)
+                                console.print(f"[blue]Debug: Getting class {class_name} from module[/blue]")
+                                cls = getattr(module, class_name)
+                                
+                                input_text = step.get('input', {}).get('input', '')
+                                console.print(f"[blue]Debug: Calling run method with input: {input_text}[/blue]")
+                                
                                 if isinstance(cls.run, staticmethod):
-                                    output = str(cls.run(step.get('input', {}).get('input', '')))
+                                    output = str(cls.run(input_text))
                                 else:
                                     instance = cls()
-                                    output = str(instance.run(step.get('input', {}).get('input', '')))
+                                    output = str(instance.run(input_text))
+                                
+                                console.print(f"[blue]Debug: Run method output: {output}[/blue]")
+                                
+                            except Exception as e:
+                                console.print(f"[red]Error during execution: {str(e)}[/red]")
+                                console.print(f"[blue]Debug: Exception type: {type(e).__name__}[/blue]")
+                                import traceback
+                                console.print(f"[blue]Debug: Traceback:\n{traceback.format_exc()}[/blue]")
+                                raise
                             finally:
                                 # Clean up: remove both directories from sys.path
                                 if package_dir in sys.path:
@@ -819,4 +861,5 @@ class TestRunner:
             logger.logger.error(error_msg)
             results['overall_status']['status'] = 'failed'
             results['overall_status']['error'] = error_msg
+            return results 
             return results 
