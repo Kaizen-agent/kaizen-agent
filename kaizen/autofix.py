@@ -13,6 +13,7 @@ import sys
 from rich.console import Console
 import ast
 import importlib
+import random
 
 from .logger import get_logger
 from .config import get_config
@@ -765,7 +766,17 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         
         # Create a new branch
         logger.info(f"Creating new branch: {branch_name}")
-        subprocess.run(["git", "checkout", "-b", branch_name], check=True)
+        try:
+            subprocess.run(["git", "checkout", "-b", branch_name], check=True)
+        except subprocess.CalledProcessError:
+            # If branch already exists, add a unique suffix
+            logger.info(f"Branch {branch_name} already exists, adding unique suffix")
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            random_suffix = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=4))
+            unique_branch_name = f"{branch_name}-{timestamp}-{random_suffix}"
+            logger.info(f"Trying with new branch name: {unique_branch_name}")
+            subprocess.run(["git", "checkout", "-b", unique_branch_name], check=True)
+            branch_name = unique_branch_name
         
         # Write the best fixed code back to disk before committing
         logger.info("Writing best fixed code back to disk")
