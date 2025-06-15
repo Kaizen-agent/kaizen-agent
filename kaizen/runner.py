@@ -714,11 +714,16 @@ class TestRunner:
                                 if import_lines:
                                     import_code = '\n'.join(import_lines)
                                     console.print(f"[blue]Debug: Executing imports:\n{import_code}[/blue]")
+                                    
+                                    # First, execute the code block to define the class
+                                    console.print("[blue]Debug: Executing code block first to define the class[/blue]")
+                                    exec(code_block, module.__dict__)
+                                    console.print(f"[blue]Debug: Module namespace after code block execution: {list(module.__dict__.keys())}[/blue]")
+                                    
+                                    # Then execute the imports
+                                    console.print("[blue]Debug: Now executing imports[/blue]")
                                     exec(import_code, module.__dict__)
-                                
-                                # Execute the code block in the module's namespace
-                                console.print("[blue]Debug: Executing code block in module namespace[/blue]")
-                                exec(code_block, module.__dict__)
+                                    console.print(f"[blue]Debug: Module namespace after imports: {list(module.__dict__.keys())}[/blue]")
                                 
                                 # Get the class from the module
                                 console.print("[blue]Debug: Looking for class with run method in module namespace[/blue]")
