@@ -26,9 +26,23 @@ def format_test_results_table(test_results: Dict) -> str:
     """Format test results into a markdown table."""
     table = "| Test Name | Region | Status |\n|-----------|--------|--------|\n"
     for region, result in test_results.items():
-        for test_case in result.get('test_cases', []):
-            status = "✅ PASS" if test_case['status'] == 'passed' else "❌ FAIL"
-            table += f"| {test_case['name']} | {region} | {status} |\n"
+        # Skip if result is a string or if region is _status/overall_status
+        if isinstance(result, str) or region in ('_status', 'overall_status'):
+            continue
+        # Ensure result is a dictionary before accessing test_cases
+        if not isinstance(result, dict):
+            logger.warning(f"Skipping invalid result format for region {region}: {result}")
+            continue
+        test_cases = result.get('test_cases', [])
+        if not isinstance(test_cases, list):
+            logger.warning(f"Skipping invalid test_cases format for region {region}: {test_cases}")
+            continue
+        for test_case in test_cases:
+            if not isinstance(test_case, dict):
+                logger.warning(f"Skipping invalid test case format: {test_case}")
+                continue
+            status = "✅ PASS" if test_case.get('status') == 'passed' else "❌ FAIL"
+            table += f"| {test_case.get('name', 'Unknown')} | {region} | {status} |\n"
     return table
 
 def analyze_failures(failure_data: List[Dict]) -> str:
