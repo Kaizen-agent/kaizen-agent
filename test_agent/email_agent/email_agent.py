@@ -3,6 +3,9 @@ from typing import Optional
 import google.generativeai as genai
 from dotenv import load_dotenv
 import sys
+import unittest
+from unittest.mock import patch, MagicMock
+import io
 
 # kaizen:start:email_agent
 class EmailAgent:
@@ -21,7 +24,6 @@ class EmailAgent:
             # Test the configuration by generating content
             # This helps catch issues like invalid API keys or network problems early
             self.model.generate_content("Test")
-            # Removed debug print: print("Debug: EmailAgent: Successfully configured Google API")
         except Exception as e:
             raise ValueError(f"Failed to configure Google API: {str(e)}")
 
@@ -33,35 +35,41 @@ class EmailAgent:
             draft (str): The original email draft to improve
             
         Returns:
-            str: The improved email draft
+            str: The improved email draft or an error message if not a valid email.
         """
-        # Modified to raise a ValueError for empty/whitespace drafts, making the method's
-        # behavior more consistent with typical API functions (raising errors for invalid input).
-        # The CLI interface handles this case before calling this method.
         if not draft or not draft.strip():
             raise ValueError("Email draft cannot be empty or contain only whitespace.")
             
-        # Add safety instructions to the prompt
-        prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
-        Focus on:
-        - Professional tone and language
-        - Clear and concise communication
-        - Proper email etiquette
-        - Maintaining the original message's intent
-        
-        Here's the draft:
-        
+        # Add safety instructions and strict output formatting to the prompt
+        # The prompt is modified to handle two cases:
+        # 1. If the input is not an email draft, return a specific error message.
+        # 2. If it is an email, improve it professionally, without extra conversational text.
+        prompt = f"""You are an AI assistant specialized in improving email drafts.
+
+        Your primary goal is to take a given text and, if it is a valid email draft, improve its professionalism, clarity, and effectiveness.
+
+        **Strict Instructions:**
+        1.  **If the provided text is NOT an email draft** (e.g., it's a general question, a random sentence, a non-email-related query, etc.), you MUST respond with the EXACT phrase: "I'm sorry, I can't help with that." Do NOT add any other text, explanations, or conversational elements in this case.
+        2.  **If the provided text IS an email draft**, you will improve it.
+            *   Maintain the original intent of the draft.
+            *   Enhance its professional tone and language.
+            *   Ensure clear and concise communication.
+            *   Apply proper email etiquette.
+            *   Correct any grammar errors, spelling mistakes, or punctuation issues.
+            *   The improved version should ONLY contain the email draft itself. Do NOT include any preambles, introductory phrases like "Improved version:", conversational text, or explanations before or after the email. Just the polished email.
+
+        Here is the text to process:
+
         {draft}
-        
-        Improved version:"""
+
+        Your response:"""
 
         try:
-            # Removed debug print: print(f"Debug: Prompt: {prompt}")
             response = self.model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.7,
-                    max_output_tokens=2048, # Increased token limit for longer emails
+                    max_output_tokens=2048,
                     top_p=0.8,
                     top_k=40,
                 ),
@@ -84,7 +92,6 @@ class EmailAgent:
                     }
                 ]
             )
-            # Removed debug print: print(f"Debug: Response: {response}")
             
             # Check for safety issues in the prompt feedback
             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
@@ -106,7 +113,6 @@ class EmailAgent:
                     raise ValueError("Content was blocked by safety filters during generation.")
             
             # Attempt to extract the text content from the response
-            # Modified this section for robustness to rely directly on parts[0].text
             if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
                 if not candidate.content.parts:
                     raise ValueError("Model response contained no content parts.")
@@ -151,7 +157,6 @@ def main():
         if draft is None:
             # If no --draft or --file is provided, read from stdin
             print("Please enter your email draft (press Ctrl+D or Ctrl+Z on Windows when finished):")
-            # Changed to use sys.stdin.read() for more robust input handling
             draft = sys.stdin.read()
 
         if not draft.strip():
@@ -166,7 +171,73 @@ def main():
 
     except Exception as e:
         print(f"Error: {str(e)}")
-
-if __name__ == "__main__":
-    main()
 # kaizen:end:cli_interface
+
+# kaizen:start:test_runner
+class TestRunner(unittest.TestCase):
+    def setUp(self):
+        """Set up environment for tests."""
+        load_dotenv() # Ensure .env is loaded for tests too
+        self.temp_file_name = "test_draft.txt"
+        self.original_stdout = sys.stdout
+        self.captured_output = io.StringIO()
+        sys.stdout = self.captured_output
+
+        # Conditionally mock EmailAgent if API key is not set
+        if not os.getenv("GOOGLE_API_KEY"):
+            # Mock EmailAgent and its improve_email method
+            # This patch needs to be active during the main() call
+            self.email_agent_patch = patch('__main__.EmailAgent')
+            self.mock_email_agent_class = self.email_agent_patch.start()
+            self.mock_agent_instance = MagicMock()
+            self.mock_email_agent_class.return_value = self.mock_agent_instance
+            self.mock_agent_instance.improve_email.return_value = "This is an improved email."
+        else:
+            self.email_agent_patch = None # Indicate no patch was started
+
+    def tearDown(self):
+        """Clean up after tests."""
+        sys.stdout = self.original_stdout # Restore stdout
+        if os.path.exists(self.temp_file_name):
+            os.remove(self.temp_file_name)
+        if self.email_agent_patch:
+            self.email_agent_patch.stop() # Stop the patch if it was started
+
+    def _get_output(self):
+        """Helper to get and clear captured output."""
+        return self.captured_output.getvalue().strip()
+
+    def test_valid_email_from_file(self):
+        """Test improving a valid email provided via file."""
+        email_draft = "Hi team, Can we meat next week to discuss the project?"
+        expected_output_header = "Improved Email:\n--------------------------------------------------"
+
+        # Write draft to a temporary file
+        with open(self.temp_file_name, 'w') as f:
+            f.write(email_draft)
+
+        # Simulate command-line arguments
+        with patch('sys.argv', ['main.py', '--file', self.temp_file_name]):
+            # Run the main function
+            main()
+
+        output = self._get_output()
+        
+        self.assertIn(expected_output_header, output)
+
+        if os.getenv("GOOGLE_API_KEY"):
+            # If real agent, expect a professionally improved email (not the mock one)
+            self.assertNotIn("This is an improved email.", output)
+            self.assertIn("meet next week", output) # Check for common correction
+            self.assertIn("Hi team,", output) # Check original intent retention
+        else:
+            # If mocked, expect the predefined mock response
+            self.assertIn("This is an improved email.", output)
+            # Verify that improve_email was called with the correct content
+            self.mock_agent_instance.improve_email.assert_called_once_with(email_draft)
+
+# This part ensures the tests run when the script is executed
+if __name__ == "__main__":
+    # Only pass the program name to unittest.main to avoid parsing test-specific args
+    unittest.main(argv=sys.argv[:1])
+# kaizen:end:test_runner
