@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from rich.console import Console
 
 from .runner import TestRunner, run_test_block
@@ -13,6 +13,41 @@ from .logger import TestLogger
 from .autofix import run_autofix_and_pr
 
 console = Console()
+
+def collect_failed_tests(results: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Collect all failed tests from the test results dictionary.
+    
+    Args:
+        results: Dictionary containing test results by region
+        
+    Returns:
+        List of dictionaries containing failed test information
+    """
+    failed_tests = []
+    for region, result in results.items():
+        if not isinstance(result, dict):
+            click.echo(f"Warning: Invalid result format for region {region}: {result}")
+            continue
+            
+        test_cases = result.get('test_cases', [])
+        if not isinstance(test_cases, list):
+            click.echo(f"Warning: Invalid test_cases format for region {region}: {test_cases}")
+            continue
+            
+        for test_case in test_cases:
+            if not isinstance(test_case, dict):
+                click.echo(f"Warning: Invalid test case format: {test_case}")
+                continue
+                
+            if test_case.get('status') != 'passed':
+                failed_tests.append({
+                    'region': region,
+                    'test_name': test_case.get('name', 'Unknown Test'),
+                    'error_message': test_case.get('details', 'Test failed'),
+                    'output': test_case.get('output', 'No output available')
+                })
+    return failed_tests
 
 @click.group()
 def cli():
@@ -24,7 +59,8 @@ def cli():
 @click.option('--auto-fix', is_flag=True, help='Automatically fix failing tests')
 @click.option('--create-pr', is_flag=True, help='Create a pull request with fixes')
 @click.option('--max-retries', type=int, default=1, help='Maximum number of retry attempts for auto-fix (default: 1)')
-def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
+@click.option('--base-branch', default='main', help='Base branch for pull request (default: main)')
+def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, base_branch: str):
     """
     Run all tests specified in the configuration file.
     
@@ -62,29 +98,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
         results = runner.run_tests(resolved_file_path)
         
         # Check if any tests failed
-        failed_tests = []
-        for region, result in results.items():
-            if not isinstance(result, dict):
-                click.echo(f"Warning: Invalid result format for region {region}: {result}")
-                continue
-                
-            test_cases = result.get('test_cases', [])
-            if not isinstance(test_cases, list):
-                click.echo(f"Warning: Invalid test_cases format for region {region}: {test_cases}")
-                continue
-                
-            for test_case in test_cases:
-                if not isinstance(test_case, dict):
-                    click.echo(f"Warning: Invalid test case format: {test_case}")
-                    continue
-                    
-                if test_case.get('status') != 'passed':
-                    failed_tests.append({
-                        'region': region,
-                        'test_name': test_case.get('name', 'Unknown Test'),
-                        'error_message': test_case.get('details', 'Test failed'),
-                        'output': test_case.get('output', 'No output available')
-                    })
+        failed_tests = collect_failed_tests(results)
         
         if failed_tests:
             click.echo("\nFailed Tests:")
@@ -96,7 +110,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
             if auto_fix:
                 click.echo(f"\nAttempting to fix failing tests (max retries: {max_retries})...")
                 if file_path:
-                    run_autofix_and_pr(failed_tests, str(resolved_file_path), config, max_retries=max_retries, create_pr=create_pr)
+                    run_autofix_and_pr(failed_tests, str(resolved_file_path), str(config_path), max_retries=max_retries, create_pr=create_pr, base_branch=base_branch)
                     if create_pr:
                         click.echo("Pull request created with fixes")
                 else:
@@ -105,8 +119,112 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
             click.echo("\nAll tests passed!")
         
         # Output results
-        click.echo("\nTest Results:")
-        click.echo(json.dumps(results, indent=2))
+        click.echo("\nTest Results Summary")
+        click.echo("=" * 50)
+        
+        # Print test configuration details
+        click.echo(f"\nTest Configuration:")
+        click.echo(f"- Name: {test_config.get('name', 'Unnamed Test')}")
+        click.echo(f"- File: {resolved_file_path}")
+        click.echo(f"- Config: {config_path}")
+        
+        # Print overall status
+        overall_status = results.get('overall_status', 'unknown')
+        status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
+        status_emoji = "✅" if status == 'passed' else "❌"
+        click.echo(f"\nOverall Status: {status_emoji} {status.upper()}")
+        
+        # Print test results table
+        click.echo("\nTest Results Table:")
+        click.echo("| Test Name | Region | Status | Details |")
+        click.echo("|-----------|--------|--------|---------|")
+        
+        for region, result in results.items():
+            if region == 'overall_status':
+                continue
+                
+            test_cases = result.get('test_cases', [])
+            for test_case in test_cases:
+                status = "✅ PASS" if test_case.get('status') == 'passed' else "❌ FAIL"
+                try:
+                    details = str(test_case.get('details', ''))
+                    if len(details) > 50:
+                        details = details[:47] + "..."
+                except Exception:
+                    details = "Error displaying details"
+                click.echo(f"| {test_case.get('name', 'Unknown')} | {region} | {status} | {details} |")
+        
+        # Print failed tests details if any
+        failed_tests = collect_failed_tests(results)
+        if failed_tests:
+            click.echo("\nFailed Tests Details:")
+            click.echo("=" * 50)
+            for test in failed_tests:
+                click.echo(f"\nTest: {test['test_name']} ({test['region']})")
+                click.echo(f"Error: {test['error_message']}")
+                if test['output']:
+                    click.echo(f"Output:\n{test['output']}")
+            
+            if auto_fix:
+                click.echo("\nAuto-fix Attempts:")
+                click.echo("=" * 50)
+                click.echo(f"Maximum retries: {max_retries}")
+                if create_pr:
+                    click.echo("Pull request will be created with fixes")
+        
+        # Save detailed results to file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_file = Path("test-results") / f"{test_config.get('name', 'test')}_{timestamp}_report.txt"
+        result_file.parent.mkdir(exist_ok=True)
+        
+        with open(result_file, 'w') as f:
+            f.write("Test Results Report\n")
+            f.write("=" * 50 + "\n\n")
+            
+            # Write configuration details
+            f.write("Test Configuration:\n")
+            f.write(f"- Name: {test_config.get('name', 'Unnamed Test')}\n")
+            f.write(f"- File: {resolved_file_path}\n")
+            f.write(f"- Config: {config_path}\n\n")
+            
+            # Write overall status
+            f.write(f"Overall Status: {status_emoji} {status.upper()}\n\n")
+            
+            # Write detailed test results
+            f.write("Detailed Test Results:\n")
+            f.write("=" * 50 + "\n\n")
+            
+            for region, result in results.items():
+                if region == 'overall_status':
+                    continue
+                    
+                f.write(f"Region: {region}\n")
+                f.write("-" * 30 + "\n")
+                
+                test_cases = result.get('test_cases', [])
+                for test_case in test_cases:
+                    f.write(f"\nTest: {test_case.get('name', 'Unknown')}\n")
+                    f.write(f"Status: {test_case.get('status', 'unknown')}\n")
+                    if test_case.get('details'):
+                        f.write(f"Details: {test_case.get('details')}\n")
+                    if test_case.get('output'):
+                        f.write(f"Output:\n{test_case.get('output')}\n")
+                    if test_case.get('evaluation'):
+                        f.write(f"Evaluation:\n{json.dumps(test_case.get('evaluation'), indent=2)}\n")
+                    f.write("-" * 30 + "\n")
+            
+            # Write failed tests section if any
+            if failed_tests:
+                f.write("\nFailed Tests Analysis:\n")
+                f.write("=" * 50 + "\n\n")
+                for test in failed_tests:
+                    f.write(f"Test: {test['test_name']} ({test['region']})\n")
+                    f.write(f"Error: {test['error_message']}\n")
+                    if test['output']:
+                        f.write(f"Output:\n{test['output']}\n")
+                    f.write("-" * 30 + "\n")
+        
+        click.echo(f"\nDetailed report saved to: {result_file}")
         
     except Exception as e:
         click.echo(f"Error running tests: {str(e)}")
@@ -175,7 +293,8 @@ def run_test(test_file: str):
 @click.option('--results', '-r', type=click.Path(), help='Path to save test results')
 @click.option('--make-pr', is_flag=True, help='Create a GitHub pull request')
 @click.option('--max-retries', type=int, default=1, help='Maximum number of retry attempts for auto-fix (default: 1)')
-def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: bool, max_retries: int):
+@click.option('--base-branch', default='main', help='Base branch for pull request (default: main)')
+def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: bool, max_retries: int, base_branch: str):
     """
     Automatically fix failing tests.
     
@@ -205,30 +324,11 @@ def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: 
             test_results = runner.run_tests(resolved_file_path)
             
             # Collect failed tests
-            failed_tests = []
-            for region, result in test_results.items():
-                if not isinstance(result, dict):
-                    continue
-                    
-                test_cases = result.get('test_cases', [])
-                if not isinstance(test_cases, list):
-                    continue
-                    
-                for test_case in test_cases:
-                    if not isinstance(test_case, dict):
-                        continue
-                        
-                    if test_case.get('status') != 'passed':
-                        failed_tests.append({
-                            'region': region,
-                            'test_name': test_case.get('name', 'Unknown Test'),
-                            'error_message': test_case.get('details', 'Test failed'),
-                            'output': test_case.get('output', 'No output available')
-                        })
+            failed_tests = collect_failed_tests(test_results)
             
             if failed_tests:
                 # Run auto-fix
-                run_autofix_and_pr(failed_tests, str(resolved_file_path), test_file, max_retries=max_retries, create_pr=make_pr)
+                run_autofix_and_pr(failed_tests, str(resolved_file_path), str(Path(test_file).resolve()), max_retries=max_retries, create_pr=make_pr, base_branch=base_branch)
                 fixed_tests.extend(failed_tests)
         
         if fixed_tests:

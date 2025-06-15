@@ -2,7 +2,7 @@ import os
 from typing import Optional
 import google.generativeai as genai
 from dotenv import load_dotenv
-import sys # Added this import for sys.stdin.read()
+import sys
 
 # kaizen:start:email_agent
 class EmailAgent:

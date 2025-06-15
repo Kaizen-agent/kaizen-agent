@@ -523,6 +523,13 @@ class TestRunner:
             console.print(f"[blue]Debug: Test file path: {file_path}[/blue]")
             console.print(f"[blue]Debug: Config file path: {self.test_config.get('config_file')}[/blue]")
             
+            # Log file contents for debugging only if debug mode is enabled
+            debug_mode = os.getenv('KAIZEN_DEBUG', '').lower() in ('true', '1', 'yes')
+            if debug_mode:
+                with open(file_path, 'r') as f:
+                    file_contents = f.read()
+                    console.print(f"[blue]Debug: File contents:\n{file_contents}[/blue]")
+            
             # Initialize LLM evaluator if evaluation criteria are specified
             evaluator = None
             if 'evaluation' in self.test_config:
@@ -575,6 +582,7 @@ class TestRunner:
                             region: {
                                 'test_cases': [{
                                     'name': step_name,
+                                    'input': step.get('input', {}),
                                     'output': output,
                                     'details': logger.get_last_step_details()
                                 }]
@@ -616,6 +624,7 @@ class TestRunner:
                 # Add test case result
                 test_case = {
                     'name': step_name,
+                    'input': step.get('input', {}),
                     'status': 'passed' if passed else 'failed',
                     'output': output,
                     'details': logger.get_last_step_details()
@@ -631,8 +640,11 @@ class TestRunner:
                 if not passed:
                     results[region]['status'] = 'failed'
             
-            # Set overall status in a separate field
-            results['overall_status'] = 'failed' if not all_steps_passed else 'passed'
+            # Set overall status in a separate field with consistent structure
+            results['overall_status'] = {
+                'test_cases': [],
+                'status': 'failed' if not all_steps_passed else 'passed'
+            }
             
             if not all_steps_passed:
                 logger.logger.error("Test failed due to failed steps or evaluations")
