@@ -664,7 +664,14 @@ class TestRunner:
                             module_name = os.path.splitext(os.path.basename(step_file_path))[0]
                             package_name = os.path.basename(os.path.dirname(step_file_path))
                             parent_package = os.path.basename(os.path.dirname(os.path.dirname(step_file_path)))
-                            console.print(f"[blue]Debug: Creating module {module_name} in package {package_name} (parent: {parent_package})[/blue]")
+                            full_module_name = f"{parent_package}.{package_name}.{module_name}"
+                            console.print(f"[blue]Debug: Creating module {full_module_name}[/blue]")
+                            
+                            # Clean up any existing modules to prevent stale state
+                            for key in list(sys.modules.keys()):
+                                if key.startswith(f"{parent_package}.{package_name}"):
+                                    del sys.modules[key]
+                                    console.print(f"[blue]Debug: Cleaned up existing module {key}[/blue]")
                             
                             # Add parent directory to Python path if not already there
                             parent_dir = os.path.dirname(os.path.dirname(step_file_path))
@@ -673,7 +680,7 @@ class TestRunner:
                                 console.print(f"[blue]Debug: Added parent directory {parent_dir} to Python path[/blue]")
                             
                             # Create module spec and module
-                            spec = importlib.util.spec_from_file_location(f"{parent_package}.{package_name}.{module_name}", step_file_path)
+                            spec = importlib.util.spec_from_file_location(full_module_name, step_file_path)
                             if spec is None:
                                 raise ImportError(f"Could not create module spec for {step_file_path}")
                             
@@ -683,7 +690,7 @@ class TestRunner:
                             # Set up the module's namespace with proper package structure
                             module.__file__ = step_file_path
                             module.__package__ = f"{parent_package}.{package_name}"
-                            module.__name__ = f"{parent_package}.{package_name}.{module_name}"
+                            module.__name__ = full_module_name
                             
                             # Create parent package modules if they don't exist
                             if parent_package not in sys.modules:
@@ -719,7 +726,10 @@ class TestRunner:
                                 # First, execute the code block to define the class
                                 console.print("[blue]Debug: Executing code block first to define the class[/blue]")
                                 exec(code_block, module.__dict__)
-                                console.print(f"[blue]Debug: Module namespace after code block execution: {[k for k in module.__dict__.keys() if not k.startswith('_')]}[/blue]")
+                                # Only show non-private attributes that are not from builtins
+                                module_attrs = [k for k in module.__dict__.keys() 
+                                              if not k.startswith('_') and k not in __builtins__]
+                                console.print(f"[blue]Debug: Module namespace after code block execution: {module_attrs}[/blue]")
                                 
                                 # Then execute the imports
                                 console.print("[blue]Debug: Now executing imports[/blue]")
@@ -739,14 +749,18 @@ class TestRunner:
                                 except ImportError as e:
                                     console.print(f"[red]Error importing modules: {str(e)}[/red]")
                                     # Only log relevant modules in sys.modules
-                                    relevant_modules = [k for k in sys.modules.keys() if k.startswith(parent_package)]
+                                    relevant_modules = [k for k in sys.modules.keys() 
+                                                      if k.startswith(parent_package) and not k.startswith('_')]
                                     console.print(f"[blue]Debug: Relevant modules in sys.modules: {relevant_modules}[/blue]")
                                     console.print(f"[blue]Debug: sys.path: {sys.path}[/blue]")
                                     # Fall back to executing the import code
                                     console.print("[blue]Debug: Falling back to executing import code[/blue]")
                                     exec(import_code, module.__dict__)
                                 
-                                console.print(f"[blue]Debug: Module namespace after imports: {[k for k in module.__dict__.keys() if not k.startswith('_')]}[/blue]")
+                                # Only show non-private attributes that are not from builtins
+                                module_attrs = [k for k in module.__dict__.keys() 
+                                              if not k.startswith('_') and k not in __builtins__]
+                                console.print(f"[blue]Debug: Module namespace after imports: {module_attrs}[/blue]")
                             
                             # Get the class from the module
                             console.print("[blue]Debug: Looking for class with run method in module namespace[/blue]")
