@@ -59,7 +59,8 @@ def cli():
 @click.option('--auto-fix', is_flag=True, help='Automatically fix failing tests')
 @click.option('--create-pr', is_flag=True, help='Create a pull request with fixes')
 @click.option('--max-retries', type=int, default=1, help='Maximum number of retry attempts for auto-fix (default: 1)')
-def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
+@click.option('--base-branch', default='main', help='Base branch for pull request (default: main)')
+def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, base_branch: str):
     """
     Run all tests specified in the configuration file.
     
@@ -109,7 +110,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int):
             if auto_fix:
                 click.echo(f"\nAttempting to fix failing tests (max retries: {max_retries})...")
                 if file_path:
-                    run_autofix_and_pr(failed_tests, str(resolved_file_path), str(config_path), max_retries=max_retries, create_pr=create_pr)
+                    run_autofix_and_pr(failed_tests, str(resolved_file_path), str(config_path), max_retries=max_retries, create_pr=create_pr, base_branch=base_branch)
                     if create_pr:
                         click.echo("Pull request created with fixes")
                 else:
@@ -188,7 +189,8 @@ def run_test(test_file: str):
 @click.option('--results', '-r', type=click.Path(), help='Path to save test results')
 @click.option('--make-pr', is_flag=True, help='Create a GitHub pull request')
 @click.option('--max-retries', type=int, default=1, help='Maximum number of retry attempts for auto-fix (default: 1)')
-def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: bool, max_retries: int):
+@click.option('--base-branch', default='main', help='Base branch for pull request (default: main)')
+def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: bool, max_retries: int, base_branch: str):
     """
     Automatically fix failing tests.
     
@@ -222,7 +224,7 @@ def fix_tests(test_files: tuple, project: str, results: Optional[str], make_pr: 
             
             if failed_tests:
                 # Run auto-fix
-                run_autofix_and_pr(failed_tests, str(resolved_file_path), str(Path(test_file).resolve()), max_retries=max_retries, create_pr=make_pr)
+                run_autofix_and_pr(failed_tests, str(resolved_file_path), str(Path(test_file).resolve()), max_retries=max_retries, create_pr=make_pr, base_branch=base_branch)
                 fixed_tests.extend(failed_tests)
         
         if fixed_tests:
