@@ -658,131 +658,56 @@ class TestRunner:
                             
                             # Extract the code between markers
                             code_block = content[start_idx + len(start_marker):end_idx].strip()
-                            console.print(f"[blue]Debug: Extracted code block:\n{code_block}[/blue]")
+                            console.print(f"[blue]Debug: Extracted code block[/blue]")
                             
-                            # Create a new module for execution
-                            module_name = os.path.splitext(os.path.basename(step_file_path))[0]
-                            package_name = os.path.basename(os.path.dirname(step_file_path))
-                            parent_package = os.path.basename(os.path.dirname(os.path.dirname(step_file_path)))
-                            full_module_name = f"{parent_package}.{package_name}.{module_name}"
-                            console.print(f"[blue]Debug: Creating module {full_module_name}[/blue]")
-                            
-                            # Clean up any existing modules to prevent stale state
-                            for key in list(sys.modules.keys()):
-                                if key.startswith(f"{parent_package}.{package_name}"):
-                                    del sys.modules[key]
-                                    console.print(f"[blue]Debug: Cleaned up existing module {key}[/blue]")
-                            
-                            # Add parent directory to Python path if not already there
-                            parent_dir = os.path.dirname(os.path.dirname(step_file_path))
-                            if parent_dir not in sys.path:
-                                sys.path.insert(0, parent_dir)
-                                console.print(f"[blue]Debug: Added parent directory {parent_dir} to Python path[/blue]")
-                            
-                            # Create module spec and module
-                            spec = importlib.util.spec_from_file_location(full_module_name, step_file_path)
-                            if spec is None:
-                                raise ImportError(f"Could not create module spec for {step_file_path}")
-                            
-                            module = importlib.util.module_from_spec(spec)
-                            sys.modules[spec.name] = module
-                            
-                            # Set up the module's namespace with proper package structure
-                            module.__file__ = step_file_path
-                            module.__package__ = f"{parent_package}.{package_name}"
-                            module.__name__ = full_module_name
-                            
-                            # Create parent package modules if they don't exist
-                            if parent_package not in sys.modules:
-                                parent_spec = importlib.util.find_spec(parent_package)
-                                if parent_spec:
-                                    parent_module = importlib.util.module_from_spec(parent_spec)
-                                    sys.modules[parent_package] = parent_module
-                                    console.print(f"[blue]Debug: Created parent package module {parent_package}[/blue]")
-                            
-                            if f"{parent_package}.{package_name}" not in sys.modules:
-                                package_spec = importlib.util.find_spec(f"{parent_package}.{package_name}")
-                                if package_spec:
-                                    package_module = importlib.util.module_from_spec(package_spec)
-                                    sys.modules[f"{parent_package}.{package_name}"] = package_module
-                                    console.print(f"[blue]Debug: Created package module {parent_package}.{package_name}[/blue]")
-                            
-                            # Now handle the imports
+                            # Convert relative imports to absolute imports
                             import_lines = []
-                            for line in content.split('\n'):
+                            code_lines = []
+                            for line in code_block.split('\n'):
                                 if line.strip().startswith('from ') or line.strip().startswith('import '):
                                     # Convert relative imports to absolute imports
                                     if line.strip().startswith('from .'):
-                                        # Replace relative import with absolute import
-                                        line = line.replace('from .', f'from {parent_package}.{package_name}.')
+                                        line = line.replace('from .', f'from test_agent.summarizer_agent.')
+                                    elif line.strip().startswith('import .'):
+                                        line = line.replace('import .', f'import test_agent.summarizer_agent.')
                                     import_lines.append(line)
-                                elif line.strip() and not line.strip().startswith('#'):
-                                    break
+                                else:
+                                    code_lines.append(line)
                             
+                            # Create execution namespace
+                            namespace = {
+                                '__name__': '__main__',
+                                '__file__': step_file_path,
+                                '__package__': 'test_agent.summarizer_agent',
+                                '__builtins__': __builtins__,
+                            }
+                            
+                            # Execute imports first
                             if import_lines:
                                 import_code = '\n'.join(import_lines)
-                                console.print(f"[blue]Debug: Executing imports:\n{import_code}[/blue]")
-                                
-                                # First, execute the code block to define the class
-                                console.print("[blue]Debug: Executing code block first to define the class[/blue]")
-                                exec(code_block, module.__dict__)
-                                # Only show non-private attributes that are not from builtins
-                                module_attrs = [k for k in module.__dict__.keys() 
-                                              if not k.startswith('_') and k not in __builtins__]
-                                console.print(f"[blue]Debug: Module namespace after code block execution: {module_attrs}[/blue]")
-                                
-                                # Then execute the imports
-                                console.print("[blue]Debug: Now executing imports[/blue]")
-                                try:
-                                    # Import the required modules
-                                    console.print(f"[blue]Debug: Importing prompt module[/blue]")
-                                    prompt_module = importlib.import_module(f"{parent_package}.{package_name}.prompt")
-                                    console.print(f"[blue]Debug: Importing utils module[/blue]")
-                                    utils_module = importlib.import_module(f"{parent_package}.{package_name}.utils")
-                                    
-                                    # Add them to the module namespace
-                                    console.print(f"[blue]Debug: Adding functions to module namespace[/blue]")
-                                    module.__dict__['get_prompt'] = getattr(prompt_module, 'get_prompt')
-                                    module.__dict__['call_gemini_llm'] = getattr(utils_module, 'call_gemini_llm')
-                                    
-                                    console.print(f"[blue]Debug: Successfully imported modules[/blue]")
-                                except ImportError as e:
-                                    console.print(f"[red]Error importing modules: {str(e)}[/red]")
-                                    # Only log relevant modules in sys.modules
-                                    relevant_modules = [k for k in sys.modules.keys() 
-                                                      if k.startswith(parent_package) and not k.startswith('_')]
-                                    console.print(f"[blue]Debug: Relevant modules in sys.modules: {relevant_modules}[/blue]")
-                                    console.print(f"[blue]Debug: sys.path: {sys.path}[/blue]")
-                                    # Fall back to executing the import code
-                                    console.print("[blue]Debug: Falling back to executing import code[/blue]")
-                                    exec(import_code, module.__dict__)
-                                
-                                # Only show non-private attributes that are not from builtins
-                                module_attrs = [k for k in module.__dict__.keys() 
-                                              if not k.startswith('_') and k not in __builtins__]
-                                console.print(f"[blue]Debug: Module namespace after imports: {module_attrs}[/blue]")
+                                console.print(f"[blue]Debug: Executing imports[/blue]")
+                                exec(import_code, namespace)
                             
-                            # Get the class from the module
-                            console.print("[blue]Debug: Looking for class with run method in module namespace[/blue]")
-                            console.print(f"[blue]Debug: Available names in module: {list(module.__dict__.keys())}[/blue]")
+                            # Execute the code block
+                            code_block = '\n'.join(code_lines)
+                            console.print(f"[blue]Debug: Executing code block[/blue]")
+                            exec(code_block, namespace)
                             
+                            # Find the class with run method
                             class_name = None
-                            for name, obj in module.__dict__.items():
+                            for name, obj in namespace.items():
                                 if isinstance(obj, type) and hasattr(obj, 'run'):
                                     class_name = name
-                                    console.print(f"[blue]Debug: Found class {name} with run method[/blue]")
+                                    console.print(f"[blue]Debug: Found class {name}[/blue]")
                                     break
-                                    
-                            if class_name is None:
-                                console.print("[red]Error: No class with run method found in module namespace[/red]")
-                                raise ImportError(f"Could not find class with run method in the extracted code block")
-                                
-                            # Get the class and call its run method
-                            console.print(f"[blue]Debug: Getting class {class_name} from module[/blue]")
-                            cls = getattr(module, class_name)
                             
+                            if class_name is None:
+                                raise ImportError("Could not find class with run method in the code block")
+                            
+                            # Create instance and run
+                            cls = namespace[class_name]
                             input_text = step.get('input', {}).get('input', '')
-                            console.print(f"[blue]Debug: Calling run method with input: {input_text}[/blue]")
+                            console.print(f"[blue]Debug: Running with input[/blue]")
                             
                             if isinstance(cls.run, staticmethod):
                                 output = str(cls.run(input_text))
@@ -790,12 +715,7 @@ class TestRunner:
                                 instance = cls()
                                 output = str(instance.run(input_text))
                             
-                            console.print(f"[blue]Debug: Run method output: {output}[/blue]")
-                            
-                            # Store the module in sys.modules to prevent it from being garbage collected
-                            module_name = f"{parent_package}.{package_name}.{os.path.splitext(os.path.basename(step_file_path))[0]}"
-                            sys.modules[module_name] = module
-                            console.print(f"[blue]Debug: Stored module {module_name} in sys.modules[/blue]")
+                            console.print(f"[blue]Debug: Run completed[/blue]")
                             
                         except Exception as e:
                             console.print(f"[red]Error during execution: {str(e)}[/red]")
