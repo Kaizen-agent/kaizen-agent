@@ -33,7 +33,7 @@ class EmailAgent:
             draft (str): The original email draft to improve
             
         Returns:
-            str: The improved email draft
+            str: The improved email draft or a specific error message if the input is not a valid email draft.
         """
         # Modified to raise a ValueError for empty/whitespace drafts, making the method's
         # behavior more consistent with typical API functions (raising errors for invalid input).
@@ -41,19 +41,20 @@ class EmailAgent:
         if not draft or not draft.strip():
             raise ValueError("Email draft cannot be empty or contain only whitespace.")
             
-        # Add safety instructions to the prompt
-        prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
-        Focus on:
-        - Professional tone and language
-        - Clear and concise communication
-        - Proper email etiquette
-        - Maintaining the original message's intent
-        
-        Here's the draft:
-        
+        # Modified the prompt to handle non-email inputs and ensure specific output format
+        prompt = f"""You are an email improvement assistant. Your task is to refine and professionalize email drafts.
+
+        **Instructions:**
+        1. If the provided text is clearly NOT an email draft (e.g., a general question, a random phrase, or a non-email-related text), you MUST respond ONLY with the exact phrase: "I'm sorry, I can't help with that."
+        2. If the provided text IS an email draft, improve it to be more professional, clear, and effective, while maintaining its original intent.
+           - Focus on: professional tone, clear/concise communication, proper email etiquette.
+           - The output MUST ONLY contain the improved email draft. DO NOT include any introductory phrases like "Here's the improved email:" or conversational filler.
+           - Ensure there are no grammar errors.
+
+        Here's the draft to process:
+
         {draft}
-        
-        Improved version:"""
+        """
 
         try:
             # Removed debug print: print(f"Debug: Prompt: {prompt}")
