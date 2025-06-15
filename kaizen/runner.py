@@ -767,6 +767,30 @@ class TestRunner:
                                 if not passed:
                                     results[region]['status'] = 'failed'
                                     all_steps_passed = False
+                            else:
+                                # Handle case where no output was produced
+                                error_msg = "No output produced from test execution"
+                                logger.log_step_result(step_index, None, False, error_msg)
+                                all_steps_passed = False
+                                
+                                # Update results
+                                region = step.get('input', {}).get('region', 'default')
+                                if region not in results:
+                                    results[region] = {
+                                        'test_cases': [],
+                                        'status': 'failed'
+                                    }
+                                
+                                test_case = {
+                                    'name': step_name,
+                                    'input': step.get('input', {}),
+                                    'status': 'failed',
+                                    'output': None,
+                                    'details': logger.get_last_step_details()
+                                }
+                                
+                                results[region]['test_cases'].append(test_case)
+                                results[region]['status'] = 'failed'
                             
                     # Update overall status
                     results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
