@@ -170,6 +170,9 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
     Returns:
         str: Output from the code block execution or error message
     """
+    # Initialize parent_dirs before the try block
+    parent_dirs = []
+    
     try:
         console.print(f"[blue]Debug: run_test_block called with file_path={file_path}, config_file={config_file}[/blue]")
         
@@ -206,7 +209,6 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
 
         # Add the file's directory and parent directories to Python path
         file_dir = os.path.dirname(os.path.abspath(code_file))
-        parent_dirs = []
         current_dir = file_dir
         while current_dir and current_dir != os.path.dirname(current_dir):
             if current_dir not in sys.path:
@@ -260,9 +262,13 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
                     # Try to find and process the imported module if it's a local import
                     try:
                         if line.startswith('from '):
-                            module_name = line.split()[1].split()[0]  # Handle 'from x import y'
+                            # Handle 'from x import y' and strip leading dots
+                            module_name = line.split()[1].split()[0]  # Get the module name
+                            module_name = module_name.lstrip('.')  # Remove leading dots
                         else:
+                            # Handle 'import x' and strip leading dots
                             module_name = line.split()[1].split('.')[0]
+                            module_name = module_name.lstrip('.')  # Remove leading dots
                             
                         # Check if it's a local module
                         module_path = os.path.join(base_dir, f"{module_name}.py")
@@ -305,11 +311,12 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
     except Exception as e:
         return f"Error executing code block: {str(e)}"
     finally:
-        # Clean up: remove the added paths
-        for directory in parent_dirs:
-            if directory in sys.path:
-                sys.path.remove(directory)
-                console.print(f"[blue]Debug: Removed {directory} from Python path[/blue]")
+        # Clean up: remove the added paths only if parent_dirs is not empty
+        if parent_dirs:
+            for directory in parent_dirs:
+                if directory in sys.path:
+                    sys.path.remove(directory)
+                    console.print(f"[blue]Debug: Removed {directory} from Python path[/blue]")
 
 class TestRunner:
     def __init__(self, test_config: Optional[Dict] = None):

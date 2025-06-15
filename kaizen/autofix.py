@@ -813,6 +813,9 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         GithubException: If GitHub API operations fail
     """
     try:
+        # Store the original file path to avoid shadowing
+        main_file_path = file_path
+        
         # Store the original branch
         original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
         logger.info(f"Stored original branch: {original_branch}")
@@ -847,7 +850,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         
         # Generate PR info with test configuration
         try:
-            branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], {}, test_config, original_codes[file_path])
+            branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], {}, test_config, original_codes[main_file_path])
             logger.info(f"Generated PR info: {branch_name}, {pr_title}, {pr_body}")
         except Exception as e:
             logger.warning(f"Failed to generate PR info: {str(e)}")
@@ -873,24 +876,25 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
             
             fixed_codes = {}
-            for file_path, failures in file_failures.items():
+            for current_file_path, failures in file_failures.items():
                 if failures:  # Only fix files with failures
-                    logger.info(f"Requesting code fixes for {file_path}")
+                    logger.info(f"Requesting code fixes for {current_file_path}")
                     response = model.generate_content(pr_body)
                     fixed_code = response.text.strip()
-                    logger.info(f"Fixed code for {file_path}: {fixed_code}")
+                    logger.info(f"Fixed code for {current_file_path}: {fixed_code}")
                     
                     # Validate and improve the generated code
-                    fixed_code = _validate_and_improve_code(fixed_code, original_codes[file_path])
-                    logger.info(f"Validated and improved generated code for {file_path}")
+                    fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file_path])
+                    logger.info(f"Validated and improved generated code for {current_file_path}")
                     
-                    fixed_codes[file_path] = fixed_code
+                    fixed_codes[current_file_path] = fixed_code
             
             # Write all fixed code to disk before running tests
-            for file_path, code in fixed_codes.items():
-                with open(file_path, 'w') as f:
+            logger.info("Writing best fixed code back to disk")
+            for current_file_path, code in fixed_codes.items():
+                with open(current_file_path, 'w') as f:
                     f.write(code)
-                logger.info(f"Updated file: {file_path}")
+                logger.info(f"Updated file: {current_file_path}")
             
             # Reload all affected modules
             _reload_modules(set(fixed_codes.keys()))
@@ -988,7 +992,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         logger.info(f"Fixed {len(fixed_tests)} previously failing tests")
         
         # Update PR info with fixed tests
-        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results, test_config, original_codes[file_path])
+        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results, test_config, original_codes[main_file_path])
         logger.info(f"Updated branch name: {branch_name}")
         
         # Create a new branch
@@ -1007,8 +1011,8 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         
         # Write the best fixed code back to disk before committing
         logger.info("Writing best fixed code back to disk")
-        for file_path, code in fixed_codes.items():
-            with open(file_path, 'w') as f:
+        for current_file_path, code in fixed_codes.items():
+            with open(current_file_path, 'w') as f:
                 f.write(code)
         
         # Commit changes with a proper commit message
