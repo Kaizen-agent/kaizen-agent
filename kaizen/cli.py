@@ -96,7 +96,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
             sys.exit(1)
             
         results = runner.run_tests(resolved_file_path)
-        
+        print(results)
         # Check if any tests failed
         failed_tests = collect_failed_tests(results)
         
