@@ -431,9 +431,6 @@ class DynamicRegionRunner(AgentRunner):
             if module_name in sys.modules:
                 importlib.reload(sys.modules[module_name])
             
-            # Execute the full file to set up the context
-            exec(code, namespace)
-            
             # Extract the specified region
             region = input_data.get('region')
             if region:
@@ -460,8 +457,13 @@ class DynamicRegionRunner(AgentRunner):
             # Extract the code block
             block_code = code[start_idx + len(start_marker):end_idx].strip()
             
-            # Execute the block
-            exec(block_code, namespace)
+            # Execute either the full file or just the block based on whether a region was specified
+            if not region:
+                # If no specific region was requested, execute the full file
+                exec(code, namespace)
+            else:
+                # If a specific region was requested, only execute that block
+                exec(block_code, namespace)
             
             # If a method is specified, call it with the input
             method = input_data.get('method')

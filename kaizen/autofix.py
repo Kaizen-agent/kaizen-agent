@@ -93,7 +93,10 @@ def _generate_pr_info(failure_data: List[Dict], fixed_tests: List[Dict], test_re
         # Prepare prompt for LLM
         prompt = f"""You are a senior software engineer specializing in AI agent development. Your task is to improve the following code by fixing the issues described in the test failures. Make only minimal changes necessary to resolve all problems while preserving existing logic.
 
-IMPORTANT: You must return valid Python code that can be executed. DO NOT return empty code blocks or invalid syntax.
+IMPORTANT: You must return your response in exactly three newline-separated fields:
+1. First line: A descriptive branch name (will be sanitized and timestamped)
+2. Second line: A concise PR title
+3. Remaining lines: The complete fixed code file
 
 Context:
 1. This is an AI agent code that needs to be fixed
@@ -116,7 +119,7 @@ Requirements:
 3. Ensure proper error handling and input validation
 4. Maintain code quality standards (type hints, documentation, etc.)
 5. Keep changes minimal and focused on fixing the specific issues
-6. Return only the complete fixed code file, no explanations
+6. Return exactly three newline-separated fields as specified above
 7. DO NOT return empty code blocks or invalid syntax
 8. The returned code must be valid Python code that can be executed
 
@@ -226,7 +229,7 @@ Code Improvement Guidelines:
    - Include output sanitization
    - Add quality scoring mechanisms
 
-Return the complete fixed code file that addresses all test failures while following these guidelines."""
+Return your response in exactly three newline-separated fields as specified at the top of this prompt."""
         
         # Call Gemini API
         response = model.generate_content(prompt)
@@ -276,86 +279,98 @@ Return the complete fixed code file that addresses all test failures while follo
 """
         return branch_name, pr_title, pr_body
 
-def _validate_and_improve_code(code: str, original_code: str) -> str:
+class CodeValidationError(Exception):
+    """Exception raised when code validation and improvement fails."""
+    pass
+
+def _extract_code_blocks(text: str) -> List[str]:
     """
-    Validate and improve the generated code if it has invalid syntax.
+    Extract code blocks from text that may contain markdown or other formatting.
     
     Args:
-        code: The generated code to validate
-        original_code: The original code for reference
+        text: Text that may contain code blocks
         
     Returns:
-        str: Improved code that should be valid Python syntax
+        List of extracted code blocks
+    """
+    code_blocks = []
+    in_code_block = False
+    current_block = []
+    
+    for line in text.split('\n'):
+        if line.strip().startswith('```'):
+            if in_code_block:
+                code_blocks.append('\n'.join(current_block))
+                current_block = []
+            in_code_block = not in_code_block
+        elif in_code_block:
+            current_block.append(line)
+    
+    return code_blocks
+
+def _extract_kaizen_blocks(text: str) -> List[str]:
+    """
+    Extract code blocks between kaizen markers.
+    
+    Args:
+        text: Text that may contain kaizen-marked code blocks
+        
+    Returns:
+        List of extracted kaizen code blocks
+    """
+    kaizen_blocks = []
+    in_kaizen_block = False
+    current_block = []
+    
+    for line in text.split('\n'):
+        if '# kaizen:start:' in line:
+            in_kaizen_block = True
+        elif '# kaizen:end:' in line:
+            if current_block:
+                kaizen_blocks.append('\n'.join(current_block))
+                current_block = []
+            in_kaizen_block = False
+        elif in_kaizen_block:
+            current_block.append(line)
+    
+    return kaizen_blocks
+
+def _validate_code_syntax(code: str) -> bool:
+    """
+    Validate if the given code has valid Python syntax.
+    
+    Args:
+        code: Code to validate
+        
+    Returns:
+        bool: True if code has valid syntax, False otherwise
     """
     try:
-        # First try to parse the code to check syntax
         ast.parse(code)
-        return code
-    except SyntaxError as e:
-        logger.warning(f"Generated code has invalid syntax: {str(e)}")
+        return True
+    except SyntaxError:
+        return False
+
+def _attempt_llm_fix(code: str, original_code: str) -> str:
+    """
+    Attempt to fix code syntax using LLM.
+    
+    Args:
+        code: Invalid code to fix
+        original_code: Original code for reference
         
-        # If code is empty or just whitespace, try to extract code from the response
-        if not code.strip():
-            logger.warning("Generated code is empty, attempting to extract code from response")
-            # Try to find code blocks in the response
-            code_blocks = []
-            in_code_block = False
-            current_block = []
-            
-            for line in code.split('\n'):
-                if line.strip().startswith('```'):
-                    if in_code_block:
-                        code_blocks.append('\n'.join(current_block))
-                        current_block = []
-                    in_code_block = not in_code_block
-                elif in_code_block:
-                    current_block.append(line)
-            
-            if code_blocks:
-                # Try each code block until we find a valid one
-                for block in code_blocks:
-                    try:
-                        ast.parse(block)
-                        logger.info("Found valid code block in response")
-                        return block
-                    except SyntaxError:
-                        continue
-            
-            # If no valid code blocks found, try to extract code between kaizen markers
-            kaizen_blocks = []
-            in_kaizen_block = False
-            current_block = []
-            
-            for line in code.split('\n'):
-                if '# kaizen:start:' in line:
-                    in_kaizen_block = True
-                elif '# kaizen:end:' in line:
-                    if current_block:
-                        kaizen_blocks.append('\n'.join(current_block))
-                        current_block = []
-                    in_kaizen_block = False
-                elif in_kaizen_block:
-                    current_block.append(line)
-            
-            if kaizen_blocks:
-                # Try each kaizen block until we find a valid one
-                for block in kaizen_blocks:
-                    try:
-                        ast.parse(block)
-                        logger.info("Found valid code in kaizen block")
-                        return block
-                    except SyntaxError:
-                        continue
+    Returns:
+        str: Fixed code if successful
         
-        # If we still don't have valid code, try to fix common syntax issues
-        try:
-            # Initialize Gemini for code improvement
-            config = get_config()
-            genai.configure(api_key=config.get_api_key("google"))
-            model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
-            
-            # Create prompt for fixing syntax
-            prompt = f"""The following Python code has invalid syntax. Please fix it to be valid Python code that can be executed.
+    Raises:
+        CodeValidationError: If LLM fix attempt fails
+    """
+    try:
+        config = get_config()
+        genai.configure(api_key=config.get_api_key("google"))
+        model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+        
+        prompt = f"""The following Python code has invalid syntax. Please fix it to be valid Python code that can be executed.
 The code should maintain the improvements and fixes from the invalid code while ensuring it is syntactically correct.
 
 Original Code (for reference only, do not revert to this):
@@ -381,42 +396,74 @@ Requirements:
 14. Return ONLY the fixed code
 
 Return only the fixed code, no explanations or additional text."""
+        
+        response = model.generate_content(prompt)
+        improved_code = response.text.strip()
+        improved_code = improved_code.replace('```python', '').replace('```', '').strip()
+        
+        if _validate_code_syntax(improved_code):
+            return improved_code
             
-            # Get improved code from Gemini
-            response = model.generate_content(prompt)
-            improved_code = response.text.strip()
-            
-            # Clean up the response to ensure it's just code
-            improved_code = improved_code.replace('```python', '').replace('```', '').strip()
-            
-            # Validate the improved code
-            try:
-                ast.parse(improved_code)
-                logger.info("Successfully improved code syntax")
-                return improved_code
-            except SyntaxError:
-                logger.warning("Failed to improve code syntax, attempting to extract code from response")
-                # Try to extract code from the response
-                code_lines = []
-                for line in improved_code.split('\n'):
-                    if line.strip() and not line.strip().startswith(('#', '```', 'Here', 'The', 'This')):
-                        code_lines.append(line)
-                
-                if code_lines:
-                    try:
-                        extracted_code = '\n'.join(code_lines)
-                        ast.parse(extracted_code)
-                        logger.info("Successfully extracted valid code from response")
-                        return extracted_code
-                    except SyntaxError:
-                        pass
-                
-                logger.warning("All attempts to fix code failed, returning original code")
-                return original_code
-                
-        except Exception as e:
-            logger.error(f"Error improving code: {str(e)}")
-            return original_code
+        # Try to extract valid code from the response
+        code_lines = []
+        for line in improved_code.split('\n'):
+            if line.strip() and not line.strip().startswith(('#', '```', 'Here', 'The', 'This')):
+                code_lines.append(line)
+        
+        if code_lines:
+            extracted_code = '\n'.join(code_lines)
+            if _validate_code_syntax(extracted_code):
+                return extracted_code
+        
+        raise CodeValidationError("LLM failed to generate valid code")
+        
+    except Exception as e:
+        raise CodeValidationError(f"Error during LLM fix attempt: {str(e)}")
+
+def _validate_and_improve_code(code: str, original_code: str) -> str:
+    """
+    Validate and improve the generated code if it has invalid syntax.
+    
+    Args:
+        code: The generated code to validate
+        original_code: The original code for reference
+        
+    Returns:
+        str: Improved code that should be valid Python syntax
+        
+    Raises:
+        CodeValidationError: If all attempts to fix the code fail
+    """
+    # First try to parse the code to check syntax
+    if _validate_code_syntax(code):
+        return code
+        
+    logger.warning("Generated code has invalid syntax, attempting to fix")
+    
+    # If code is empty or just whitespace, try to extract code from the response
+    if not code.strip():
+        logger.warning("Generated code is empty, attempting to extract code from response")
+        
+        # Try code blocks first
+        code_blocks = _extract_code_blocks(code)
+        for block in code_blocks:
+            if _validate_code_syntax(block):
+                logger.info("Found valid code block in response")
+                return block
+        
+        # Try kaizen blocks next
+        kaizen_blocks = _extract_kaizen_blocks(code)
+        for block in kaizen_blocks:
+            if _validate_code_syntax(block):
+                logger.info("Found valid code in kaizen block")
+                return block
+    
+    # If we still don't have valid code, try to fix common syntax issues
+    try:
+        return _attempt_llm_fix(code, original_code)
+    except CodeValidationError as e:
+        logger.error(f"All attempts to fix code failed: {str(e)}")
+        raise
 
 def _enhance_pr_body(failure_data: List[Dict], fixed_tests: List[Dict], test_results: Dict, test_config: Dict) -> str:
     """
