@@ -42,17 +42,24 @@ class EmailAgent:
             raise ValueError("Email draft cannot be empty or contain only whitespace.")
             
         # Add safety instructions to the prompt
-        prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
+        # Modified prompt to handle non-email inputs and ensure strict output format for valid emails.
+        prompt = f"""
+        Instructions:
+        1. If the provided text is NOT an email draft or is completely irrelevant to improving an email (e.g., a random question, a sentence not meant as a draft, or just keywords), respond ONLY with "I'm sorry, I can't help with that." Do NOT include any other text, explanations, or formatting.
+        2. Otherwise, please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
+        3. The output should contain ONLY the improved email draft. Do NOT include any conversational text, prefixes like "Here's the improved email:", "Subject:", "Body:", or any other additional comments or explanations.
+
         Focus on:
         - Professional tone and language
         - Clear and concise communication
         - Proper email etiquette
         - Maintaining the original message's intent
-        
+        - Correcting grammar and spelling errors
+
         Here's the draft:
-        
+
         {draft}
-        
+
         Improved version:"""
 
         try:
