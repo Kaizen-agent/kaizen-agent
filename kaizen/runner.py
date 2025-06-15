@@ -660,6 +660,23 @@ class TestRunner:
                             code_block = content[start_idx + len(start_marker):end_idx].strip()
                             console.print(f"[blue]Debug: Extracted code block:\n{code_block}[/blue]")
                             
+                            # Create a new module for execution
+                            module_name = os.path.splitext(os.path.basename(step_file_path))[0]
+                            package_name = os.path.basename(os.path.dirname(step_file_path))
+                            console.print(f"[blue]Debug: Creating module {module_name} in package {package_name}[/blue]")
+                            
+                            # Create module spec and module
+                            spec = importlib.util.spec_from_file_location(f"{package_name}.{module_name}", step_file_path)
+                            if spec is None:
+                                raise ImportError(f"Could not create module spec for {step_file_path}")
+                            
+                            module = importlib.util.module_from_spec(spec)
+                            sys.modules[spec.name] = module
+                            
+                            # Set up the module's namespace
+                            module.__file__ = step_file_path
+                            module.__package__ = package_name
+                            
                             # Now handle the imports
                             import_lines = []
                             for line in content.split('\n'):
