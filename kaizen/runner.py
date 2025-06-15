@@ -638,8 +638,11 @@ class TestRunner:
                 if not passed:
                     results[region]['status'] = 'failed'
             
-            # Set overall status in a separate field
-            results['overall_status'] = 'failed' if not all_steps_passed else 'passed'
+            # Set overall status in a separate field with consistent structure
+            results['overall_status'] = {
+                'test_cases': [],
+                'status': 'failed' if not all_steps_passed else 'passed'
+            }
             
             if not all_steps_passed:
                 logger.logger.error("Test failed due to failed steps or evaluations")
