@@ -643,6 +643,11 @@ class TestRunner:
                             module.__file__ = step_file_path
                             module.__package__ = package_name
                             
+                            # Add the package directory to sys.path if not already there
+                            package_dir = os.path.dirname(step_file_path)
+                            if package_dir not in sys.path:
+                                sys.path.insert(0, package_dir)
+                            
                             # Execute the module's code
                             spec.loader.exec_module(module)
                             
@@ -670,6 +675,10 @@ class TestRunner:
                             results['overall_status']['status'] = 'failed'
                             results['overall_status']['error'] = error_msg
                             return results
+                        finally:
+                            # Clean up: remove the package directory from sys.path
+                            if package_dir in sys.path:
+                                sys.path.remove(package_dir)
                         
                         console.print(f"[blue]Debug: Test block output: {output}[/blue]")
                     
