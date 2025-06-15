@@ -604,120 +604,121 @@ class TestRunner:
             try:
                 # Run each test step
                 for step in self.test_config.get('steps', []):
-                    step_index = step.get('step_index')
-                    step_name = step.get('name', f'Step {step_index}')
-                    
-                    logger.log_step_start(step_index, step.get('input', {}))
-                    
-                    # Run the step and capture output
-                    output = None
-                    if 'region' in step.get('input', {}):
-                        console.print(f"[blue]Debug: Running test block for step {step_index}[/blue]")
+                    try:
+                        step_index = step.get('step_index')
+                        step_name = step.get('name', f'Step {step_index}')
                         
-                        # Use the step's file_path if provided, otherwise use the main test file path
-                        step_file_path = step.get('input', {}).get('file_path')
-                        if step_file_path:
-                            # Resolve the step's file path relative to the config file
-                            if self.test_config.get('config_file'):
-                                config_dir = os.path.dirname(os.path.abspath(self.test_config['config_file']))
-                                step_file_path = os.path.normpath(os.path.join(config_dir, step_file_path))
-                            console.print(f"[blue]Debug: Using step's file path: {step_file_path}[/blue]")
-                        else:
-                            step_file_path = str(file_path)
-                            console.print(f"[blue]Debug: Using main test file path: {step_file_path}[/blue]")
+                        logger.log_step_start(step_index, step.get('input', {}))
                         
-                        try:
-                            # Read the file content
-                            console.print(f"[blue]Debug: Reading file content from {step_file_path}[/blue]")
-                            with open(step_file_path, 'r') as f:
-                                content = f.read()
+                        # Run the step and capture output
+                        output = None
+                        if 'region' in step.get('input', {}):
+                            console.print(f"[blue]Debug: Running test block for step {step_index}[/blue]")
                             
-                            # Extract the code between kaizen markers first
-                            region = step.get('input', {}).get('region')
-                            if region:
-                                start_marker = f'# kaizen:start:{region}'
-                                end_marker = f'# kaizen:end:{region}'
+                            # Use the step's file_path if provided, otherwise use the main test file path
+                            step_file_path = step.get('input', {}).get('file_path')
+                            if step_file_path:
+                                # Resolve the step's file path relative to the config file
+                                if self.test_config.get('config_file'):
+                                    config_dir = os.path.dirname(os.path.abspath(self.test_config['config_file']))
+                                    step_file_path = os.path.normpath(os.path.join(config_dir, step_file_path))
+                                console.print(f"[blue]Debug: Using step's file path: {step_file_path}[/blue]")
                             else:
-                                start_marker = '# kaizen:start'
-                                end_marker = '# kaizen:end'
+                                step_file_path = str(file_path)
+                                console.print(f"[blue]Debug: Using main test file path: {step_file_path}[/blue]")
                             
-                            console.print(f"[blue]Debug: Looking for markers: start='{start_marker}', end='{end_marker}'[/blue]")
-                            
-                            start_idx = content.find(start_marker)
-                            if start_idx == -1:
-                                raise ImportError(f"Start marker '{start_marker}' not found in {step_file_path}")
-                            
-                            end_idx = content.find(end_marker, start_idx)
-                            if end_idx == -1:
-                                raise ImportError(f"End marker '{end_marker}' not found in {step_file_path}")
-                            
-                            # Extract the code between markers
-                            code_block = content[start_idx + len(start_marker):end_idx].strip()
-                            console.print("[blue]Debug: Extracted code block[/blue]")
-                            
-                            # Create execution namespace
-                            namespace = {
-                                '__name__': '__main__',
-                                '__file__': step_file_path,
-                                '__package__': 'test_agent.summarizer_agent',
-                                '__builtins__': __builtins__,
-                            }
-                            
-                            # Add the parent directory to Python path
-                            parent_dir = os.path.dirname(os.path.dirname(step_file_path))
-                            if parent_dir not in sys.path:
-                                sys.path.insert(0, parent_dir)
-                                console.print(f"[blue]Debug: Added {parent_dir} to Python path[/blue]")
-                            
-                            # Import required modules first
                             try:
-                                console.print("[blue]Debug: Attempting to import required modules[/blue]")
-                                from test_agent.summarizer_agent.prompt import get_prompt
-                                from test_agent.summarizer_agent.utils import call_gemini_llm
-                                namespace['get_prompt'] = get_prompt
-                                namespace['call_gemini_llm'] = call_gemini_llm
-                                console.print("[blue]Debug: Successfully imported modules[/blue]")
-                            except ImportError as e:
-                                console.print(f"[red]Error importing required functions: {str(e)}[/red]")
+                                # Read the file content
+                                console.print(f"[blue]Debug: Reading file content from {step_file_path}[/blue]")
+                                with open(step_file_path, 'r') as f:
+                                    content = f.read()
+                                
+                                # Extract the code between kaizen markers first
+                                region = step.get('input', {}).get('region')
+                                if region:
+                                    start_marker = f'# kaizen:start:{region}'
+                                    end_marker = f'# kaizen:end:{region}'
+                                else:
+                                    start_marker = '# kaizen:start'
+                                    end_marker = '# kaizen:end'
+                                
+                                console.print(f"[blue]Debug: Looking for markers: start='{start_marker}', end='{end_marker}'[/blue]")
+                                
+                                start_idx = content.find(start_marker)
+                                if start_idx == -1:
+                                    raise ImportError(f"Start marker '{start_marker}' not found in {step_file_path}")
+                                
+                                end_idx = content.find(end_marker, start_idx)
+                                if end_idx == -1:
+                                    raise ImportError(f"End marker '{end_marker}' not found in {step_file_path}")
+                                
+                                # Extract the code between markers
+                                code_block = content[start_idx + len(start_marker):end_idx].strip()
+                                console.print("[blue]Debug: Extracted code block[/blue]")
+                                
+                                # Create execution namespace
+                                namespace = {
+                                    '__name__': '__main__',
+                                    '__file__': step_file_path,
+                                    '__package__': 'test_agent.summarizer_agent',
+                                    '__builtins__': __builtins__,
+                                }
+                                
+                                # Add the parent directory to Python path
+                                parent_dir = os.path.dirname(os.path.dirname(step_file_path))
+                                if parent_dir not in sys.path:
+                                    sys.path.insert(0, parent_dir)
+                                    console.print(f"[blue]Debug: Added {parent_dir} to Python path[/blue]")
+                                
+                                # Import required modules first
+                                try:
+                                    console.print("[blue]Debug: Attempting to import required modules[/blue]")
+                                    from test_agent.summarizer_agent.prompt import get_prompt
+                                    from test_agent.summarizer_agent.utils import call_gemini_llm
+                                    namespace['get_prompt'] = get_prompt
+                                    namespace['call_gemini_llm'] = call_gemini_llm
+                                    console.print("[blue]Debug: Successfully imported modules[/blue]")
+                                except ImportError as e:
+                                    console.print(f"[red]Error importing required functions: {str(e)}[/red]")
+                                    raise
+                                
+                                # Execute the code block
+                                console.print("[blue]Debug: Executing code block[/blue]")
+                                exec(code_block, namespace)
+                                console.print("[blue]Debug: Successfully executed code block[/blue]")
+                                
+                                # Find the class with run method
+                                class_name = None
+                                for name, obj in namespace.items():
+                                    if isinstance(obj, type) and hasattr(obj, 'run'):
+                                        class_name = name
+                                        console.print(f"[blue]Debug: Found class {name}[/blue]")
+                                        break
+                                
+                                if class_name is None:
+                                    raise ImportError("Could not find class with run method in the code block")
+                                
+                                # Create instance and run
+                                cls = namespace[class_name]
+                                input_text = step.get('input', {}).get('input', '')
+                                console.print("[blue]Debug: Running with input[/blue]")
+                                
+                                if isinstance(cls.run, staticmethod):
+                                    output = str(cls.run(input_text))
+                                else:
+                                    instance = cls()
+                                    output = str(instance.run(input_text))
+                                
+                                console.print("[blue]Debug: Run completed[/blue]")
+                                
+                            except Exception as e:
+                                console.print(f"[red]Error during execution: {str(e)}[/red]")
                                 raise
-                            
-                            # Execute the code block
-                            console.print("[blue]Debug: Executing code block[/blue]")
-                            exec(code_block, namespace)
-                            console.print("[blue]Debug: Successfully executed code block[/blue]")
-                            
-                            # Find the class with run method
-                            class_name = None
-                            for name, obj in namespace.items():
-                                if isinstance(obj, type) and hasattr(obj, 'run'):
-                                    class_name = name
-                                    console.print(f"[blue]Debug: Found class {name}[/blue]")
-                                    break
-                            
-                            if class_name is None:
-                                raise ImportError("Could not find class with run method in the code block")
-                            
-                            # Create instance and run
-                            cls = namespace[class_name]
-                            input_text = step.get('input', {}).get('input', '')
-                            console.print("[blue]Debug: Running with input[/blue]")
-                            
-                            if isinstance(cls.run, staticmethod):
-                                output = str(cls.run(input_text))
-                            else:
-                                instance = cls()
-                                output = str(instance.run(input_text))
-                            
-                            console.print("[blue]Debug: Run completed[/blue]")
-                            
-                        except Exception as e:
-                            console.print(f"[red]Error during execution: {str(e)}[/red]")
-                            raise
-                        finally:
-                            # Clean up: remove the added path
-                            if parent_dir in sys.path:
-                                sys.path.remove(parent_dir)
-                                console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
+                            finally:
+                                # Clean up: remove the added path
+                                if parent_dir in sys.path:
+                                    sys.path.remove(parent_dir)
+                                    console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
                             
                             # Store the output for validation
                             if output:
@@ -743,7 +744,7 @@ class TestRunner:
 
                                 if passed:
                                     logger.log_step_result(step_index, output, True)
-                                
+                                    
                                 # Store results by region
                                 region = step.get('input', {}).get('region', 'default')
                                 if region not in results:
@@ -791,31 +792,26 @@ class TestRunner:
                                 
                                 results[region]['test_cases'].append(test_case)
                                 results[region]['status'] = 'failed'
-                            
-                    # Update overall status
-                    results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
-                    
-                    if not all_steps_passed:
-                        logger.logger.error("Test failed due to failed steps or evaluations")
-                    else:
-                        logger.logger.info("All tests passed")
-                    
-                    # Save test results
-                    logger.save_results()
-                    
-                    return results
-                    
-            except Exception as e:
-                error_msg = f"Error running tests: {str(e)}"
-                logger.logger.error(error_msg)
-                results['overall_status']['status'] = 'failed'
-                results['overall_status']['error'] = error_msg
-                return results
-            finally:
-                # Clean up: remove the added path
-                if parent_dir in sys.path:
-                    sys.path.remove(parent_dir)
-                    console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
+                        
+                        # Update overall status
+                        results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
+                        
+                        if not all_steps_passed:
+                            logger.logger.error("Test failed due to failed steps or evaluations")
+                        else:
+                            logger.logger.info("All tests passed")
+                        
+                        # Save test results
+                        logger.save_results()
+                    except Exception as e:
+                        error_msg = f"Error in step {step_index}: {str(e)}"
+                        logger.logger.error(error_msg)
+                        all_steps_passed = False
+                        results['overall_status']['status'] = 'failed'
+                        results['overall_status']['error'] = error_msg
+                        continue
+            
+            return results
             
         except Exception as e:
             error_msg = f"Error running tests: {str(e)}"
