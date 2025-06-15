@@ -485,6 +485,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             logger.info(f"Fixed code: {fixed_code}")
             # Validate and improve the generated code
             fixed_code = _validate_and_improve_code(fixed_code, original_code)
+            logger.info(f"Validated and improved generated code: {fixed_code}")
             logger.info("Validated and improved generated code")
             
             # Write the fixed code to disk before running tests
