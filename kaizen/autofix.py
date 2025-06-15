@@ -478,6 +478,9 @@ def _enhance_pr_body(failure_data: List[Dict], fixed_tests: List[Dict], test_res
     Returns:
         str: Enhanced PR body with detailed information
     """
+    logger.info(f"Enhancing PR body with test results type: {type(test_results)}")
+    logger.info(f"Test results content: {test_results}")
+    
     # Create the base PR body
     pr_body = f"""# Test Fix Summary
 
@@ -730,6 +733,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         
         # Create PR using GitHub API
         if create_pr:
+            logger.info("Starting PR creation process")
             github_token = os.environ.get("GITHUB_TOKEN")
             if not github_token:
                 raise ValueError("GITHUB_TOKEN environment variable not set. Please set it with your GitHub personal access token.")
@@ -744,22 +748,42 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                 repo_name = repo_url.split('/')[-1]
                 repo_owner = repo_url.split('/')[-2]
                 repo = g.get_repo(f"{repo_owner}/{repo_name}")
+                logger.info(f"Successfully connected to repository: {repo_owner}/{repo_name}")
             except subprocess.CalledProcessError:
                 raise ValueError("Could not determine repository information. Please ensure you're in a git repository with a remote origin.")
             except GithubException as e:
                 raise ValueError(f"Error accessing GitHub repository: {str(e)}")
             
             # Create PR
-            enhanced_pr_body = _enhance_pr_body(failure_data, fixed_tests, test_results, test_config)
-            pr = repo.create_pull(
-                title=pr_title,
-                body=enhanced_pr_body,
-                head=branch_name,
-                base=base_branch
-            )
+            logger.info("Preparing to create PR with test results")
+            logger.info(f"Test results type: {type(test_results)}")
+            logger.info(f"Test results content: {test_results}")
+            logger.info(f"Fixed tests: {fixed_tests}")
+            logger.info(f"Test config: {test_config}")
             
-            logger.info(f"Created Pull Request: {pr.html_url}")
-            print(f"Pull Request created: {pr.html_url}")
+            try:
+                enhanced_pr_body = _enhance_pr_body(failure_data, fixed_tests, test_results, test_config)
+                logger.info("Successfully enhanced PR body")
+            except Exception as e:
+                logger.error(f"Error enhancing PR body: {str(e)}")
+                logger.error(f"Error type: {type(e)}")
+                logger.error(f"Error args: {e.args}")
+                raise
+            
+            try:
+                pr = repo.create_pull(
+                    title=pr_title,
+                    body=enhanced_pr_body,
+                    head=branch_name,
+                    base=base_branch
+                )
+                logger.info(f"Created Pull Request: {pr.html_url}")
+                print(f"Pull Request created: {pr.html_url}")
+            except Exception as e:
+                logger.error(f"Error creating PR: {str(e)}")
+                logger.error(f"Error type: {type(e)}")
+                logger.error(f"Error args: {e.args}")
+                raise
         
         # Return to the original branch
         logger.info(f"Returning to original branch: {original_branch}")
@@ -783,6 +807,8 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         raise
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error(f"Error args: {e.args}")
         # Try to return to original branch even if there was an error
         try:
             subprocess.run(["git", "checkout", original_branch], check=True)
