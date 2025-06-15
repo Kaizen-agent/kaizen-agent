@@ -23,6 +23,8 @@ evaluation:
         - the response should be relevant to the input text
         - the response should be coherent and well-structured
         - the response should maintain the context of the input
+        - IF the question is not related to the input text, the response should be "I'm sorry, I can't answer that question."
+        - if the input is empty, the response should be "The input is empty. Please provide a valid input."
       weight: 1
 
 steps:
