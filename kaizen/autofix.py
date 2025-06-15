@@ -47,23 +47,59 @@ def format_test_results_table(test_results: Dict) -> str:
 
 def analyze_failures(failure_data: List[Dict]) -> str:
     """Analyze test failures and generate a summary."""
+    logger.info(f"Starting analyze_failures with failure_data type: {type(failure_data)}")
+    logger.info(f"Failure data content: {failure_data}")
+    
+    if not failure_data:
+        logger.info("No failure data provided, returning default message")
+        return "## Failure Analysis\n\nNo failures to analyze."
+        
     analysis = "## Failure Analysis\n\n"
     
     # Group failures by error type
     error_groups = {}
-    for failure in failure_data:
-        error_type = failure['error_message'].split(':')[0] if ':' in failure['error_message'] else 'Unknown Error'
-        if error_type not in error_groups:
-            error_groups[error_type] = []
-        error_groups[error_type].append(failure)
+    logger.info("Starting to process failures")
+    for i, failure in enumerate(failure_data):
+        logger.info(f"Processing failure {i}: {failure}")
+        if not isinstance(failure, dict):
+            logger.warning(f"Skipping invalid failure format: {failure}")
+            continue
+            
+        try:
+            error_message = failure.get('error_message', 'Unknown Error')
+            logger.info(f"Error message: {error_message}")
+            error_type = error_message.split(':')[0] if ':' in error_message else 'Unknown Error'
+            logger.info(f"Error type: {error_type}")
+            
+            if error_type not in error_groups:
+                error_groups[error_type] = []
+            error_groups[error_type].append(failure)
+        except Exception as e:
+            logger.error(f"Error processing failure {i}: {str(e)}")
+            logger.error(f"Failure data: {failure}")
+            continue
+    
+    logger.info(f"Error groups: {error_groups}")
     
     # Generate analysis for each error type
     for error_type, failures in error_groups.items():
+        logger.info(f"Processing error type: {error_type}")
         analysis += f"### {error_type}\n\n"
         analysis += f"**Affected Tests ({len(failures)}):**\n"
         for failure in failures:
-            analysis += f"- {failure['test_name']}\n"
-        analysis += f"\n**Error Pattern:**\n{failures[0]['error_message']}\n\n"
+            try:
+                test_name = failure.get('test_name', 'Unknown Test')
+                analysis += f"- {test_name}\n"
+            except Exception as e:
+                logger.error(f"Error processing test name: {str(e)}")
+                analysis += "- Unknown Test\n"
+                
+        try:
+            analysis += f"\n**Error Pattern:**\n{failures[0].get('error_message', 'Unknown Error')}\n\n"
+        except Exception as e:
+            logger.error(f"Error processing error pattern: {str(e)}")
+            analysis += "\n**Error Pattern:**\nUnknown Error\n\n"
+            
         analysis += "**Likely Root Cause:**\n"
         # Add common root causes based on error type
         if "AssertionError" in error_type:
@@ -83,6 +119,7 @@ def analyze_failures(failure_data: List[Dict]) -> str:
             analysis += "- Edge case not properly handled\n"
         analysis += "\n"
     
+    logger.info("Completed failure analysis")
     return analysis
 
 def _generate_pr_info(failure_data: List[Dict], fixed_tests: List[Dict], test_results: Dict, test_config: Dict, original_code: str) -> Tuple[str, str, str]:
@@ -535,7 +572,7 @@ The following changes were made to fix the failing tests:
 
 ## Verification
 All fixed tests have been verified to pass in the following environments:
-{chr(10).join(f'- {region}' for region in test_results.keys()) if isinstance(test_results, dict) else "- No environments available"}
+{chr(10).join(f'- {region}' for region in (test_results or {}).keys()) if isinstance(test_results, dict) else "- No environments available"}
 
 ## Next Steps
 1. Review the changes for any potential side effects
