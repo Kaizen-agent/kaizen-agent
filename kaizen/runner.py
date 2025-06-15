@@ -628,7 +628,7 @@ class TestRunner:
                             console.print(f"[blue]Debug: Using main test file path: {step_file_path}[/blue]")
                         
                         try:
-                            # Create a module spec for the file
+                            # Create a new module spec
                             module_name = os.path.splitext(os.path.basename(step_file_path))[0]
                             package_name = os.path.basename(os.path.dirname(step_file_path))
                             
@@ -659,10 +659,24 @@ class TestRunner:
                                     break
                                     
                             if class_name is None:
+                                # Try importing from the package directly
+                                try:
+                                    package_name = os.path.basename(os.path.dirname(step_file_path))
+                                    package = importlib.import_module(package_name)
+                                    for name, obj in package.__dict__.items():
+                                        if isinstance(obj, type) and hasattr(obj, 'run'):
+                                            class_name = name
+                                            cls = obj
+                                            break
+                                except ImportError:
+                                    raise ImportError(f"Could not find class with run method in {step_file_path}")
+                                
+                            if class_name is None:
                                 raise ImportError(f"Could not find class with run method in {step_file_path}")
                                 
                             # Get the class and call its run method
-                            cls = getattr(module, class_name)
+                            if 'cls' not in locals():
+                                cls = getattr(module, class_name)
                             if isinstance(cls.run, staticmethod):
                                 output = str(cls.run(step.get('input', {}).get('input', '')))
                             else:
