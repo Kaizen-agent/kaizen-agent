@@ -1,4 +1,4 @@
-from .agent import SummarizerAgent
+from test_agent.summarizer_agent.agent import SummarizerAgent
 
 def main():
     try:
