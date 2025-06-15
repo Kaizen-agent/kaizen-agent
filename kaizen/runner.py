@@ -769,77 +769,69 @@ class TestRunner:
                                 if not passed:
                                     results[region]['status'] = 'failed'
                                     all_steps_passed = False
+
+                                # Run LLM evaluation for this step if evaluator is available
+                                if evaluator and 'evaluation' in self.test_config:
+                                    try:
+                                        logger.logger.info(f"Running LLM evaluation for step {step_index}...")
+                                        # Create a temporary results dict with just this step's results
+                                        step_results = {
+                                            region: {
+                                                'test_cases': [test_case],
+                                                'status': 'passed' if passed else 'failed'
+                                            }
+                                        }
+                                        evaluation_results = evaluator.evaluate(
+                                            step_results,
+                                            self.test_config['evaluation'].get('criteria', [])
+                                        )
+                                        
+                                        # Add evaluation results to the test case
+                                        test_case['evaluation'] = evaluation_results
+                                        
+                                        # Update test case status based on evaluation
+                                        if evaluation_results['status'] == 'failed':
+                                            test_case['status'] = 'failed'
+                                            results[region]['status'] = 'failed'
+                                            all_steps_passed = False
+                                            logger.logger.error(f"Step {step_index} failed LLM evaluation with score: {evaluation_results['overall_score']}")
+                                        else:
+                                            logger.logger.info(f"Step {step_index} passed LLM evaluation with score: {evaluation_results['overall_score']}")
+                                    except Exception as e:
+                                        logger.logger.error(f"Error during LLM evaluation for step {step_index}: {str(e)}")
+                                        test_case['evaluation_error'] = str(e)
+                                        test_case['status'] = 'failed'
+                                        results[region]['status'] = 'failed'
+                                        all_steps_passed = False
+                            
+                            # Update overall status
+                            results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
+                            
+                            if not all_steps_passed:
+                                logger.logger.error("Test failed due to failed steps")
                             else:
-                                # Handle case where no output was produced
-                                error_msg = "No output produced from test execution"
-                                logger.log_step_result(step_index, None, False, error_msg)
-                                all_steps_passed = False
-                                
-                                # Update results
-                                region = step.get('input', {}).get('region', 'default')
-                                if region not in results:
-                                    results[region] = {
-                                        'test_cases': [],
-                                        'status': 'failed'
-                                    }
-                                
-                                test_case = {
-                                    'name': step_name,
-                                    'input': step.get('input', {}),
-                                    'status': 'failed',
-                                    'output': 'No output available',
-                                    'details': error_msg
-                                }
-                                
-                                results[region]['test_cases'].append(test_case)
-                                results[region]['status'] = 'failed'
-                        
-                        # Update overall status
-                        results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
-                        
-                        if not all_steps_passed:
-                            logger.logger.error("Test failed due to failed steps")
-                        else:
-                            logger.logger.info("All test steps passed")
-                        
-                        # Run LLM evaluation if evaluator is available
-                        if evaluator and 'evaluation' in self.test_config:
-                            try:
-                                logger.logger.info("Running LLM evaluation...")
-                                evaluation_results = evaluator.evaluate(
-                                    results,
-                                    self.test_config['evaluation'].get('criteria', [])
-                                )
-                                
-                                # Add evaluation results to the overall status
-                                results['overall_status']['evaluation'] = evaluation_results
-                                
-                                # Update overall status based on evaluation
-                                if evaluation_results['status'] == 'failed':
-                                    results['overall_status']['status'] = 'failed'
-                                    logger.logger.error(f"Test failed LLM evaluation with score: {evaluation_results['overall_score']}")
-                                else:
-                                    logger.logger.info(f"Test passed LLM evaluation with score: {evaluation_results['overall_score']}")
-                            except Exception as e:
-                                logger.logger.error(f"Error during LLM evaluation: {str(e)}")
-                                results['overall_status']['evaluation_error'] = str(e)
-                                results['overall_status']['status'] = 'failed'
-                        
-                        # Save test results
-                        logger.save_results()
-                        
-                        # Print final status
-                        if results['overall_status']['status'] == 'passed':
-                            console.print("\nAll tests passed!")
-                        else:
-                            console.print("\n❌ Tests failed!")
-                            if 'evaluation' in results['overall_status']:
-                                eval_results = results['overall_status']['evaluation']
-                                console.print(f"\nLLM Evaluation Score: {eval_results['overall_score']}")
-                                console.print("\nEvaluation Details:")
-                                for criterion, result in eval_results['criteria'].items():
-                                    status = "✅" if result['status'] == 'passed' else "❌"
-                                    console.print(f"{status} {criterion}: {result['feedback']}")
+                                logger.logger.info("All test steps passed")
+                            
+                            # Save test results
+                            logger.save_results()
+                            
+                            # Print final status
+                            if results['overall_status']['status'] == 'passed':
+                                console.print("\nAll tests passed!")
+                            else:
+                                console.print("\n❌ Tests failed!")
+                                # Print evaluation results for each step
+                                for region, region_results in results.items():
+                                    if region != 'overall_status':
+                                        for test_case in region_results['test_cases']:
+                                            if 'evaluation' in test_case:
+                                                eval_results = test_case['evaluation']
+                                                console.print(f"\nStep: {test_case['name']}")
+                                                console.print(f"LLM Evaluation Score: {eval_results['overall_score']}")
+                                                console.print("Evaluation Details:")
+                                                for criterion, result in eval_results['criteria'].items():
+                                                    status = "✅" if result['status'] == 'passed' else "❌"
+                                                    console.print(f"{status} {criterion}: {result['feedback']}")
                     except Exception as e:
                         error_msg = f"Error in step {step_index}: {str(e)}"
                         logger.logger.error(error_msg)
