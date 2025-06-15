@@ -4,6 +4,7 @@ file_path: email_agent.py
 description: |
   Test suite for the EmailAgent class that handles email improvement using OpenAI's API.
   Tests cover initialization, error handling, and email improvement functionality.
+  This is an ai agent that improves the email draft.
 
 metadata:
   version: 1.0.0
