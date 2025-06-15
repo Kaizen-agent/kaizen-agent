@@ -12,6 +12,7 @@ import yaml
 import sys
 from rich.console import Console
 import ast
+import importlib
 
 from .logger import get_logger
 from .config import get_config
@@ -290,15 +291,63 @@ def _validate_and_improve_code(code: str, original_code: str) -> str:
         # First try to parse the code to check syntax
         ast.parse(code)
         return code
-    except SyntaxError:
-        logger.warning("Generated code has invalid syntax, attempting to improve it")
+    except SyntaxError as e:
+        logger.warning(f"Generated code has invalid syntax: {str(e)}")
         
-        # If code is empty or just whitespace, return original code
+        # If code is empty or just whitespace, try to extract code from the response
         if not code.strip():
-            logger.warning("Generated code is empty, returning original code")
-            return original_code
+            logger.warning("Generated code is empty, attempting to extract code from response")
+            # Try to find code blocks in the response
+            code_blocks = []
+            in_code_block = False
+            current_block = []
             
-        # Try to fix common syntax issues
+            for line in code.split('\n'):
+                if line.strip().startswith('```'):
+                    if in_code_block:
+                        code_blocks.append('\n'.join(current_block))
+                        current_block = []
+                    in_code_block = not in_code_block
+                elif in_code_block:
+                    current_block.append(line)
+            
+            if code_blocks:
+                # Try each code block until we find a valid one
+                for block in code_blocks:
+                    try:
+                        ast.parse(block)
+                        logger.info("Found valid code block in response")
+                        return block
+                    except SyntaxError:
+                        continue
+            
+            # If no valid code blocks found, try to extract code between kaizen markers
+            kaizen_blocks = []
+            in_kaizen_block = False
+            current_block = []
+            
+            for line in code.split('\n'):
+                if '# kaizen:start:' in line:
+                    in_kaizen_block = True
+                elif '# kaizen:end:' in line:
+                    if current_block:
+                        kaizen_blocks.append('\n'.join(current_block))
+                        current_block = []
+                    in_kaizen_block = False
+                elif in_kaizen_block:
+                    current_block.append(line)
+            
+            if kaizen_blocks:
+                # Try each kaizen block until we find a valid one
+                for block in kaizen_blocks:
+                    try:
+                        ast.parse(block)
+                        logger.info("Found valid code in kaizen block")
+                        return block
+                    except SyntaxError:
+                        continue
+        
+        # If we still don't have valid code, try to fix common syntax issues
         try:
             # Initialize Gemini for code improvement
             config = get_config()
@@ -319,13 +368,16 @@ Requirements:
 1. Return only valid Python code, no explanations
 2. Maintain the same functionality as the original code
 3. Fix any syntax errors
-4. Ensure all imports are at the top
+4. Ensure all imports are at the top of the file
 5. Ensure proper indentation
 6. Ensure all brackets and parentheses are properly closed
 7. Ensure all strings are properly quoted
 8. Ensure all statements end with proper punctuation
 9. Ensure all code blocks are properly defined
 10. Ensure all functions and classes are properly defined
+11. DO NOT include any markdown formatting or code block markers
+12. DO NOT include any explanations or comments about the code
+13. Return ONLY the fixed code
 
 Return only the fixed code, no explanations or additional text."""
             
@@ -333,13 +385,32 @@ Return only the fixed code, no explanations or additional text."""
             response = model.generate_content(prompt)
             improved_code = response.text.strip()
             
+            # Clean up the response to ensure it's just code
+            improved_code = improved_code.replace('```python', '').replace('```', '').strip()
+            
             # Validate the improved code
             try:
                 ast.parse(improved_code)
                 logger.info("Successfully improved code syntax")
                 return improved_code
             except SyntaxError:
-                logger.warning("Failed to improve code syntax, returning original code")
+                logger.warning("Failed to improve code syntax, attempting to extract code from response")
+                # Try to extract code from the response
+                code_lines = []
+                for line in improved_code.split('\n'):
+                    if line.strip() and not line.strip().startswith(('#', '```', 'Here', 'The', 'This')):
+                        code_lines.append(line)
+                
+                if code_lines:
+                    try:
+                        extracted_code = '\n'.join(code_lines)
+                        ast.parse(extracted_code)
+                        logger.info("Successfully extracted valid code from response")
+                        return extracted_code
+                    except SyntaxError:
+                        pass
+                
+                logger.warning("All attempts to fix code failed, returning original code")
                 return original_code
                 
         except Exception as e:
@@ -388,6 +459,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         # Generate PR info with test configuration
         try:
             branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], {}, test_config, original_code)
+            logger.info(f"Generated PR info: {branch_name}, {pr_title}, {pr_body}")
         except Exception as e:
             logger.warning(f"Failed to generate PR info: {str(e)}")
             # Use default values if PR info generation fails
@@ -410,7 +482,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             logger.info("Requesting code fixes from Gemini")
             response = model.generate_content(pr_body)
             fixed_code = response.text.strip()
-            
+            logger.info(f"Fixed code: {fixed_code}")
             # Validate and improve the generated code
             fixed_code = _validate_and_improve_code(fixed_code, original_code)
             logger.info("Validated and improved generated code")
@@ -419,6 +491,11 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             with open(file_path, 'w') as f:
                 f.write(fixed_code)
             logger.info(f"Updated file: {file_path}")
+            
+            # Force reload the module to ensure we're using the new code
+            module_name = Path(file_path).stem
+            if module_name in sys.modules:
+                importlib.reload(sys.modules[module_name])
             
             # Run tests again to verify fixes
             logger.info("Running tests to verify fixes")
@@ -505,9 +582,10 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         with open(file_path, 'w') as f:
             f.write(best_fixed_code)
         
-        # Commit changes
+        # Commit changes with a proper commit message
         subprocess.run(["git", "add", file_path], check=True)
-        subprocess.run(["git", "commit", "-m", pr_title, "-m", pr_body], check=True)
+        commit_message = f"Fix: {pr_title}\n\n{pr_body}"
+        subprocess.run(["git", "commit", "-m", commit_message], check=True)
         logger.info("Committed changes")
         
         # Push branch
