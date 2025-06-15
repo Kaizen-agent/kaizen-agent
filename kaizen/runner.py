@@ -670,6 +670,19 @@ class TestRunner:
                                 with open(step_file_path, 'r') as f:
                                     content = f.read()
                                 
+                                # First, execute the imports at the top of the file
+                                import_lines = []
+                                for line in content.split('\n'):
+                                    if line.strip().startswith('from ') or line.strip().startswith('import '):
+                                        import_lines.append(line)
+                                    elif line.strip() and not line.strip().startswith('#'):
+                                        break
+                                
+                                if import_lines:
+                                    import_code = '\n'.join(import_lines)
+                                    console.print(f"[blue]Debug: Executing imports:\n{import_code}[/blue]")
+                                    exec(import_code, module.__dict__)
+                                
                                 # Extract the code between kaizen markers
                                 region = step.get('input', {}).get('region')
                                 if region:
