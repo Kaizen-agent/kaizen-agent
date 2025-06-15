@@ -797,9 +797,9 @@ class TestRunner:
                         results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
                         
                         if not all_steps_passed:
-                            logger.logger.error("Test failed due to failed steps or evaluations")
+                            logger.logger.error("Test failed due to failed steps")
                         else:
-                            logger.logger.info("All tests passed")
+                            logger.logger.info("All test steps passed")
                         
                         # Run LLM evaluation if evaluator is available
                         if evaluator and 'evaluation' in self.test_config:
@@ -822,9 +822,23 @@ class TestRunner:
                             except Exception as e:
                                 logger.logger.error(f"Error during LLM evaluation: {str(e)}")
                                 results['overall_status']['evaluation_error'] = str(e)
+                                results['overall_status']['status'] = 'failed'
                         
                         # Save test results
                         logger.save_results()
+                        
+                        # Print final status
+                        if results['overall_status']['status'] == 'passed':
+                            console.print("\nAll tests passed!")
+                        else:
+                            console.print("\n❌ Tests failed!")
+                            if 'evaluation' in results['overall_status']:
+                                eval_results = results['overall_status']['evaluation']
+                                console.print(f"\nLLM Evaluation Score: {eval_results['overall_score']}")
+                                console.print("\nEvaluation Details:")
+                                for criterion, result in eval_results['criteria'].items():
+                                    status = "✅" if result['status'] == 'passed' else "❌"
+                                    console.print(f"{status} {criterion}: {result['feedback']}")
                     except Exception as e:
                         error_msg = f"Error in step {step_index}: {str(e)}"
                         logger.logger.error(error_msg)
