@@ -670,20 +670,7 @@ class TestRunner:
                                 with open(step_file_path, 'r') as f:
                                     content = f.read()
                                 
-                                # First, execute the imports at the top of the file
-                                import_lines = []
-                                for line in content.split('\n'):
-                                    if line.strip().startswith('from ') or line.strip().startswith('import '):
-                                        import_lines.append(line)
-                                    elif line.strip() and not line.strip().startswith('#'):
-                                        break
-                                
-                                if import_lines:
-                                    import_code = '\n'.join(import_lines)
-                                    console.print(f"[blue]Debug: Executing imports:\n{import_code}[/blue]")
-                                    exec(import_code, module.__dict__)
-                                
-                                # Extract the code between kaizen markers
+                                # Extract the code between kaizen markers first
                                 region = step.get('input', {}).get('region')
                                 if region:
                                     start_marker = f'# kaizen:start:{region}'
@@ -709,6 +696,25 @@ class TestRunner:
                                 # Extract the code between markers
                                 code_block = content[start_idx + len(start_marker):end_idx].strip()
                                 console.print(f"[blue]Debug: Extracted code block:\n{code_block}[/blue]")
+                                
+                                # Now handle the imports
+                                import_lines = []
+                                for line in content.split('\n'):
+                                    if line.strip().startswith('from ') or line.strip().startswith('import '):
+                                        # Convert relative imports to absolute imports
+                                        if line.strip().startswith('from .'):
+                                            # Get the package name from the file path
+                                            package_name = os.path.basename(os.path.dirname(step_file_path))
+                                            # Replace relative import with absolute import
+                                            line = line.replace('from .', f'from {package_name}.')
+                                        import_lines.append(line)
+                                    elif line.strip() and not line.strip().startswith('#'):
+                                        break
+                                
+                                if import_lines:
+                                    import_code = '\n'.join(import_lines)
+                                    console.print(f"[blue]Debug: Executing imports:\n{import_code}[/blue]")
+                                    exec(import_code, module.__dict__)
                                 
                                 # Execute the code block in the module's namespace
                                 console.print("[blue]Debug: Executing code block in module namespace[/blue]")
