@@ -613,7 +613,6 @@ class TestRunner:
                     output = None
                     if 'region' in step.get('input', {}):
                         console.print(f"[blue]Debug: Running test block for step {step_index}[/blue]")
-                        console.print(f"[blue]Debug: Step input: {step.get('input', {})}[/blue]")
                         
                         # Use the step's file_path if provided, otherwise use the main test file path
                         step_file_path = step.get('input', {}).get('file_path')
@@ -646,33 +645,15 @@ class TestRunner:
                             
                             start_idx = content.find(start_marker)
                             if start_idx == -1:
-                                console.print(f"[red]Error: Start marker '{start_marker}' not found in file[/red]")
-                                console.print(f"[blue]Debug: File content:\n{content}[/blue]")
                                 raise ImportError(f"Start marker '{start_marker}' not found in {step_file_path}")
                             
                             end_idx = content.find(end_marker, start_idx)
                             if end_idx == -1:
-                                console.print(f"[red]Error: End marker '{end_marker}' not found in file[/red]")
-                                console.print(f"[blue]Debug: File content from start marker:\n{content[start_idx:]}[/blue]")
                                 raise ImportError(f"End marker '{end_marker}' not found in {step_file_path}")
                             
                             # Extract the code between markers
                             code_block = content[start_idx + len(start_marker):end_idx].strip()
-                            console.print(f"[blue]Debug: Extracted code block[/blue]")
-                            
-                            # Convert relative imports to absolute imports
-                            import_lines = []
-                            code_lines = []
-                            for line in code_block.split('\n'):
-                                if line.strip().startswith('from ') or line.strip().startswith('import '):
-                                    # Convert relative imports to absolute imports
-                                    if line.strip().startswith('from .'):
-                                        line = line.replace('from .', f'from test_agent.summarizer_agent.')
-                                    elif line.strip().startswith('import .'):
-                                        line = line.replace('import .', f'import test_agent.summarizer_agent.')
-                                    import_lines.append(line)
-                                else:
-                                    code_lines.append(line)
+                            console.print("[blue]Debug: Extracted code block[/blue]")
                             
                             # Create execution namespace
                             namespace = {
@@ -691,48 +672,19 @@ class TestRunner:
                             # Import required modules first
                             try:
                                 console.print("[blue]Debug: Attempting to import required modules[/blue]")
-                                # First try direct import
-                                try:
-                                    from test_agent.summarizer_agent.prompt import get_prompt
-                                    from test_agent.summarizer_agent.utils import call_gemini_llm
-                                    console.print("[blue]Debug: Successfully imported modules directly[/blue]")
-                                except ImportError:
-                                    # If direct import fails, try importing the package first
-                                    console.print("[blue]Debug: Direct import failed, trying package import[/blue]")
-                                    import test_agent.summarizer_agent
-                                    from test_agent.summarizer_agent.prompt import get_prompt
-                                    from test_agent.summarizer_agent.utils import call_gemini_llm
-                                    console.print("[blue]Debug: Successfully imported modules through package[/blue]")
-                                
+                                from test_agent.summarizer_agent.prompt import get_prompt
+                                from test_agent.summarizer_agent.utils import call_gemini_llm
                                 namespace['get_prompt'] = get_prompt
                                 namespace['call_gemini_llm'] = call_gemini_llm
+                                console.print("[blue]Debug: Successfully imported modules[/blue]")
                             except ImportError as e:
                                 console.print(f"[red]Error importing required functions: {str(e)}[/red]")
-                                console.print(f"[blue]Debug: Current sys.path: {sys.path}[/blue]")
                                 raise
-                            
-                            # Execute imports first
-                            if import_lines:
-                                import_code = '\n'.join(import_lines)
-                                console.print("[blue]Debug: Executing imports[/blue]")
-                                try:
-                                    exec(import_code, namespace)
-                                    console.print("[blue]Debug: Successfully executed imports[/blue]")
-                                except Exception as e:
-                                    console.print(f"[red]Error executing imports: {str(e)}[/red]")
-                                    console.print(f"[blue]Debug: Import code:\n{import_code}[/blue]")
-                                    raise
                             
                             # Execute the code block
-                            code_block = '\n'.join(code_lines)
                             console.print("[blue]Debug: Executing code block[/blue]")
-                            try:
-                                exec(code_block, namespace)
-                                console.print("[blue]Debug: Successfully executed code block[/blue]")
-                            except Exception as e:
-                                console.print(f"[red]Error executing code block: {str(e)}[/red]")
-                                console.print(f"[blue]Debug: Code block:\n{code_block}[/blue]")
-                                raise
+                            exec(code_block, namespace)
+                            console.print("[blue]Debug: Successfully executed code block[/blue]")
                             
                             # Find the class with run method
                             class_name = None
@@ -748,7 +700,7 @@ class TestRunner:
                             # Create instance and run
                             cls = namespace[class_name]
                             input_text = step.get('input', {}).get('input', '')
-                            console.print(f"[blue]Debug: Running with input[/blue]")
+                            console.print("[blue]Debug: Running with input[/blue]")
                             
                             if isinstance(cls.run, staticmethod):
                                 output = str(cls.run(input_text))
@@ -756,109 +708,75 @@ class TestRunner:
                                 instance = cls()
                                 output = str(instance.run(input_text))
                             
-                            console.print(f"[blue]Debug: Run completed[/blue]")
+                            console.print("[blue]Debug: Run completed[/blue]")
                             
                         except Exception as e:
                             console.print(f"[red]Error during execution: {str(e)}[/red]")
-                            console.print(f"[blue]Debug: Exception type: {type(e).__name__}[/blue]")
-                            import traceback
-                            console.print(f"[blue]Debug: Traceback:\n{traceback.format_exc()}[/blue]")
                             raise
                         finally:
-                            # Don't remove the paths, just log them
-                            console.print("[blue]Debug: Execution completed[/blue]")
-                        
-                        console.print(f"[blue]Debug: Test block output: {output}[/blue]")
-                    
-                    # Use run_step to properly validate all test criteria
-                    passed = self.run_step(step, agent_type, logger)
-                    
-                    # Store results by region
-                    region = step.get('input', {}).get('region', 'default')
-                    if region not in results:
-                        results[region] = {
-                            'test_cases': [],
-                            'status': 'passed'  # Initialize status for each region
-                        }
-                    
-                    # If we have an output and evaluator, evaluate it immediately
-                    evaluation_result = None
-                    if output and evaluator and 'evaluation' in self.test_config:
-                        try:
-                            # Create a temporary results structure for evaluation
-                            temp_results = {
-                                region: {
-                                    'test_cases': [{
-                                        'name': step_name,
-                                        'input': step.get('input', {}),
-                                        'output': output,
-                                        'details': logger.get_last_step_details()
-                                    }]
-                                }
-                            }
+                            # Clean up: remove the added path
+                            if parent_dir in sys.path:
+                                sys.path.remove(parent_dir)
+                                console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
                             
-                            # Run evaluation
-                            evaluation_result = evaluator.evaluate(
-                                results=temp_results,
-                                criteria=self.test_config['evaluation'].get('criteria', [])
-                            )
-                            
-                            # Update passed status based on evaluation
-                            if isinstance(evaluation_result, dict):
-                                if evaluation_result.get('status') == 'failed':
+                            # Store the output for validation
+                            if output:
+                                console.print("[blue]Debug: Test block output received[/blue]")
+                                # Validate the output directly without running again
+                                passed = True
+                                if expected_contains:
+                                    for expected in expected_contains:
+                                        if expected not in output:
+                                            passed = False
+                                            error_msg = f"Expected output not found: {expected}"
+                                            logger.log_step_result(step_index, output, False, error_msg)
+                                            break
+
+                                if passed and expected_exact and output != expected_exact:
                                     passed = False
-                                    all_steps_passed = False
-                                    results[region]['status'] = 'failed'  # Update region status
-                            elif isinstance(evaluation_result, str):
-                                # If evaluation_result is a string, treat it as an error
-                                passed = False
-                                all_steps_passed = False
-                                results[region]['status'] = 'failed'  # Update region status
-                                evaluation_result = {
-                                    'status': 'error',
-                                    'error': evaluation_result
+                                    error_msg = "Output does not match expected exact output"
+                                    logger.log_step_result(step_index, output, False, error_msg)
+
+                                if passed:
+                                    logger.log_step_result(step_index, output, True)
+                                
+                                # Store results by region
+                                region = step.get('input', {}).get('region', 'default')
+                                if region not in results:
+                                    results[region] = {
+                                        'test_cases': [],
+                                        'status': 'passed'
+                                    }
+                                
+                                # Add test case result
+                                test_case = {
+                                    'name': step_name,
+                                    'input': step.get('input', {}),
+                                    'status': 'passed' if passed else 'failed',
+                                    'output': output,
+                                    'details': logger.get_last_step_details()
                                 }
                                 
-                        except Exception as e:
-                            logger.logger.error(f"Error during output evaluation: {str(e)}")
-                            evaluation_result = {
-                                'status': 'error',
-                                'error': str(e)
-                            }
-                            results[region]['status'] = 'failed'  # Update region status
+                                results[region]['test_cases'].append(test_case)
+                                
+                                # Update region status if test case failed
+                                if not passed:
+                                    results[region]['status'] = 'failed'
+                                    all_steps_passed = False
+                            
+                    # Update overall status
+                    results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
                     
-                    # Add test case result
-                    test_case = {
-                        'name': step_name,
-                        'input': step.get('input', {}),
-                        'status': 'passed' if passed else 'failed',
-                        'output': output,
-                        'details': logger.get_last_step_details()
-                    }
+                    if not all_steps_passed:
+                        logger.logger.error("Test failed due to failed steps or evaluations")
+                    else:
+                        logger.logger.info("All tests passed")
                     
-                    # Add evaluation result if available
-                    if evaluation_result:
-                        test_case['evaluation'] = evaluation_result
+                    # Save test results
+                    logger.save_results()
                     
-                    results[region]['test_cases'].append(test_case)
+                    return results
                     
-                    # Update region status if test case failed
-                    if not passed:
-                        results[region]['status'] = 'failed'
-                
-                # Update overall status
-                results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
-                
-                if not all_steps_passed:
-                    logger.logger.error("Test failed due to failed steps or evaluations")
-                else:
-                    logger.logger.info("All tests passed")
-                
-                # Save test results
-                logger.save_results()
-                
-                return results
-                
             except Exception as e:
                 error_msg = f"Error running tests: {str(e)}"
                 logger.logger.error(error_msg)
@@ -876,5 +794,4 @@ class TestRunner:
             logger.logger.error(error_msg)
             results['overall_status']['status'] = 'failed'
             results['overall_status']['error'] = error_msg
-            return results 
             return results 
