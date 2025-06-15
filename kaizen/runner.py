@@ -682,27 +682,57 @@ class TestRunner:
                                 '__builtins__': __builtins__,
                             }
                             
+                            # Add the parent directory to Python path
+                            parent_dir = os.path.dirname(os.path.dirname(step_file_path))
+                            if parent_dir not in sys.path:
+                                sys.path.insert(0, parent_dir)
+                                console.print(f"[blue]Debug: Added {parent_dir} to Python path[/blue]")
+                            
                             # Import required modules first
                             try:
-                                from test_agent.summarizer_agent.prompt import get_prompt
-                                from test_agent.summarizer_agent.utils import call_gemini_llm
+                                console.print("[blue]Debug: Attempting to import required modules[/blue]")
+                                # First try direct import
+                                try:
+                                    from test_agent.summarizer_agent.prompt import get_prompt
+                                    from test_agent.summarizer_agent.utils import call_gemini_llm
+                                    console.print("[blue]Debug: Successfully imported modules directly[/blue]")
+                                except ImportError:
+                                    # If direct import fails, try importing the package first
+                                    console.print("[blue]Debug: Direct import failed, trying package import[/blue]")
+                                    import test_agent.summarizer_agent
+                                    from test_agent.summarizer_agent.prompt import get_prompt
+                                    from test_agent.summarizer_agent.utils import call_gemini_llm
+                                    console.print("[blue]Debug: Successfully imported modules through package[/blue]")
+                                
                                 namespace['get_prompt'] = get_prompt
                                 namespace['call_gemini_llm'] = call_gemini_llm
-                                console.print("[blue]Debug: Imported required functions[/blue]")
                             except ImportError as e:
                                 console.print(f"[red]Error importing required functions: {str(e)}[/red]")
+                                console.print(f"[blue]Debug: Current sys.path: {sys.path}[/blue]")
                                 raise
                             
                             # Execute imports first
                             if import_lines:
                                 import_code = '\n'.join(import_lines)
                                 console.print("[blue]Debug: Executing imports[/blue]")
-                                exec(import_code, namespace)
+                                try:
+                                    exec(import_code, namespace)
+                                    console.print("[blue]Debug: Successfully executed imports[/blue]")
+                                except Exception as e:
+                                    console.print(f"[red]Error executing imports: {str(e)}[/red]")
+                                    console.print(f"[blue]Debug: Import code:\n{import_code}[/blue]")
+                                    raise
                             
                             # Execute the code block
                             code_block = '\n'.join(code_lines)
                             console.print("[blue]Debug: Executing code block[/blue]")
-                            exec(code_block, namespace)
+                            try:
+                                exec(code_block, namespace)
+                                console.print("[blue]Debug: Successfully executed code block[/blue]")
+                            except Exception as e:
+                                console.print(f"[red]Error executing code block: {str(e)}[/red]")
+                                console.print(f"[blue]Debug: Code block:\n{code_block}[/blue]")
+                                raise
                             
                             # Find the class with run method
                             class_name = None
@@ -736,8 +766,7 @@ class TestRunner:
                             raise
                         finally:
                             # Don't remove the paths, just log them
-                            console.print(f"[blue]Debug: Current sys.path: {sys.path}[/blue]")
-                            console.print(f"[blue]Debug: Current sys.modules keys: {list(sys.modules.keys())}[/blue]")
+                            console.print("[blue]Debug: Execution completed[/blue]")
                         
                         console.print(f"[blue]Debug: Test block output: {output}[/blue]")
                     
