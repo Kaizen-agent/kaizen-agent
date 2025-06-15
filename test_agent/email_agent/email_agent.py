@@ -21,7 +21,6 @@ class EmailAgent:
             # Test the configuration by generating content
             # This helps catch issues like invalid API keys or network problems early
             self.model.generate_content("Test")
-            # Removed debug print: print("Debug: EmailAgent: Successfully configured Google API")
         except Exception as e:
             raise ValueError(f"Failed to configure Google API: {str(e)}")
 
@@ -33,7 +32,7 @@ class EmailAgent:
             draft (str): The original email draft to improve
             
         Returns:
-            str: The improved email draft
+            str: The improved email draft or a specific message if input is not an email.
         """
         # Modified to raise a ValueError for empty/whitespace drafts, making the method's
         # behavior more consistent with typical API functions (raising errors for invalid input).
@@ -41,22 +40,31 @@ class EmailAgent:
         if not draft or not draft.strip():
             raise ValueError("Email draft cannot be empty or contain only whitespace.")
             
-        # Add safety instructions to the prompt
-        prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
-        Focus on:
-        - Professional tone and language
-        - Clear and concise communication
-        - Proper email etiquette
-        - Maintaining the original message's intent
-        
-        Here's the draft:
-        
+        # Modified prompt to include explicit instructions for handling non-email inputs,
+        # ensuring the model returns "I'm sorry, I can't help with that." as required
+        # for edge cases and random inputs, while also reinforcing output format for valid emails.
+        prompt = f"""You are an AI assistant specialized in improving email drafts.
+        Your task is to take an input text and either improve it as a professional email draft or, if the input is clearly not an email draft or a request to generate an email, respond with a specific phrase.
+
+        **Instructions:**
+        1.  **If the input is an email draft or a request that can be turned into an email (e.g., "tell my team we have a meeting", "ask for a project update"), then:**
+            - Improve it by making it more professional, clear, concise, and effective.
+            - Ensure it follows proper email etiquette.
+            - Preserve the original intent.
+            - The output should ONLY contain the improved email draft, nothing else (no greetings, intros, or outros outside the email content itself).
+            - Avoid grammar errors.
+
+        2.  **If the input is *not* an email draft and *cannot* be reasonably interpreted as a request to generate or improve an email (e.g., "Where is the nearest hotel?", "What's the capital of France?", random words), then:**
+            - Your ONLY response must be: "I'm sorry, I can't help with that."
+            - Do not provide any other text, explanations, or suggestions.
+
+        Here's the input text:
+
         {draft}
-        
-        Improved version:"""
+
+        Improved version or specific response:"""
 
         try:
-            # Removed debug print: print(f"Debug: Prompt: {prompt}")
             response = self.model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
@@ -84,7 +92,6 @@ class EmailAgent:
                     }
                 ]
             )
-            # Removed debug print: print(f"Debug: Response: {response}")
             
             # Check for safety issues in the prompt feedback
             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
