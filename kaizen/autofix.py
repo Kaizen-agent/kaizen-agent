@@ -484,11 +484,11 @@ def _enhance_pr_body(failure_data: List[Dict], fixed_tests: List[Dict], test_res
 ## Overview
 - **Fix Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 - **Fixed Tests:** {len(fixed_tests)}
-- **Total Tests:** {sum(len(result.get('test_cases', [])) for result in test_results.values())}
+- **Total Tests:** {sum(len(result.get('test_cases', [])) for result in test_results.values()) if isinstance(test_results, dict) else 0}
 - **Test Configuration:** {test_config.get('name', 'Unnamed Test Suite')}
 
 ## Test Results
-{format_test_results_table(test_results)}
+{format_test_results_table(test_results) if isinstance(test_results, dict) else "Test results not available"}
 
 {analyze_failures(failure_data)}
 
@@ -518,7 +518,7 @@ The following changes were made to fix the failing tests:
 
 ## Verification
 All fixed tests have been verified to pass in the following environments:
-{chr(10).join(f'- {region}' for region in test_results.keys())}
+{chr(10).join(f'- {region}' for region in test_results.keys()) if isinstance(test_results, dict) else "- No environments available"}
 
 ## Next Steps
 1. Review the changes for any potential side effects
