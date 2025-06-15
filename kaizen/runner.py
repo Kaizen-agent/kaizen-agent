@@ -682,15 +682,26 @@ class TestRunner:
                                 '__builtins__': __builtins__,
                             }
                             
+                            # Import required modules first
+                            try:
+                                from test_agent.summarizer_agent.prompt import get_prompt
+                                from test_agent.summarizer_agent.utils import call_gemini_llm
+                                namespace['get_prompt'] = get_prompt
+                                namespace['call_gemini_llm'] = call_gemini_llm
+                                console.print("[blue]Debug: Imported required functions[/blue]")
+                            except ImportError as e:
+                                console.print(f"[red]Error importing required functions: {str(e)}[/red]")
+                                raise
+                            
                             # Execute imports first
                             if import_lines:
                                 import_code = '\n'.join(import_lines)
-                                console.print(f"[blue]Debug: Executing imports[/blue]")
+                                console.print("[blue]Debug: Executing imports[/blue]")
                                 exec(import_code, namespace)
                             
                             # Execute the code block
                             code_block = '\n'.join(code_lines)
-                            console.print(f"[blue]Debug: Executing code block[/blue]")
+                            console.print("[blue]Debug: Executing code block[/blue]")
                             exec(code_block, namespace)
                             
                             # Find the class with run method
