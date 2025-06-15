@@ -624,6 +624,7 @@ class TestRunner:
                 # Add test case result
                 test_case = {
                     'name': step_name,
+                    'input': step.get('input', {}),
                     'status': 'passed' if passed else 'failed',
                     'output': output,
                     'details': logger.get_last_step_details()
