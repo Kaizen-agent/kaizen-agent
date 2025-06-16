@@ -1188,6 +1188,11 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                 # Prepare a comprehensive prompt that includes all files and their relationships
                 prompt = f"""You are a senior AI agent engineer specializing in improving AI agent code. Your task is to fix the following code files while maintaining their structure and relationships, with a specific focus on AI agent best practices.
 
+IMPORTANT: You must return your response in a specific format. For each file, you must include:
+1. A file marker: === <file_path> ===
+2. The complete fixed code for that file
+3. A blank line between files
+
 Test Configuration Context:
 {json.dumps(test_config, indent=2)}
 
@@ -1209,7 +1214,7 @@ Requirements:
 3. Ensure proper error handling and input validation
 4. Maintain code quality standards (type hints, documentation, etc.)
 5. Keep changes minimal and focused on fixing the specific issues
-6. Return exactly three newline-separated fields as specified above
+6. Return each file's code in the exact format specified above
 7. DO NOT return empty code blocks or invalid syntax
 8. The returned code must be valid Python code that can be executed
 
@@ -1319,7 +1324,7 @@ Code Improvement Guidelines:
    - Include output sanitization
    - Add quality scoring mechanisms
 
-Return your response in exactly three newline-separated fields as specified at the top of this prompt."""
+Return your response in the exact format specified above, with each file's code separated by file markers and blank lines."""
                 
                 logger.debug("Generated prompt", extra={
                     'prompt_length': len(prompt)
@@ -1335,68 +1340,77 @@ Return your response in exactly three newline-separated fields as specified at t
                 # Parse the response to extract fixes for each file
                 current_file = None
                 current_code = []
+                file_markers = set()
                 
                 for line in fixed_content.split('\n'):
                     if line.startswith('=== ') and line.endswith(' ==='):
-                        if current_file and current_code:
-                            fixed_code = '\n'.join(current_code)
-                            # Validate and improve the generated code
-                            fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
-                            logger.debug("Generated fixed code", extra={
-                                'file': current_file,
-                                'content_length': len(fixed_code)
+                        file_marker = line[4:-4].strip()
+                        if file_marker in file_markers:
+                            logger.warning("Duplicate file marker detected", extra={
+                                'file': file_marker
                             })
+                            continue
                             
-                            # Additional validation steps
+                        if current_file and current_code:
                             try:
-                                # Check if all imports are valid
-                                tree = ast.parse(fixed_code)
-                                for node in ast.walk(tree):
-                                    if isinstance(node, (ast.Import, ast.ImportFrom)):
-                                        if isinstance(node, ast.Import):
-                                            for name in node.names:
-                                                module_name = name.name.split('.')[0]
+                                fixed_code = '\n'.join(current_code)
+                                # Validate and improve the generated code
+                                fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                                logger.debug("Generated fixed code", extra={
+                                    'file': current_file,
+                                    'content_length': len(fixed_code)
+                                })
+                                
+                                # Additional validation steps
+                                try:
+                                    # Check if all imports are valid
+                                    tree = ast.parse(fixed_code)
+                                    for node in ast.walk(tree):
+                                        if isinstance(node, (ast.Import, ast.ImportFrom)):
+                                            if isinstance(node, ast.Import):
+                                                for name in node.names:
+                                                    module_name = name.name.split('.')[0]
+                                                    if module_name not in file_dependencies.get(current_file, []):
+                                                        logger.warning("New import detected", extra={
+                                                            'file': current_file,
+                                                            'import': module_name
+                                                        })
+                                            else:
+                                                module_name = node.module.split('.')[0]
                                                 if module_name not in file_dependencies.get(current_file, []):
                                                     logger.warning("New import detected", extra={
                                                         'file': current_file,
                                                         'import': module_name
                                                     })
-                                        else:
-                                            module_name = node.module.split('.')[0]
-                                            if module_name not in file_dependencies.get(current_file, []):
-                                                logger.warning("New import detected", extra={
-                                                    'file': current_file,
-                                                    'import': module_name
-                                                })
-                                
-                                # Check if all functions and classes are preserved
-                                original_tree = ast.parse(original_codes[current_file])
-                                original_names = {node.name for node in ast.walk(original_tree) 
-                                                if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
-                                fixed_names = {node.name for node in ast.walk(tree) 
-                                             if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
-                                
-                                if original_names != fixed_names:
-                                    logger.warning("Function/class mismatch", extra={
-                                        'file': current_file,
-                                        'missing': list(original_names - fixed_names),
-                                        'added': list(fixed_names - original_names)
+                                    
+                                    # Check if all functions and classes are preserved
+                                    original_tree = ast.parse(original_codes[current_file])
+                                    original_names = {node.name for node in ast.walk(original_tree) 
+                                                    if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
+                                    fixed_names = {node.name for node in ast.walk(tree) 
+                                                 if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
+                                    
+                                    if original_names != fixed_names:
+                                        logger.warning("Function/class mismatch", extra={
+                                            'file': current_file,
+                                            'missing': list(original_names - fixed_names),
+                                            'added': list(fixed_names - original_names)
+                                        })
+                                    
+                                    fixed_codes[current_file] = fixed_code
+                                    logger.info("Validated and improved code", extra={
+                                        'file': current_file
                                     })
-                                
-                                fixed_codes[current_file] = fixed_code
-                                logger.info("Validated and improved code", extra={
-                                    'file': current_file
-                                })
-                            except Exception as e:
-                                logger.error("Failed to validate code", extra={
-                                    'file': current_file,
-                                    'error': str(e)
-                                })
-                                # Try to fix the code again individually
-                                logger.info("Attempting individual fix", extra={
-                                    'file': current_file
-                                })
-                                response = model.generate_content(f"""Fix the following code file:
+                                except Exception as e:
+                                    logger.error("Failed to validate code", extra={
+                                        'file': current_file,
+                                        'error': str(e)
+                                    })
+                                    # Try to fix the code again individually
+                                    logger.info("Attempting individual fix", extra={
+                                        'file': current_file
+                                    })
+                                    response = model.generate_content(f"""You are a senior AI agent engineer specializing in improving AI agent code. Your task is to fix the following code file with a specific focus on AI agent best practices and prompt engineering.
 
 === {current_file} ===
 {original_codes[current_file]}
@@ -1404,53 +1418,83 @@ Return your response in exactly three newline-separated fields as specified at t
 Test failures:
 {chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failure in files_to_fix[current_file])}
 
+Requirements:
+1. Fix all test failures while maintaining the agent's core functionality
+2. Focus on improving AI agent capabilities and prompt engineering
+3. Ensure proper error handling and input validation
+4. Maintain code quality standards (type hints, documentation, etc.)
+5. Keep changes minimal and focused on fixing the specific issues
+
+AI Agent Improvement Guidelines:
+1. Prompt Engineering:
+   - Analyze and improve any prompts in the code
+   - Add clear output format requirements
+   - Include specific examples of expected outputs
+   - Specify required content elements
+   - Add constraints for response length and style
+   - Include validation criteria in the prompts
+
+2. Context Enhancement:
+   - Add relevant background information
+   - Include domain-specific terminology
+   - Specify the target audience
+   - Add style and tone requirements
+   - Include quality assurance steps
+
+3. Output Quality:
+   - Add post-processing for output formatting
+   - Implement content validation
+   - Add response enhancement logic
+   - Include output sanitization
+   - Add quality scoring mechanisms
+
+4. Error Handling:
+   - Add proper error handling for API calls
+   - Include specific error messages
+   - Handle edge cases gracefully
+   - Validate inputs before processing
+   - Add retry mechanisms for transient failures
+
+5. Code Structure:
+   - Keep methods focused and single-purpose
+   - Use clear and descriptive variable names
+   - Add type hints for all parameters
+   - Include docstrings explaining purpose
+   - Follow consistent code style
+
 Return only the fixed code without any explanations or markdown formatting.""")
-                                fixed_code = response.text.strip()
-                                fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
-                                fixed_codes[current_file] = fixed_code
-                                logger.info("Successfully fixed code individually", extra={
-                                    'file': current_file
+                                    fixed_code = response.text.strip()
+                                    fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                                    fixed_codes[current_file] = fixed_code
+                                    logger.info("Successfully fixed code individually", extra={
+                                        'file': current_file
+                                    })
+                            except Exception as e:
+                                logger.error("Failed to process file", extra={
+                                    'file': current_file,
+                                    'error': str(e)
                                 })
+                                continue
                                 
-                        current_file = line[4:-4].strip()
+                        current_file = file_marker
+                        file_markers.add(file_marker)
                         current_code = []
                     elif current_file:
                         current_code.append(line)
                 
                 # Handle the last file
                 if current_file and current_code:
-                    fixed_code = '\n'.join(current_code)
-                    fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
-                    fixed_codes[current_file] = fixed_code
-                    logger.info("Processed last file", extra={
-                        'file': current_file
-                    })
-                
-                # Verify that all files were fixed
-                missing_files = set(files_to_fix.keys()) - set(fixed_codes.keys())
-                if missing_files:
-                    logger.warning("Some files were not fixed", extra={
-                        'missing_files': list(missing_files)
-                    })
-                    # Try to fix remaining files individually
-                    for file_path in missing_files:
-                        logger.info("Requesting individual fix", extra={
-                            'file': file_path
+                    try:
+                        fixed_code = '\n'.join(current_code)
+                        fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                        fixed_codes[current_file] = fixed_code
+                        logger.info("Processed last file", extra={
+                            'file': current_file
                         })
-                        response = model.generate_content(f"""Fix the following code file:
-
-=== {file_path} ===
-{original_codes[file_path]}
-
-Test failures:
-{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failure in files_to_fix[file_path])}
-
-Return only the fixed code without any explanations or markdown formatting.""")
-                        fixed_code = response.text.strip()
-                        fixed_code = _validate_and_improve_code(fixed_code, original_codes[file_path])
-                        fixed_codes[file_path] = fixed_code
-                        logger.info("Successfully fixed file individually", extra={
-                            'file': file_path
+                    except Exception as e:
+                        logger.error("Failed to process last file", extra={
+                            'file': current_file,
+                            'error': str(e)
                         })
             
             # Write all fixed code to disk before running tests
