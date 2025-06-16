@@ -697,13 +697,13 @@ def _collect_referenced_files(file_path: str, processed_files: set = None, base_
     processed_files.add(file_path)
     
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
             
         # Parse the file to find imports
         tree = ast.parse(content)
         
-        # Get the directory of the current file
+        # Get the directory of the current file for relative imports
         file_dir = os.path.dirname(os.path.abspath(file_path))
         if base_dir is None:
             base_dir = file_dir
@@ -713,46 +713,138 @@ def _collect_referenced_files(file_path: str, processed_files: set = None, base_
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 if isinstance(node, ast.Import):
                     for name in node.names:
-                        module_name = name.name.split('.')[0]
-                        # Try different possible locations for the module
-                        possible_paths = [
-                            os.path.join(file_dir, f"{module_name}.py"),  # Same directory
-                            os.path.join(file_dir, module_name, "__init__.py"),  # Package
-                            os.path.join(base_dir, f"{module_name}.py"),  # Base directory
-                            os.path.join(base_dir, module_name, "__init__.py"),  # Package in base
-                        ]
-                        for module_path in possible_paths:
-                            if os.path.exists(module_path):
-                                _collect_referenced_files(module_path, processed_files, base_dir)
-                                break
+                        module_name = name.name
+                        try:
+                            # Use importlib to find the module
+                            spec = importlib.util.find_spec(module_name)
+                            if spec is not None and spec.origin is not None:
+                                # Only process Python files
+                                if spec.origin.endswith('.py'):
+                                    _collect_referenced_files(spec.origin, processed_files, base_dir)
+                        except (ImportError, ValueError) as e:
+                            logger.warning(f"Failed to find module {module_name}: {str(e)}")
                 else:  # ImportFrom
                     if node.module:
-                        # Handle relative imports
-                        if node.level > 0:  # Relative import
-                            current_dir = file_dir
-                            for _ in range(node.level - 1):
-                                current_dir = os.path.dirname(current_dir)
-                            module_name = node.module.split('.')[0]
-                            module_path = os.path.join(current_dir, f"{module_name}.py")
-                            if os.path.exists(module_path):
-                                _collect_referenced_files(module_path, processed_files, base_dir)
-                        else:  # Absolute import
-                            module_name = node.module.split('.')[0]
-                            possible_paths = [
-                                os.path.join(file_dir, f"{module_name}.py"),
-                                os.path.join(file_dir, module_name, "__init__.py"),
-                                os.path.join(base_dir, f"{module_name}.py"),
-                                os.path.join(base_dir, module_name, "__init__.py"),
-                            ]
-                            for module_path in possible_paths:
-                                if os.path.exists(module_path):
-                                    _collect_referenced_files(module_path, processed_files, base_dir)
-                                    break
+                        try:
+                            # Handle relative imports
+                            if node.level > 0:  # Relative import
+                                # Get the package name from the current file
+                                current_package = os.path.basename(file_dir)
+                                # Construct the full module name
+                                module_name = f"{current_package}.{node.module}"
+                            else:  # Absolute import
+                                module_name = node.module
+                            
+                            # Use importlib to find the module
+                            spec = importlib.util.find_spec(module_name)
+                            if spec is not None and spec.origin is not None:
+                                # Only process Python files
+                                if spec.origin.endswith('.py'):
+                                    _collect_referenced_files(spec.origin, processed_files, base_dir)
+                        except (ImportError, ValueError) as e:
+                            logger.warning(f"Failed to find module {module_name}: {str(e)}")
     
     except Exception as e:
         logger.warning(f"Error processing imports in {file_path}: {str(e)}")
     
     return processed_files
+
+def _map_modules(file_paths: set) -> Dict[str, str]:
+    """
+    Create a mapping of module names to file paths.
+    
+    Args:
+        file_paths: Set of file paths to map
+        
+    Returns:
+        Dict mapping module names to file paths
+    """
+    module_to_file = {}
+    for file_path in file_paths:
+        path = Path(file_path)
+        # Map the module name (filename without extension)
+        module_name = path.stem
+        module_to_file[module_name] = file_path
+        
+        # Map package paths (without .py suffix)
+        package_parts = path.with_suffix("").parts
+        for i in range(len(package_parts)):
+            module_name = '.'.join(package_parts[i:])
+            module_to_file[module_name] = file_path
+            
+    return module_to_file
+
+def _match_failure(failure: Dict, module_to_file: Dict[str, str], referenced_files: set) -> set:
+    """
+    Match a failure to affected files based on error context.
+    
+    Args:
+        failure: Test failure data
+        module_to_file: Mapping of module names to file paths
+        referenced_files: Set of all referenced files
+        
+    Returns:
+        Set of affected file paths
+    """
+    affected_files = set()
+    
+    # Extract failure information
+    error_message = failure.get('error_message', '')
+    test_name = failure.get('test_name', '')
+    output = failure.get('output', '')
+    region = failure.get('region', '')
+    details = failure.get('details', '')
+    
+    # Check error message for module references
+    if error_message:
+        for module_name, file_path in module_to_file.items():
+            if module_name in error_message:
+                affected_files.add(file_path)
+                logger.info(f"Found module {module_name} in error message: {error_message}")
+    
+    # Check test name for module references
+    if test_name:
+        for module_name, file_path in module_to_file.items():
+            if module_name in test_name:
+                affected_files.add(file_path)
+                logger.info(f"Found module {module_name} in test name: {test_name}")
+    
+    # Check output for module references
+    if output:
+        for module_name, file_path in module_to_file.items():
+            if module_name in output:
+                affected_files.add(file_path)
+                logger.info(f"Found module {module_name} in output: {output}")
+    
+    # Check details for module references
+    if details:
+        for module_name, file_path in module_to_file.items():
+            if module_name in details:
+                affected_files.add(file_path)
+                logger.info(f"Found module {module_name} in details: {details}")
+    
+    # Check region information
+    if region:
+        for file_path in referenced_files:
+            if region in file_path:
+                affected_files.add(file_path)
+                logger.info(f"Found region {region} in file path: {file_path}")
+    
+    # If no files were matched, try to infer from the test name
+    if not affected_files and test_name:
+        test_parts = test_name.split('.')
+        for i in range(len(test_parts)):
+            module_name = '.'.join(test_parts[:i+1])
+            if module_name in module_to_file:
+                affected_files.add(module_to_file[module_name])
+                logger.info(f"Inferred module {module_name} from test name: {test_name}")
+    
+    # If still no files were matched, add to all referenced files
+    if not affected_files:
+        logger.warning("No specific files matched for failure, adding to all referenced files")
+        affected_files = referenced_files
+    
+    return affected_files
 
 def _analyze_failure_dependencies(failure_data: List[Dict], referenced_files: set) -> Dict[str, List[Dict]]:
     """
@@ -767,127 +859,28 @@ def _analyze_failure_dependencies(failure_data: List[Dict], referenced_files: se
     """
     file_failures = {file_path: [] for file_path in referenced_files}
     
-    # Create a mapping of module names to file paths
-    module_to_file = {}
-    for file_path in referenced_files:
-        # Get the module name from the file path
-        module_name = os.path.splitext(os.path.basename(file_path))[0]
-        module_to_file[module_name] = file_path
-        
-        # Also map the full path components
-        path_parts = file_path.split(os.sep)
-        for i in range(len(path_parts)):
-            module_name = '.'.join(path_parts[i:])
-            module_to_file[module_name] = file_path
+    # Create module mapping
+    module_to_file = _map_modules(referenced_files)
     
     for failure in failure_data:
-        # Extract all relevant information from the failure
-        error_message = failure.get('error_message', '')
-        test_name = failure.get('test_name', '')
-        output = failure.get('output', '')
-        region = failure.get('region', '')
-        details = failure.get('details', '')
-        
-        # Create a comprehensive error context
+        # Create error context
         error_context = {
-            'error_message': error_message,
-            'test_name': test_name,
-            'output': output,
-            'region': region,
-            'details': details,
-            'raw_failure': failure  # Keep the original failure data for reference
+            'error_message': failure.get('error_message', ''),
+            'test_name': failure.get('test_name', ''),
+            'output': failure.get('output', ''),
+            'region': failure.get('region', ''),
+            'details': failure.get('details', ''),
+            'raw_failure': failure
         }
         
-        # Skip if we have no useful information at all
-        if not any([error_message, test_name, output, details]):
+        # Skip if we have no useful information
+        if not any([error_context['error_message'], error_context['test_name'], 
+                   error_context['output'], error_context['details']]):
             logger.warning(f"Skipping failure with no useful information: {failure}")
             continue
-            
-        # Analyze error message and context to determine affected files
-        affected_files = set()
         
-        # Check error message for module references
-        if error_message:
-            # Look for module references in error messages
-            for module_name, file_path in module_to_file.items():
-                if module_name in error_message:
-                    affected_files.add(file_path)
-                    logger.info(f"Found module {module_name} in error message: {error_message}")
-            
-            # Look for file paths in error messages
-            for file_path in referenced_files:
-                file_name = os.path.basename(file_path)
-                if file_name in error_message:
-                    affected_files.add(file_path)
-                    logger.info(f"Found file {file_name} in error message: {error_message}")
-        
-        # Check test name for module references
-        if test_name:
-            # Look for module references in test names
-            for module_name, file_path in module_to_file.items():
-                if module_name in test_name:
-                    affected_files.add(file_path)
-                    logger.info(f"Found module {module_name} in test name: {test_name}")
-            
-            # Look for file paths in test names
-            for file_path in referenced_files:
-                file_name = os.path.basename(file_path)
-                if file_name in test_name:
-                    affected_files.add(file_path)
-                    logger.info(f"Found file {file_name} in test name: {test_name}")
-        
-        # Check output for module references
-        if output:
-            # Look for module references in output
-            for module_name, file_path in module_to_file.items():
-                if module_name in output:
-                    affected_files.add(file_path)
-                    logger.info(f"Found module {module_name} in output: {output}")
-            
-            # Look for file paths in output
-            for file_path in referenced_files:
-                file_name = os.path.basename(file_path)
-                if file_name in output:
-                    affected_files.add(file_path)
-                    logger.info(f"Found file {file_name} in output: {output}")
-        
-        # Check details for module references
-        if details:
-            # Look for module references in details
-            for module_name, file_path in module_to_file.items():
-                if module_name in details:
-                    affected_files.add(file_path)
-                    logger.info(f"Found module {module_name} in details: {details}")
-            
-            # Look for file paths in details
-            for file_path in referenced_files:
-                file_name = os.path.basename(file_path)
-                if file_name in details:
-                    affected_files.add(file_path)
-                    logger.info(f"Found file {file_name} in details: {details}")
-        
-        # Check region information
-        if region:
-            # Look for region matches in file paths
-            for file_path in referenced_files:
-                if region in file_path:
-                    affected_files.add(file_path)
-                    logger.info(f"Found region {region} in file path: {file_path}")
-        
-        # If no files were matched, try to infer from the test name
-        if not affected_files and test_name:
-            # Try to extract module/package names from test name
-            test_parts = test_name.split('.')
-            for i in range(len(test_parts)):
-                module_name = '.'.join(test_parts[:i+1])
-                if module_name in module_to_file:
-                    affected_files.add(module_to_file[module_name])
-                    logger.info(f"Inferred module {module_name} from test name: {test_name}")
-        
-        # If still no files were matched, add to all referenced files
-        if not affected_files:
-            logger.warning(f"No specific files matched for failure, adding to all referenced files")
-            affected_files = referenced_files
+        # Match failure to affected files
+        affected_files = _match_failure(failure, module_to_file, referenced_files)
         
         # Add the failure to all affected files
         for file_path in affected_files:
@@ -915,14 +908,53 @@ def _reload_modules(file_paths: set) -> None:
     Args:
         file_paths: Set of file paths to reload
     """
+    # Invalidate import caches to ensure newly written files are detected
+    importlib.invalidate_caches()
+    
     for file_path in file_paths:
-        module_name = Path(file_path).stem
-        if module_name in sys.modules:
-            try:
-                importlib.reload(sys.modules[module_name])
-                logger.info(f"Reloaded module: {module_name}")
-            except Exception as e:
-                logger.warning(f"Failed to reload module {module_name}: {str(e)}")
+        try:
+            # Convert file path to absolute path
+            abs_path = os.path.abspath(file_path)
+            
+            # Get the directory containing the file
+            file_dir = os.path.dirname(abs_path)
+            
+            # Get the module name by converting the file path to a module path
+            # First, find the root package directory (where __init__.py exists)
+            root_dir = file_dir
+            while os.path.exists(os.path.join(root_dir, '__init__.py')):
+                parent = os.path.dirname(root_dir)
+                if parent == root_dir:  # Reached filesystem root
+                    break
+                root_dir = parent
+            
+            # Get the relative path from root_dir to the file
+            rel_path = os.path.relpath(abs_path, root_dir)
+            
+            # Convert path to module name
+            module_name = os.path.splitext(rel_path)[0].replace(os.sep, '.')
+            
+            # If the module is already loaded, reload it
+            if module_name in sys.modules:
+                try:
+                    importlib.reload(sys.modules[module_name])
+                    logger.info(f"Reloaded module: {module_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to reload module {module_name}: {str(e)}")
+            else:
+                # Try to import and then reload the module
+                try:
+                    module = importlib.import_module(module_name)
+                    importlib.reload(module)
+                    logger.info(f"Imported and reloaded module: {module_name}")
+                except ImportError as e:
+                    logger.warning(f"Failed to import module {module_name}: {str(e)}")
+                except Exception as e:
+                    logger.warning(f"Failed to reload module {module_name}: {str(e)}")
+                    
+        except Exception as e:
+            logger.warning(f"Error processing file {file_path}: {str(e)}")
+            continue
 
 def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True, base_branch: str = 'main') -> List[Dict]:
     """
