@@ -1108,8 +1108,9 @@ Return only the fixed code without any explanations or markdown formatting.""")
             # Extract file path from the root of the configuration
             test_file_path = test_config.get('file_path')
             if not test_file_path:
-                console.print("[red]Error: No file_path found in test configuration[/red]")
-                sys.exit(1)
+                error_msg = "No file_path found in test configuration"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
             # Resolve the test file path relative to the YAML config file's directory
             config_dir = os.path.dirname(os.path.abspath(test_config_path))
@@ -1117,6 +1118,18 @@ Return only the fixed code without any explanations or markdown formatting.""")
             
             logger.info(f"Running tests for {resolved_test_file_path}")
             test_results = test_runner.run_tests(Path(resolved_test_file_path))
+            
+            # Validate test results
+            if test_results is None:
+                error_msg = "Test runner returned None results"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+                
+            if not isinstance(test_results, dict):
+                error_msg = f"Invalid test results type: {type(test_results)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
             logger.info(f"Test results: {test_results}")
             
             # Store this attempt's results
