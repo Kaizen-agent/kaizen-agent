@@ -876,18 +876,218 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
             
             fixed_codes = {}
-            for current_file_path, failures in file_failures.items():
-                if failures:  # Only fix files with failures
-                    logger.info(f"Requesting code fixes for {current_file_path}")
-                    response = model.generate_content(pr_body)
-                    fixed_code = response.text.strip()
-                    logger.info(f"Fixed code for {current_file_path}: {fixed_code}")
-                    
-                    # Validate and improve the generated code
-                    fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file_path])
-                    logger.info(f"Validated and improved generated code for {current_file_path}")
-                    
-                    fixed_codes[current_file_path] = fixed_code
+            # Collect all files that need fixing
+            files_to_fix = {path: failures for path, failures in file_failures.items() if failures}
+            
+            if files_to_fix:
+                logger.info(f"Requesting code fixes for {len(files_to_fix)} files")
+                
+                # Analyze dependencies between files
+                file_dependencies = {}
+                for path in files_to_fix.keys():
+                    try:
+                        with open(path, 'r') as f:
+                            content = f.read()
+                            tree = ast.parse(content)
+                            imports = []
+                            for node in ast.walk(tree):
+                                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                                    if isinstance(node, ast.Import):
+                                        imports.extend(name.name.split('.')[0] for name in node.names)
+                                    else:
+                                        imports.append(node.module.split('.')[0])
+                            file_dependencies[path] = imports
+                    except Exception as e:
+                        logger.warning(f"Error analyzing dependencies for {path}: {str(e)}")
+                        file_dependencies[path] = []
+                
+                # Prepare a comprehensive prompt that includes all files and their relationships
+                prompt = f"""You are a senior AI agent engineer specializing in improving AI agent code. Your task is to fix the following code files while maintaining their structure and relationships, with a specific focus on AI agent best practices.
+
+Files to fix:
+{chr(10).join(f'- {path}: {len(failures)} failures' for path, failures in files_to_fix.items())}
+
+File Dependencies:
+{chr(10).join(f'- {path} imports: {", ".join(deps)}' for path, deps in file_dependencies.items())}
+
+Original code for each file:
+{chr(10).join(f'=== {path} ==={chr(10)}{original_codes[path]}{chr(10)}' for path in files_to_fix.keys())}
+
+Test failures:
+{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failures in files_to_fix.values() for failure in failures)}
+
+AI Agent Best Practices Requirements:
+1. Prompt Engineering:
+   - Ensure prompts are clear, specific, and well-structured
+   - Include proper context and constraints
+   - Add validation criteria in prompts
+   - Maintain consistent prompt formatting
+   - Include error handling instructions in prompts
+
+2. Response Handling:
+   - Implement robust response parsing
+   - Add validation for response format and content
+   - Include fallback mechanisms for invalid responses
+   - Handle edge cases in responses
+   - Maintain proper error messages
+
+3. Context Management:
+   - Preserve conversation history appropriately
+   - Handle context window limitations
+   - Implement proper context pruning
+   - Maintain relevant context across interactions
+   - Handle context switching gracefully
+
+4. Error Handling:
+   - Implement comprehensive error handling
+   - Add proper logging for debugging
+   - Include retry mechanisms for transient failures
+   - Handle API rate limits and timeouts
+   - Provide meaningful error messages
+
+5. Performance Optimization:
+   - Optimize API calls and external service interactions
+   - Implement proper caching where appropriate
+   - Handle large inputs efficiently
+   - Manage resource usage effectively
+   - Implement proper cleanup
+
+6. Security:
+   - Never expose API keys or sensitive data
+   - Validate and sanitize all inputs
+   - Implement proper access controls
+   - Handle sensitive data appropriately
+   - Follow security best practices
+
+7. Code Structure:
+   - Maintain clear separation of concerns
+   - Keep functions focused and single-purpose
+   - Use clear and descriptive variable names
+   - Add proper type hints and documentation
+   - Follow consistent code style
+
+8. Testing Considerations:
+   - Make code testable by avoiding hard-coded values
+   - Use dependency injection where appropriate
+   - Add proper mocking points for external services
+   - Ensure error cases are testable
+   - Make validation logic explicit and testable
+
+General Requirements:
+1. Fix all test failures while maintaining the existing file structure
+2. Ensure fixes are consistent across all files
+3. Maintain all imports and dependencies
+4. Keep the same class and function signatures
+5. Only modify the necessary parts of the code
+6. Ensure all imports are valid and resolve correctly
+7. Maintain proper error handling and logging
+8. Keep code style consistent with the original
+
+Return the fixed code for each file in the following format:
+
+=== file_path ===
+fixed code here
+
+=== next_file_path ===
+fixed code here
+
+Do not include any explanations or markdown formatting."""
+                
+                # Get fixes for all files at once
+                response = model.generate_content(prompt)
+                fixed_content = response.text.strip()
+                
+                # Parse the response to extract fixes for each file
+                current_file = None
+                current_code = []
+                
+                for line in fixed_content.split('\n'):
+                    if line.startswith('=== ') and line.endswith(' ==='):
+                        if current_file and current_code:
+                            fixed_code = '\n'.join(current_code)
+                            # Validate and improve the generated code
+                            fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                            
+                            # Additional validation steps
+                            try:
+                                # Check if all imports are valid
+                                tree = ast.parse(fixed_code)
+                                for node in ast.walk(tree):
+                                    if isinstance(node, (ast.Import, ast.ImportFrom)):
+                                        if isinstance(node, ast.Import):
+                                            for name in node.names:
+                                                module_name = name.name.split('.')[0]
+                                                if module_name not in file_dependencies.get(current_file, []):
+                                                    logger.warning(f"New import detected in {current_file}: {module_name}")
+                                        else:
+                                            module_name = node.module.split('.')[0]
+                                            if module_name not in file_dependencies.get(current_file, []):
+                                                logger.warning(f"New import detected in {current_file}: {module_name}")
+                                
+                                # Check if all functions and classes are preserved
+                                original_tree = ast.parse(original_codes[current_file])
+                                original_names = {node.name for node in ast.walk(original_tree) 
+                                                if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
+                                fixed_names = {node.name for node in ast.walk(tree) 
+                                             if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
+                                
+                                if original_names != fixed_names:
+                                    logger.warning(f"Function/class mismatch in {current_file}")
+                                    logger.warning(f"Missing: {original_names - fixed_names}")
+                                    logger.warning(f"Added: {fixed_names - original_names}")
+                                
+                                fixed_codes[current_file] = fixed_code
+                                logger.info(f"Validated and improved generated code for {current_file}")
+                            except Exception as e:
+                                logger.error(f"Error validating code for {current_file}: {str(e)}")
+                                # Try to fix the code again individually
+                                logger.info(f"Attempting individual fix for {current_file}")
+                                response = model.generate_content(f"""Fix the following code file:
+
+=== {current_file} ===
+{original_codes[current_file]}
+
+Test failures:
+{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failure in files_to_fix[current_file])}
+
+Return only the fixed code without any explanations or markdown formatting.""")
+                                fixed_code = response.text.strip()
+                                fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                                fixed_codes[current_file] = fixed_code
+                                logger.info(f"Validated and improved generated code for {current_file}")
+                                
+                        current_file = line[4:-4].strip()
+                        current_code = []
+                    elif current_file:
+                        current_code.append(line)
+                
+                # Handle the last file
+                if current_file and current_code:
+                    fixed_code = '\n'.join(current_code)
+                    fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                    fixed_codes[current_file] = fixed_code
+                    logger.info(f"Validated and improved generated code for {current_file}")
+                
+                # Verify that all files were fixed
+                missing_files = set(files_to_fix.keys()) - set(fixed_codes.keys())
+                if missing_files:
+                    logger.warning(f"Some files were not fixed: {missing_files}")
+                    # Try to fix remaining files individually
+                    for file_path in missing_files:
+                        logger.info(f"Requesting individual fix for {file_path}")
+                        response = model.generate_content(f"""Fix the following code file:
+
+=== {file_path} ===
+{original_codes[file_path]}
+
+Test failures:
+{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failure in files_to_fix[file_path])}
+
+Return only the fixed code without any explanations or markdown formatting.""")
+                        fixed_code = response.text.strip()
+                        fixed_code = _validate_and_improve_code(fixed_code, original_codes[file_path])
+                        fixed_codes[file_path] = fixed_code
+                        logger.info(f"Validated and improved generated code for {file_path}")
             
             # Write all fixed code to disk before running tests
             logger.info("Writing best fixed code back to disk")
