@@ -940,11 +940,18 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         ValueError: If required environment variables are not set
         subprocess.CalledProcessError: If git commands fail
         GithubException: If GitHub API operations fail
+        FileNotFoundError: If required files cannot be found
     """
     try:
         # Start with a clear section marker
         logger.info("=" * 50)
         logger.info("Starting run_autofix_and_pr")
+        
+        # Validate input paths
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Source file not found: {file_path}")
+        if not os.path.exists(test_config_path):
+            raise FileNotFoundError(f"Test configuration file not found: {test_config_path}")
         
         # Log basic information with sanitized data
         logger.info("Processing request", extra={
@@ -957,7 +964,11 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         })
         
         # Store the original file path to avoid shadowing
-        main_file_path = file_path
+        main_file_path = os.path.abspath(file_path)
+        logger.debug("Resolved main file path", extra={
+            'original_path': file_path,
+            'absolute_path': main_file_path
+        })
         
         # Store the original branch
         original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
@@ -968,7 +979,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         
         config = get_config()
         logger.info("Starting auto-fix process", extra={
-            'file_path': file_path,
+            'file_path': main_file_path,
             'failure_count': len(failure_data)
         })
         
@@ -986,20 +997,53 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                     'test_count': sum(len(result.get('test_cases', [])) 
                                     for result in test_config.get('regions', {}).values())
                 })
+                
+                # Validate and resolve file paths in test configuration
+                if 'file_path' in test_config:
+                    config_dir = os.path.dirname(os.path.abspath(test_config_path))
+                    test_file_path = os.path.normpath(os.path.join(config_dir, test_config['file_path']))
+                    if not os.path.exists(test_file_path):
+                        raise FileNotFoundError(f"Test file not found: {test_file_path}")
+                    test_config['file_path'] = test_file_path
+                    logger.info("Resolved test file path in configuration", extra={
+                        'original_path': test_config['file_path'],
+                        'resolved_path': test_file_path
+                    })
+                
+                # Validate and resolve file paths in test steps
+                for step in test_config.get('steps', []):
+                    if 'input' in step and 'file_path' in step['input']:
+                        step_dir = os.path.dirname(os.path.abspath(test_config_path))
+                        step_file_path = os.path.normpath(os.path.join(step_dir, step['input']['file_path']))
+                        if not os.path.exists(step_file_path):
+                            raise FileNotFoundError(f"Step file not found: {step_file_path}")
+                        step['input']['file_path'] = step_file_path
+                        logger.debug("Resolved step file path", extra={
+                            'step': step.get('name', 'Unknown'),
+                            'original_path': step['input']['file_path'],
+                            'resolved_path': step_file_path
+                        })
+                
         except Exception as e:
             logger.error("Failed to load test configuration", extra={
                 'error': str(e),
+                'error_type': type(e).__name__,
                 'config_path': test_config_path
             })
             raise
         
         # Collect all referenced files
         try:
-            referenced_files = _collect_referenced_files(file_path)
+            referenced_files = _collect_referenced_files(main_file_path)
             logger.info("Collected referenced files", extra={
                 'file_count': len(referenced_files),
                 'files': list(referenced_files)
             })
+            
+            # Validate all referenced files exist
+            missing_files = [f for f in referenced_files if not os.path.exists(f)]
+            if missing_files:
+                raise FileNotFoundError(f"Referenced files not found: {missing_files}")
             
             # Log details about each referenced file
             for ref_file in referenced_files:
@@ -1014,12 +1058,15 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                 except Exception as e:
                     logger.error("Failed to read file", extra={
                         'file': ref_file,
-                        'error': str(e)
+                        'error': str(e),
+                        'error_type': type(e).__name__
                     })
+                    raise
         except Exception as e:
             logger.error("Failed to collect referenced files", extra={
                 'error': str(e),
-                'file_path': file_path
+                'error_type': type(e).__name__,
+                'file_path': main_file_path
             })
             raise
         

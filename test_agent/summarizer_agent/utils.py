@@ -29,4 +29,4 @@ def call_gemini_llm(prompt: str) -> str:
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        raise Exception(f"Error calling Gemini API: {str(e)}") 
+        raise Exception(f"Error calling Gemini API: {str(e)}")

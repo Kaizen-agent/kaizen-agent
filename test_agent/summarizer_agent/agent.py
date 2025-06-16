@@ -15,6 +15,10 @@ class SummarizerAgent:
         Returns:
             str: The agent's response
         """
+        # AI Agent Best Practice: Handle empty or whitespace-only input explicitly
+        if not text or text.strip() == "":
+            return "Please provide some text to summarize."
+            
         prompt = get_prompt(text)
         return call_gemini_llm(prompt) 
 # kaizen:end:summarizer_agent
