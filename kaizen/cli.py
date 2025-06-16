@@ -82,7 +82,9 @@ def collect_failed_tests(results: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'region': region,
                     'test_name': test_case.get('name', 'Unknown Test'),
                     'error_message': test_case.get('details', 'Test failed'),
-                    'output': test_case.get('output', 'No output available')
+                    'input': test_case.get('input', 'No input available'),
+                    'output': test_case.get('output', 'No output available'),
+                    'evaluation': test_case.get('evaluation', {})
                 })
     
     return failed_tests
