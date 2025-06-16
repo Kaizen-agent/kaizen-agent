@@ -1188,6 +1188,9 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                 # Prepare a comprehensive prompt that includes all files and their relationships
                 prompt = f"""You are a senior AI agent engineer specializing in improving AI agent code. Your task is to fix the following code files while maintaining their structure and relationships, with a specific focus on AI agent best practices.
 
+Test Configuration Context:
+{json.dumps(test_config, indent=2)}
+
 Files to fix:
 {chr(10).join(f'- {path}: {len(failures)} failures' for path, failures in files_to_fix.items())}
 
@@ -1200,15 +1203,123 @@ Original code for each file:
 Test failures:
 {chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failures in files_to_fix.values() for failure in failures)}
 
-Return the fixed code for each file in the following format:
+Requirements:
+1. Fix all test failures while maintaining the agent's core functionality
+2. Follow the evaluation criteria from the test configuration
+3. Ensure proper error handling and input validation
+4. Maintain code quality standards (type hints, documentation, etc.)
+5. Keep changes minimal and focused on fixing the specific issues
+6. Return exactly three newline-separated fields as specified above
+7. DO NOT return empty code blocks or invalid syntax
+8. The returned code must be valid Python code that can be executed
 
-=== file_path ===
-fixed code here
+Code Structure Requirements:
+1. All imports must be at the top of the file
+2. All classes and functions must be properly defined with type hints
+3. All functions must have docstrings explaining their purpose and parameters
+4. All classes must have proper initialization methods
+5. All methods must handle their own exceptions and return appropriate values
+6. All code must be properly indented and follow PEP 8 style
+7. All variables must be properly initialized before use
+8. All required dependencies must be imported
+9. All code must be executable in a Python environment
+10. All code must be compatible with Python 3.8+
+11. The code must be a complete, valid Python file
+12. The code must not contain any empty code blocks or invalid syntax
 
-=== next_file_path ===
-fixed code here
+Execution Requirements:
+1. Code must be executable in a controlled environment with proper namespace setup
+2. Code must handle all possible input types and edge cases
+3. Code must validate all inputs before processing
+4. Code must handle all possible error conditions
+5. Code must return appropriate values for all execution paths
+6. Code must not rely on external state or global variables
+7. Code must be thread-safe and reentrant
+8. Code must clean up any resources it uses
+9. Code must not have any side effects
+10. Code must be deterministic
 
-Do not include any explanations or markdown formatting."""
+Code Improvement Guidelines:
+1. Error Handling:
+   - Add proper error handling for API calls and external services
+   - Include specific error messages for different failure scenarios
+   - Handle edge cases gracefully with appropriate fallbacks
+   - Validate inputs before processing
+
+2. AI Agent Best Practices:
+   - Ensure proper initialization of AI models and services
+   - Handle API rate limits and timeouts
+   - Implement proper logging for debugging
+   - Add retry mechanisms for transient failures
+   - Validate model outputs before returning
+
+3. Code Structure:
+   - Keep methods focused and single-purpose
+   - Use clear and descriptive variable names
+   - Add type hints for all parameters and return values
+   - Include docstrings explaining method purpose and parameters
+   - Follow consistent code style
+
+4. Testing Considerations:
+   - Make code testable by avoiding hard-coded values
+   - Use dependency injection where appropriate
+   - Add proper mocking points for external services
+   - Ensure error cases are testable
+   - Make validation logic explicit and testable
+
+5. Performance:
+   - Optimize API calls and external service interactions
+   - Cache results where appropriate
+   - Handle large inputs efficiently
+   - Implement proper resource cleanup
+
+6. Security:
+   - Never expose API keys or sensitive data
+   - Validate and sanitize all inputs
+   - Implement proper access controls
+   - Handle sensitive data appropriately
+
+7. AI Agent Prompt Engineering:
+   When test failures indicate output quality issues (e.g., missing expected content, incorrect format, or poor response quality):
+   
+   a) Analyze the Failure:
+      - Identify which specific aspects of the output failed (content, format, style, etc.)
+      - Check if the failure is due to missing context or unclear instructions
+      - Determine if the model needs more specific guidance or constraints
+   
+   b) Improve the Prompt:
+      - Add clear output format requirements
+      - Include specific examples of expected outputs
+      - Specify required content elements
+      - Add constraints for response length and style
+      - Include validation criteria in the prompt
+   
+   c) Add Output Validation:
+      - Implement checks for required content elements
+      - Validate output format and structure
+      - Add length and style validation
+      - Include fallback responses for invalid outputs
+   
+   d) Enhance Context:
+      - Add relevant background information
+      - Include domain-specific terminology
+      - Specify the target audience
+      - Add style and tone requirements
+   
+   e) Add Safety and Quality Checks:
+      - Include content filtering requirements
+      - Add fact-checking instructions
+      - Specify ethical guidelines
+      - Include quality assurance steps
+
+8. Output Quality Improvements:
+   - Add post-processing for output formatting
+   - Implement content validation
+   - Add response enhancement logic
+   - Include output sanitization
+   - Add quality scoring mechanisms
+
+Return your response in exactly three newline-separated fields as specified at the top of this prompt."""
                 
                 logger.debug("Generated prompt", extra={
                     'prompt_length': len(prompt)
