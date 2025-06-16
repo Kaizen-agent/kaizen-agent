@@ -398,23 +398,35 @@ def _analyze_failure_dependencies(failure_data: List[Dict], referenced_files: se
 def _reload_modules(file_paths: set) -> None:
     """
     Reload all affected modules to ensure changes are properly reflected.
+    This function handles circular dependencies and ensures proper reload order.
     
     Args:
         file_paths: Set of file paths to reload
     """
-    # Invalidate import caches to ensure newly written files are detected
+    # First, invalidate all import caches
     importlib.invalidate_caches()
     
+    # Build dependency graph
+    dependency_graph = {}
     for file_path in file_paths:
         try:
-            # Convert file path to absolute path
             abs_path = os.path.abspath(file_path)
+            with open(abs_path, 'r', encoding='utf-8') as f:
+                content = f.read()
             
-            # Get the directory containing the file
+            # Parse the file to find imports
+            tree = ast.parse(content)
+            imports = set()
+            
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    if isinstance(node, ast.Import):
+                        imports.update(name.name.split('.')[0] for name in node.names)
+                    else:
+                        imports.add(node.module.split('.')[0])
+            
+            # Get module name
             file_dir = os.path.dirname(abs_path)
-            
-            # Get the module name by converting the file path to a module path
-            # First, find the root package directory (where __init__.py exists)
             root_dir = file_dir
             while os.path.exists(os.path.join(root_dir, '__init__.py')):
                 parent = os.path.dirname(root_dir)
@@ -422,33 +434,311 @@ def _reload_modules(file_paths: set) -> None:
                     break
                 root_dir = parent
             
-            # Get the relative path from root_dir to the file
             rel_path = os.path.relpath(abs_path, root_dir)
-            
-            # Convert path to module name
             module_name = os.path.splitext(rel_path)[0].replace(os.sep, '.')
             
-            # If the module is already loaded, reload it
+            dependency_graph[module_name] = imports
+            
+        except Exception as e:
+            logger.warning(f"Error analyzing dependencies for {file_path}: {str(e)}")
+    
+    # Topological sort to determine reload order
+    def topological_sort(graph):
+        visited = set()
+        temp = set()
+        order = []
+        
+        def visit(node):
+            if node in temp:
+                # Circular dependency detected
+                logger.warning(f"Circular dependency detected involving {node}")
+                return
+            if node in visited:
+                return
+            temp.add(node)
+            for neighbor in graph.get(node, set()):
+                visit(neighbor)
+            temp.remove(node)
+            visited.add(node)
+            order.append(node)
+        
+        for node in graph:
+            if node not in visited:
+                visit(node)
+        
+        return order
+    
+    # Get reload order
+    reload_order = topological_sort(dependency_graph)
+    
+    # Reload modules in order
+    for module_name in reversed(reload_order):  # Reverse to handle dependencies first
+        try:
             if module_name in sys.modules:
-                try:
-                    importlib.reload(sys.modules[module_name])
-                    logger.info(f"Reloaded module: {module_name}")
-                except Exception as e:
-                    logger.warning(f"Failed to reload module {module_name}: {str(e)}")
+                # Get the module's file path
+                module = sys.modules[module_name]
+                if hasattr(module, '__file__') and module.__file__:
+                    # Check if the file has been modified
+                    file_path = module.__file__
+                    if os.path.exists(file_path):
+                        # Force reload by removing from sys.modules
+                        del sys.modules[module_name]
+                        # Import and reload
+                        module = importlib.import_module(module_name)
+                        importlib.reload(module)
+                        logger.info(f"Reloaded module: {module_name}")
             else:
-                # Try to import and then reload the module
+                # Try to import the module
                 try:
                     module = importlib.import_module(module_name)
                     importlib.reload(module)
                     logger.info(f"Imported and reloaded module: {module_name}")
                 except ImportError as e:
                     logger.warning(f"Failed to import module {module_name}: {str(e)}")
-                except Exception as e:
-                    logger.warning(f"Failed to reload module {module_name}: {str(e)}")
-                    
         except Exception as e:
-            logger.warning(f"Error processing file {file_path}: {str(e)}")
-            continue
+            logger.warning(f"Error reloading module {module_name}: {str(e)}")
+    
+    # Clear any cached instances
+    for module_name in reload_order:
+        if module_name in sys.modules:
+            module = sys.modules[module_name]
+            # Clear any cached instances in the module
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if hasattr(attr, '__dict__'):
+                    # Clear instance caches if they exist
+                    if hasattr(attr, '_instance'):
+                        delattr(attr, '_instance')
+                    if hasattr(attr, '_instances'):
+                        delattr(attr, '_instances')
+
+def _apply_code_changes(fixed_codes: Dict[str, str], original_codes: Dict[str, str]) -> None:
+    """
+    Apply code changes and ensure they are properly reflected in the running system.
+    
+    Args:
+        fixed_codes: Dictionary mapping file paths to fixed code
+        original_codes: Dictionary mapping file paths to original code
+    """
+    try:
+        # First, write all changes to disk
+        for file_path, code in fixed_codes.items():
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(code)
+                logger.info(f"Written changes to {file_path}")
+            except Exception as e:
+                logger.error(f"Failed to write changes to {file_path}: {str(e)}")
+                # Restore original code
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(original_codes[file_path])
+                raise
+        
+        # Reload all affected modules
+        _reload_modules(set(fixed_codes.keys()))
+        
+        # Verify changes were applied
+        for file_path, code in fixed_codes.items():
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    current_code = f.read()
+                if current_code != code:
+                    logger.error(f"Changes not properly applied to {file_path}")
+                    # Restore original code
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(original_codes[file_path])
+                    raise ValueError(f"Changes not properly applied to {file_path}")
+            except Exception as e:
+                logger.error(f"Failed to verify changes in {file_path}: {str(e)}")
+                raise
+        
+        logger.info("All code changes successfully applied and verified")
+        
+    except Exception as e:
+        logger.error(f"Failed to apply code changes: {str(e)}")
+        # Restore all original code
+        for file_path, code in original_codes.items():
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(code)
+            except Exception as restore_error:
+                logger.error(f"Failed to restore original code in {file_path}: {str(restore_error)}")
+        raise
+
+def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
+    """
+    Validate and improve the fixed code to ensure it maintains the original structure
+    while incorporating the necessary fixes. This function specifically handles AI agent code
+    with a focus on prompt engineering and output quality.
+    
+    Args:
+        fixed_code: The code generated by the LLM
+        original_code: The original code to compare against
+        
+    Returns:
+        str: The validated and improved code
+        
+    Raises:
+        ValueError: If the fixed code is invalid or missing critical components
+    """
+    try:
+        # Basic validation
+        if not fixed_code or fixed_code.isspace():
+            raise ValueError("Generated code is empty or whitespace only")
+            
+        # Parse both codes to validate syntax
+        try:
+            fixed_tree = ast.parse(fixed_code)
+            original_tree = ast.parse(original_code)
+        except SyntaxError as e:
+            logger.error(f"Syntax error in code: {str(e)}")
+            raise ValueError(f"Invalid syntax in code: {str(e)}")
+        
+        # Extract imports from both codes
+        fixed_imports = []
+        original_imports = []
+        
+        for node in ast.walk(fixed_tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                fixed_imports.append(ast.unparse(node))
+                
+        for node in ast.walk(original_tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                original_imports.append(ast.unparse(node))
+        
+        # Ensure all original imports are preserved
+        missing_imports = [imp for imp in original_imports if imp not in fixed_imports]
+        if missing_imports:
+            # Add missing imports at the top of the file
+            fixed_code = '\n'.join(missing_imports) + '\n\n' + fixed_code
+        
+        # Extract class and function definitions from original code
+        original_defs = {}
+        for node in ast.walk(original_tree):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
+                original_defs[node.name] = node
+        
+        # Verify all original definitions are present in fixed code
+        fixed_defs = {}
+        for node in ast.walk(fixed_tree):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
+                fixed_defs[node.name] = node
+        
+        missing_defs = [name for name in original_defs if name not in fixed_defs]
+        if missing_defs:
+            # If any definitions are missing, keep the original code for those
+            for name in missing_defs:
+                original_def = original_defs[name]
+                fixed_code += '\n\n' + ast.unparse(original_def)
+        
+        # AI Agent-specific improvements
+        try:
+            # Check for prompt-related code
+            prompt_nodes = []
+            for node in ast.walk(fixed_tree):
+                if isinstance(node, ast.Str) and any(keyword in node.s.lower() 
+                    for keyword in ['prompt', 'instruction', 'guideline', 'template']):
+                    prompt_nodes.append(node)
+            
+            # Improve prompts if found
+            if prompt_nodes:
+                for node in prompt_nodes:
+                    # Add output format requirements if not present
+                    if 'format' not in node.s.lower() and 'output' not in node.s.lower():
+                        improved_prompt = node.s + "\n\nPlease format your response as follows:\n1. Clear and concise\n2. Well-structured\n3. Include all necessary details"
+                        fixed_code = fixed_code.replace(node.s, improved_prompt)
+            
+            # Check for error handling
+            error_handling_nodes = []
+            for node in ast.walk(fixed_tree):
+                if isinstance(node, ast.Try):
+                    error_handling_nodes.append(node)
+            
+            # Add error handling if missing
+            if not error_handling_nodes:
+                # Find main processing functions
+                for node in ast.walk(fixed_tree):
+                    if isinstance(node, ast.FunctionDef) and 'process' in node.name.lower():
+                        # Add basic error handling
+                        error_handling = """
+    try:
+        # Your processing code here
+        pass
+    except Exception as e:
+        logger.error(f"Error processing input: {str(e)}")
+        raise ValueError(f"Failed to process input: {str(e)}")
+"""
+                        # Insert error handling at the start of the function
+                        fixed_code = fixed_code.replace(ast.unparse(node), 
+                            ast.unparse(node).replace('pass', error_handling))
+            
+            # Check for input validation
+            validation_nodes = []
+            for node in ast.walk(fixed_tree):
+                if isinstance(node, ast.If) and any(keyword in ast.unparse(node).lower() 
+                    for keyword in ['validate', 'check', 'verify']):
+                    validation_nodes.append(node)
+            
+            # Add input validation if missing
+            if not validation_nodes:
+                for node in ast.walk(fixed_tree):
+                    if isinstance(node, ast.FunctionDef) and 'process' in node.name.lower():
+                        # Add basic input validation
+                        validation = """
+    if not input_data:
+        raise ValueError("Input data cannot be empty")
+    if not isinstance(input_data, (str, dict)):
+        raise TypeError("Input data must be a string or dictionary")
+"""
+                        # Insert validation at the start of the function
+                        fixed_code = fixed_code.replace(ast.unparse(node), 
+                            ast.unparse(node).replace('pass', validation))
+            
+            # Check for logging
+            logging_nodes = []
+            for node in ast.walk(fixed_tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'logger':
+                    logging_nodes.append(node)
+            
+            # Add logging if missing
+            if not logging_nodes:
+                for node in ast.walk(fixed_tree):
+                    if isinstance(node, ast.FunctionDef) and 'process' in node.name.lower():
+                        # Add basic logging
+                        logging = """
+    logger.info(f"Processing input: {input_data}")
+    try:
+        # Your processing code here
+        pass
+    except Exception as e:
+        logger.error(f"Error processing input: {str(e)}")
+        raise
+    finally:
+        logger.info("Processing completed")
+"""
+                        # Insert logging
+                        fixed_code = fixed_code.replace(ast.unparse(node), 
+                            ast.unparse(node).replace('pass', logging))
+        
+        except Exception as e:
+            logger.warning(f"Failed to apply AI agent improvements: {str(e)}")
+            # Continue with the basic validation
+        
+        # Validate the final code
+        try:
+            ast.parse(fixed_code)  # This will raise SyntaxError if invalid
+        except SyntaxError as e:
+            logger.error(f"Invalid syntax in final code: {str(e)}")
+            raise ValueError(f"Invalid syntax in final code: {str(e)}")
+        
+        return fixed_code
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in code validation: {str(e)}")
+        raise ValueError(f"Failed to validate code: {str(e)}")
 
 def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True, base_branch: str = 'main') -> List[Dict]:
     """
@@ -870,6 +1160,8 @@ Return your response in the exact format specified above, with each file's code 
                 current_file = None
                 current_code = []
                 file_markers = set()
+                retry_count = 0
+                max_retries = 3
                 
                 for line in fixed_content.split('\n'):
                     if line.startswith('=== ') and line.endswith(' ==='):
@@ -885,125 +1177,44 @@ Return your response in the exact format specified above, with each file's code 
                                 fixed_code = '\n'.join(current_code)
                                 # Validate and improve the generated code
                                 fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
-                                logger.debug("Generated fixed code", extra={
+                                
+                                # Additional validation
+                                if not fixed_code or fixed_code.isspace():
+                                    raise ValueError("Generated code is empty or whitespace only")
+                                    
+                                if fixed_code == original_codes[current_file]:
+                                    logger.warning("Generated code is identical to original", extra={
+                                        'file': current_file
+                                    })
+                                    # Try to get a different fix
+                                    if retry_count < max_retries:
+                                        retry_count += 1
+                                        logger.info(f"Retrying fix for {current_file} (attempt {retry_count})")
+                                        continue
+                                
+                                fixed_codes[current_file] = fixed_code
+                                logger.info("Successfully fixed code", extra={
                                     'file': current_file,
                                     'content_length': len(fixed_code)
                                 })
+                                retry_count = 0  # Reset retry count for next file
                                 
-                                # Additional validation steps
-                                try:
-                                    # Check if all imports are valid
-                                    tree = ast.parse(fixed_code)
-                                    for node in ast.walk(tree):
-                                        if isinstance(node, (ast.Import, ast.ImportFrom)):
-                                            if isinstance(node, ast.Import):
-                                                for name in node.names:
-                                                    module_name = name.name.split('.')[0]
-                                                    if module_name not in file_dependencies.get(current_file, []):
-                                                        logger.warning("New import detected", extra={
-                                                            'file': current_file,
-                                                            'import': module_name
-                                                        })
-                                            else:
-                                                module_name = node.module.split('.')[0]
-                                                if module_name not in file_dependencies.get(current_file, []):
-                                                    logger.warning("New import detected", extra={
-                                                        'file': current_file,
-                                                        'import': module_name
-                                                    })
-                                    
-                                    # Check if all functions and classes are preserved
-                                    original_tree = ast.parse(original_codes[current_file])
-                                    original_names = {node.name for node in ast.walk(original_tree) 
-                                                    if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
-                                    fixed_names = {node.name for node in ast.walk(tree) 
-                                                 if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
-                                    
-                                    if original_names != fixed_names:
-                                        logger.warning("Function/class mismatch", extra={
-                                            'file': current_file,
-                                            'missing': list(original_names - fixed_names),
-                                            'added': list(fixed_names - original_names)
-                                        })
-                                    
-                                    fixed_codes[current_file] = fixed_code
-                                    logger.info("Validated and improved code", extra={
-                                        'file': current_file
-                                    })
-                                except Exception as e:
-                                    logger.error("Failed to validate code", extra={
-                                        'file': current_file,
-                                        'error': str(e)
-                                    })
-                                    # Try to fix the code again individually
-                                    logger.info("Attempting individual fix", extra={
-                                        'file': current_file
-                                    })
-                                    response = model.generate_content(f"""You are a senior AI agent engineer specializing in improving AI agent code. Your task is to fix the following code file with a specific focus on AI agent best practices and prompt engineering.
-
-=== {current_file} ===
-{original_codes[current_file]}
-
-Test failures:
-{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failure in files_to_fix[current_file])}
-
-Requirements:
-1. Fix all test failures while maintaining the agent's core functionality
-2. Focus on improving AI agent capabilities and prompt engineering
-3. Ensure proper error handling and input validation
-4. Maintain code quality standards (type hints, documentation, etc.)
-5. Keep changes minimal and focused on fixing the specific issues
-
-AI Agent Improvement Guidelines:
-1. Prompt Engineering:
-   - Analyze and improve any prompts in the code
-   - Add clear output format requirements
-   - Include specific examples of expected outputs
-   - Specify required content elements
-   - Add constraints for response length and style
-   - Include validation criteria in the prompts
-
-2. Context Enhancement:
-   - Add relevant background information
-   - Include domain-specific terminology
-   - Specify the target audience
-   - Add style and tone requirements
-   - Include quality assurance steps
-
-3. Output Quality:
-   - Add post-processing for output formatting
-   - Implement content validation
-   - Add response enhancement logic
-   - Include output sanitization
-   - Add quality scoring mechanisms
-
-4. Error Handling:
-   - Add proper error handling for API calls
-   - Include specific error messages
-   - Handle edge cases gracefully
-   - Validate inputs before processing
-   - Add retry mechanisms for transient failures
-
-5. Code Structure:
-   - Keep methods focused and single-purpose
-   - Use clear and descriptive variable names
-   - Add type hints for all parameters
-   - Include docstrings explaining purpose
-   - Follow consistent code style
-
-Return only the fixed code without any explanations or markdown formatting.""")
-                                    fixed_code = response.text.strip()
-                                    fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
-                                    fixed_codes[current_file] = fixed_code
-                                    logger.info("Successfully fixed code individually", extra={
-                                        'file': current_file
-                                    })
                             except Exception as e:
                                 logger.error("Failed to process file", extra={
                                     'file': current_file,
-                                    'error': str(e)
+                                    'error': str(e),
+                                    'error_type': type(e).__name__
                                 })
-                                continue
+                                if retry_count < max_retries:
+                                    retry_count += 1
+                                    logger.info(f"Retrying fix for {current_file} (attempt {retry_count})")
+                                    continue
+                                else:
+                                    # If all retries failed, keep original code
+                                    fixed_codes[current_file] = original_codes[current_file]
+                                    logger.warning("Using original code after failed fixes", extra={
+                                        'file': current_file
+                                    })
                                 
                         current_file = file_marker
                         file_markers.add(file_marker)
@@ -1030,16 +1241,9 @@ Return only the fixed code without any explanations or markdown formatting.""")
             logger.info("Writing fixed code to disk", extra={
                 'file_count': len(fixed_codes)
             })
-            for current_file_path, code in fixed_codes.items():
-                with open(current_file_path, 'w') as f:
-                    f.write(code)
-                logger.debug("Updated file", extra={
-                    'file': current_file_path,
-                    'content_length': len(code)
-                })
             
-            # Reload all affected modules
-            _reload_modules(set(fixed_codes.keys()))
+            # Apply code changes with proper verification
+            _apply_code_changes(fixed_codes, original_codes)
             
             # Run tests again to verify fixes
             logger.info("Running tests to verify fixes")
