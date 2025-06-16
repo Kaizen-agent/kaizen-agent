@@ -789,25 +789,57 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
         ValueError: If the fixed code is invalid or missing critical components
     """
     try:
+        # Log the initial state
+        logger.debug("Starting code validation", extra={
+            'fixed_code_length': len(fixed_code),
+            'original_code_length': len(original_code)
+        })
+        
         # Basic validation
         if not fixed_code or fixed_code.isspace():
+            logger.error("Generated code is empty or whitespace only")
             raise ValueError("Generated code is empty or whitespace only")
             
         # First pass: Try to fix common syntax issues
+        logger.debug("Attempting common syntax fixes")
         fixed_code = _fix_common_syntax_issues(fixed_code)
+        
+        # Log the code after common fixes
+        logger.debug("Code after common fixes", extra={
+            'code_preview': fixed_code[:200] + '...' if len(fixed_code) > 200 else fixed_code
+        })
             
         # Parse both codes to validate syntax
         try:
             fixed_tree = ast.parse(fixed_code)
             original_tree = ast.parse(original_code)
+            logger.debug("Successfully parsed both codes")
         except SyntaxError as e:
+            logger.warning(f"Initial syntax error: {str(e)}", extra={
+                'error_line': e.lineno,
+                'error_offset': e.offset,
+                'error_text': e.text
+            })
+            
             # Second pass: Try more aggressive syntax fixing
+            logger.debug("Attempting aggressive syntax fixes")
             fixed_code = _fix_aggressive_syntax_issues(fixed_code)
+            
+            # Log the code after aggressive fixes
+            logger.debug("Code after aggressive fixes", extra={
+                'code_preview': fixed_code[:200] + '...' if len(fixed_code) > 200 else fixed_code
+            })
+            
             try:
                 fixed_tree = ast.parse(fixed_code)
                 original_tree = ast.parse(original_code)
+                logger.debug("Successfully parsed codes after aggressive fixes")
             except SyntaxError as e:
-                logger.error(f"Syntax error in code: {str(e)}")
+                logger.error(f"Syntax error after aggressive fixes: {str(e)}", extra={
+                    'error_line': e.lineno,
+                    'error_offset': e.offset,
+                    'error_text': e.text
+                })
                 raise ValueError(f"Invalid syntax in code: {str(e)}")
         
         # Extract imports from both codes
@@ -822,9 +854,16 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 original_imports.append(ast.unparse(node))
         
+        # Log import information
+        logger.debug("Import analysis", extra={
+            'fixed_imports': fixed_imports,
+            'original_imports': original_imports
+        })
+        
         # Ensure all original imports are preserved
         missing_imports = [imp for imp in original_imports if imp not in fixed_imports]
         if missing_imports:
+            logger.info("Adding missing imports", extra={'missing_imports': missing_imports})
             # Add missing imports at the top of the file
             fixed_code = '\n'.join(missing_imports) + '\n\n' + fixed_code
         
@@ -840,8 +879,15 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
             if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
                 fixed_defs[node.name] = node
         
+        # Log definition information
+        logger.debug("Definition analysis", extra={
+            'original_defs': list(original_defs.keys()),
+            'fixed_defs': list(fixed_defs.keys())
+        })
+        
         missing_defs = [name for name in original_defs if name not in fixed_defs]
         if missing_defs:
+            logger.info("Adding missing definitions", extra={'missing_defs': missing_defs})
             # If any definitions are missing, keep the original code for those
             for name in missing_defs:
                 original_def = original_defs[name]
@@ -856,6 +902,11 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
                     for keyword in ['prompt', 'instruction', 'guideline', 'template']):
                     prompt_nodes.append(node)
             
+            # Log prompt analysis
+            logger.debug("Prompt analysis", extra={
+                'prompt_nodes_found': len(prompt_nodes)
+            })
+            
             # Improve prompts if found
             if prompt_nodes:
                 for node in prompt_nodes:
@@ -869,6 +920,11 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
             for node in ast.walk(fixed_tree):
                 if isinstance(node, ast.Try):
                     error_handling_nodes.append(node)
+            
+            # Log error handling analysis
+            logger.debug("Error handling analysis", extra={
+                'error_handling_nodes_found': len(error_handling_nodes)
+            })
             
             # Add error handling if missing
             if not error_handling_nodes:
@@ -895,6 +951,11 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
                     for keyword in ['validate', 'check', 'verify']):
                     validation_nodes.append(node)
             
+            # Log validation analysis
+            logger.debug("Validation analysis", extra={
+                'validation_nodes_found': len(validation_nodes)
+            })
+            
             # Add input validation if missing
             if not validation_nodes:
                 for node in ast.walk(fixed_tree):
@@ -915,6 +976,11 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
             for node in ast.walk(fixed_tree):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'logger':
                     logging_nodes.append(node)
+            
+            # Log logging analysis
+            logger.debug("Logging analysis", extra={
+                'logging_nodes_found': len(logging_nodes)
+            })
             
             # Add logging if missing
             if not logging_nodes:
@@ -942,14 +1008,30 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
         
         # Final validation
         try:
+            # Log the final code
+            logger.debug("Final code validation", extra={
+                'code_preview': fixed_code[:200] + '...' if len(fixed_code) > 200 else fixed_code
+            })
+            
             ast.parse(fixed_code)  # This will raise SyntaxError if invalid
+            logger.info("Code validation successful")
         except SyntaxError as e:
-            logger.error(f"Invalid syntax in final code: {str(e)}")
+            logger.error(f"Invalid syntax in final code: {str(e)}", extra={
+                'error_line': e.lineno,
+                'error_offset': e.offset,
+                'error_text': e.text
+            })
             # Last resort: try to fix the specific syntax error
             fixed_code = _fix_specific_syntax_error(fixed_code, str(e))
             try:
                 ast.parse(fixed_code)
+                logger.info("Successfully fixed specific syntax error")
             except SyntaxError as e:
+                logger.error(f"Failed to fix syntax error: {str(e)}", extra={
+                    'error_line': e.lineno,
+                    'error_offset': e.offset,
+                    'error_text': e.text
+                })
                 raise ValueError(f"Invalid syntax in final code: {str(e)}")
         
         return fixed_code
@@ -976,60 +1058,71 @@ def _fix_common_syntax_issues(code: str) -> str:
         
     Returns:
         str: The fixed code
-        
-    Examples:
-        >>> _fix_common_syntax_issues('def hello world')
-        'def hello world: '
-        >>> _fix_common_syntax_issues('print "hello')
-        'print "hello"'
     """
-    # Fix unclosed strings with more robust pattern
-    code = re.sub(
-        r'([\'"])((?:[^\'"]|\\[\'"])*?)(?:\n|$)', 
-        lambda m: m.group(1) + m.group(2) + m.group(1), 
-        code
-    )
-    
-    # Fix missing colons after control structures with better pattern
-    code = re.sub(
-        r'(if|for|while|def|class|elif|else)\s+(?!:)([^:]+?)(?:\n|$)',
-        r'\1 \2: ',
-        code
-    )
-    
-    # Fix missing parentheses in function calls with better pattern
-    code = re.sub(
-        r'([a-zA-Z_][a-zA-Z0-9_]*)\s+(?=[a-zA-Z_][a-zA-Z0-9_]*(?:\s*\(|\s*\[|\s*\.|$))',
-        r'\1(',
-        code
-    )
-    
-    # Fix indentation with better handling of nested structures
-    lines = code.split('\n')
-    fixed_lines = []
-    current_indent = 0
-    indent_stack = []
-    
-    for line in lines:
-        stripped = line.strip()
+    try:
+        # Log the initial state
+        logger.debug("Starting common syntax fixes", extra={
+            'code_length': len(code)
+        })
         
-        # Handle indentation changes
-        if stripped.endswith(':'):
-            fixed_lines.append('    ' * current_indent + stripped)
-            indent_stack.append(current_indent)
-            current_indent += 1
-        elif stripped.startswith(('return', 'break', 'continue', 'pass')):
-            if indent_stack:
-                current_indent = indent_stack.pop()
-            fixed_lines.append('    ' * current_indent + stripped)
-        elif stripped.startswith(('else:', 'elif ', 'except ', 'finally:')):
-            if indent_stack:
-                current_indent = indent_stack[-1]
-            fixed_lines.append('    ' * current_indent + stripped)
-        else:
-            fixed_lines.append('    ' * current_indent + stripped)
-    
-    return '\n'.join(fixed_lines)
+        # Fix unclosed strings with more robust pattern
+        code = re.sub(
+            r'([\'"])((?:[^\'"]|\\[\'"])*?)(?:\n|$)', 
+            lambda m: m.group(1) + m.group(2) + m.group(1), 
+            code
+        )
+        
+        # Fix missing colons after control structures with better pattern
+        code = re.sub(
+            r'(if|for|while|def|class|elif|else)\s+(?!:)([^:]+?)(?:\n|$)',
+            r'\1 \2: ',
+            code
+        )
+        
+        # Fix missing parentheses in function calls with better pattern
+        code = re.sub(
+            r'([a-zA-Z_][a-zA-Z0-9_]*)\s+(?=[a-zA-Z_][a-zA-Z0-9_]*(?:\s*\(|\s*\[|\s*\.|$))',
+            r'\1(',
+            code
+        )
+        
+        # Fix indentation with better handling of nested structures
+        lines = code.split('\n')
+        fixed_lines = []
+        current_indent = 0
+        indent_stack = []
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Handle indentation changes
+            if stripped.endswith(':'):
+                fixed_lines.append('    ' * current_indent + stripped)
+                indent_stack.append(current_indent)
+                current_indent += 1
+            elif stripped.startswith(('return', 'break', 'continue', 'pass')):
+                if indent_stack:
+                    current_indent = indent_stack.pop()
+                fixed_lines.append('    ' * current_indent + stripped)
+            elif stripped.startswith(('else:', 'elif ', 'except ', 'finally:')):
+                if indent_stack:
+                    current_indent = indent_stack[-1]
+                fixed_lines.append('    ' * current_indent + stripped)
+            else:
+                fixed_lines.append('    ' * current_indent + stripped)
+        
+        fixed_code = '\n'.join(fixed_lines)
+        
+        # Log the final state
+        logger.debug("Completed common syntax fixes", extra={
+            'fixed_code_length': len(fixed_code)
+        })
+        
+        return fixed_code
+        
+    except Exception as e:
+        logger.error(f"Error in common syntax fixes: {str(e)}")
+        return code  # Return original code if fixes fail
 
 def _fix_aggressive_syntax_issues(code: str) -> str:
     """
@@ -1046,75 +1139,86 @@ def _fix_aggressive_syntax_issues(code: str) -> str:
         
     Returns:
         str: The fixed code
-        
-    Examples:
-        >>> _fix_aggressive_syntax_issues('print "hello\x00world"')
-        'print "helloworld"'
-        >>> _fix_aggressive_syntax_issues('def hello[world')
-        'def hello[world]'
     """
-    # Remove any non-printable characters except newlines
-    code = ''.join(char for char in code if char.isprintable() or char == '\n')
-    
-    # Fix common string issues with more robust patterns
-    code = re.sub(
-        r'([\'"])((?:[^\'"]|\\[\'"])*?)(?:\n|$)',
-        lambda m: m.group(1) + m.group(2) + m.group(1),
-        code
-    )
-    
-    # Fix missing parentheses and brackets with better patterns
-    code = re.sub(
-        r'([a-zA-Z_][a-zA-Z0-9_]*)\s+(?=[a-zA-Z_][a-zA-Z0-9_]*(?:\s*\(|\s*\[|\s*\.|$))',
-        r'\1(',
-        code
-    )
-    code = re.sub(
-        r'(\[)((?:[^\[\]]|\\[\[\]])*?)(?:\n|$)',
-        lambda m: m.group(1) + m.group(2) + ']',
-        code
-    )
-    code = re.sub(
-        r'(\{)((?:[^{}]|\\[{}])*?)(?:\n|$)',
-        lambda m: m.group(1) + m.group(2) + '}',
-        code
-    )
-    
-    # Fix indentation with better handling of nested structures
-    lines = code.split('\n')
-    fixed_lines = []
-    current_indent = 0
-    indent_stack = []
-    bracket_stack = []
-    
-    for line in lines:
-        stripped = line.strip()
+    try:
+        # Log the initial state
+        logger.debug("Starting aggressive syntax fixes", extra={
+            'code_length': len(code)
+        })
         
-        # Count brackets to track nesting
-        for char in stripped:
-            if char in '([{':
-                bracket_stack.append(char)
-            elif char in ')]}':
-                if bracket_stack:
-                    bracket_stack.pop()
+        # Remove any non-printable characters except newlines
+        code = ''.join(char for char in code if char.isprintable() or char == '\n')
         
-        # Handle indentation changes
-        if stripped.endswith(':'):
-            fixed_lines.append('    ' * current_indent + stripped)
-            indent_stack.append(current_indent)
-            current_indent += 1
-        elif stripped.startswith(('return', 'break', 'continue', 'pass')):
-            if indent_stack:
-                current_indent = indent_stack.pop()
-            fixed_lines.append('    ' * current_indent + stripped)
-        elif stripped.startswith(('else:', 'elif ', 'except ', 'finally:')):
-            if indent_stack:
-                current_indent = indent_stack[-1]
-            fixed_lines.append('    ' * current_indent + stripped)
-        else:
-            fixed_lines.append('    ' * current_indent + stripped)
-    
-    return '\n'.join(fixed_lines)
+        # Fix common string issues with more robust patterns
+        code = re.sub(
+            r'([\'"])((?:[^\'"]|\\[\'"])*?)(?:\n|$)',
+            lambda m: m.group(1) + m.group(2) + m.group(1),
+            code
+        )
+        
+        # Fix missing parentheses and brackets with better patterns
+        code = re.sub(
+            r'([a-zA-Z_][a-zA-Z0-9_]*)\s+(?=[a-zA-Z_][a-zA-Z0-9_]*(?:\s*\(|\s*\[|\s*\.|$))',
+            r'\1(',
+            code
+        )
+        code = re.sub(
+            r'(\[)((?:[^\[\]]|\\[\[\]])*?)(?:\n|$)',
+            lambda m: m.group(1) + m.group(2) + ']',
+            code
+        )
+        code = re.sub(
+            r'(\{)((?:[^{}]|\\[{}])*?)(?:\n|$)',
+            lambda m: m.group(1) + m.group(2) + '}',
+            code
+        )
+        
+        # Fix indentation with better handling of nested structures
+        lines = code.split('\n')
+        fixed_lines = []
+        current_indent = 0
+        indent_stack = []
+        bracket_stack = []
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Count brackets to track nesting
+            for char in stripped:
+                if char in '([{':
+                    bracket_stack.append(char)
+                elif char in ')]}':
+                    if bracket_stack:
+                        bracket_stack.pop()
+            
+            # Handle indentation changes
+            if stripped.endswith(':'):
+                fixed_lines.append('    ' * current_indent + stripped)
+                indent_stack.append(current_indent)
+                current_indent += 1
+            elif stripped.startswith(('return', 'break', 'continue', 'pass')):
+                if indent_stack:
+                    current_indent = indent_stack.pop()
+                fixed_lines.append('    ' * current_indent + stripped)
+            elif stripped.startswith(('else:', 'elif ', 'except ', 'finally:')):
+                if indent_stack:
+                    current_indent = indent_stack[-1]
+                fixed_lines.append('    ' * current_indent + stripped)
+            else:
+                fixed_lines.append('    ' * current_indent + stripped)
+        
+        fixed_code = '\n'.join(fixed_lines)
+        
+        # Log the final state
+        logger.debug("Completed aggressive syntax fixes", extra={
+            'fixed_code_length': len(fixed_code)
+        })
+        
+        return fixed_code
+        
+    except Exception as e:
+        logger.error(f"Error in aggressive syntax fixes: {str(e)}")
+        return code  # Return original code if fixes fail
 
 def _fix_specific_syntax_error(code: str, error_msg: str) -> str:
     """
@@ -1132,54 +1236,64 @@ def _fix_specific_syntax_error(code: str, error_msg: str) -> str:
         
     Returns:
         str: The fixed code
-        
-    Examples:
-        >>> _fix_specific_syntax_error('print "hello', 'EOL while scanning string literal')
-        'print "hello"'
-        >>> _fix_specific_syntax_error('def hello(', 'unexpected EOF while parsing')
-        'def hello():'
     """
-    if "EOL while scanning string literal" in error_msg:
-        # Extract line number from error message
-        line_match = re.search(r'line (\d+)', error_msg)
-        if line_match:
-            line_num = int(line_match.group(1))
-            lines = code.split('\n')
-            if line_num <= len(lines):
-                # Fix unclosed string on the specified line
-                line = lines[line_num - 1]
-                if line.count('"') % 2 == 1:
-                    lines[line_num - 1] = line + '"'
-                elif line.count("'") % 2 == 1:
-                    lines[line_num - 1] = line + "'"
-            return '\n'.join(lines)
-    
-    elif "unexpected EOF while parsing" in error_msg:
-        # Try to fix common EOF issues
-        if code.strip().endswith('('):
-            return code + ')'
-        elif code.strip().endswith('['):
-            return code + ']'
-        elif code.strip().endswith('{'):
-            return code + '}'
-        elif code.strip().endswith(':'):
-            return code + '\n    pass'
-    
-    elif "invalid syntax" in error_msg:
-        # Try to fix common invalid syntax issues
-        if ':' in error_msg and 'expected' in error_msg:
-            # Missing colon after control structure
-            lines = code.split('\n')
+    try:
+        # Log the initial state
+        logger.debug("Starting specific syntax error fix", extra={
+            'error_message': error_msg,
+            'code_length': len(code)
+        })
+        
+        if "EOL while scanning string literal" in error_msg:
+            # Extract line number from error message
             line_match = re.search(r'line (\d+)', error_msg)
             if line_match:
                 line_num = int(line_match.group(1))
+                lines = code.split('\n')
                 if line_num <= len(lines):
+                    # Fix unclosed string on the specified line
                     line = lines[line_num - 1]
-                    if any(keyword in line for keyword in ['if', 'for', 'while', 'def', 'class']):
-                        lines[line_num - 1] = line + ':'
-            return '\n'.join(lines)
-    
-    return code
+                    if line.count('"') % 2 == 1:
+                        lines[line_num - 1] = line + '"'
+                    elif line.count("'") % 2 == 1:
+                        lines[line_num - 1] = line + "'"
+                return '\n'.join(lines)
+        
+        elif "unexpected EOF while parsing" in error_msg:
+            # Try to fix common EOF issues
+            if code.strip().endswith('('):
+                return code + ')'
+            elif code.strip().endswith('['):
+                return code + ']'
+            elif code.strip().endswith('{'):
+                return code + '}'
+            elif code.strip().endswith(':'):
+                return code + '\n    pass'
+        
+        elif "invalid syntax" in error_msg:
+            # Try to fix common invalid syntax issues
+            if ':' in error_msg and 'expected' in error_msg:
+                # Missing colon after control structure
+                lines = code.split('\n')
+                line_match = re.search(r'line (\d+)', error_msg)
+                if line_match:
+                    line_num = int(line_match.group(1))
+                    if line_num <= len(lines):
+                        line = lines[line_num - 1]
+                        if any(keyword in line for keyword in ['if', 'for', 'while', 'def', 'class']):
+                            lines[line_num - 1] = line + ':'
+                return '\n'.join(lines)
+        
+        # Log the final state
+        logger.debug("Completed specific syntax error fix", extra={
+            'fixed_code_length': len(code)
+        })
+        
+        return code
+        
+    except Exception as e:
+        logger.error(f"Error in specific syntax error fix: {str(e)}")
+        return code  # Return original code if fixes fail
 
 def _detect_prompt_file(file_path: str, max_file_size: int = 1024 * 1024) -> Tuple[bool, Optional[str]]:
     """
