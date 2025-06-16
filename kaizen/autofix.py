@@ -813,6 +813,12 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         GithubException: If GitHub API operations fail
     """
     try:
+        logger.info("=" * 50)
+        logger.info("Starting run_autofix_and_pr")
+        logger.info(f"Failure data: {failure_data}")
+        logger.info(f"File path: {file_path}")
+        logger.info(f"Test config path: {test_config_path}")
+        
         # Store the original file path to avoid shadowing
         main_file_path = file_path
         
@@ -831,27 +837,45 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         logger.info(f"Tests that were failing: {failing_test_names}")
         
         # Load test configuration
-        with open(test_config_path, 'r') as f:
-            test_config = yaml.safe_load(f)
+        try:
+            with open(test_config_path, 'r') as f:
+                test_config = yaml.safe_load(f)
+                logger.info(f"Loaded test config: {test_config}")
+        except Exception as e:
+            logger.error(f"Error loading test config: {str(e)}")
+            raise
         
         # Collect all referenced files
-        referenced_files = _collect_referenced_files(file_path)
-        logger.info(f"Found referenced files: {referenced_files}")
+        try:
+            referenced_files = _collect_referenced_files(file_path)
+            logger.info(f"Found referenced files: {referenced_files}")
+        except Exception as e:
+            logger.error(f"Error collecting referenced files: {str(e)}")
+            raise
         
         # Analyze which files need to be fixed based on failures
-        file_failures = _analyze_failure_dependencies(failure_data, referenced_files)
-        logger.info(f"File failures analysis: {file_failures}")
+        try:
+            file_failures = _analyze_failure_dependencies(failure_data, referenced_files)
+            logger.info(f"File failures analysis: {file_failures}")
+        except Exception as e:
+            logger.error(f"Error analyzing failure dependencies: {str(e)}")
+            raise
         
         # Load original code for all files
         original_codes = {}
         for ref_file in referenced_files:
-            with open(ref_file, 'r') as f:
-                original_codes[ref_file] = f.read()
+            try:
+                with open(ref_file, 'r') as f:
+                    original_codes[ref_file] = f.read()
+                logger.info(f"Loaded original code for {ref_file}")
+            except Exception as e:
+                logger.error(f"Error loading original code for {ref_file}: {str(e)}")
+                raise
         
         # Generate PR info with test configuration
         try:
             branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], {}, test_config, original_codes[main_file_path])
-            logger.info(f"Generated PR info: {branch_name}, {pr_title}, {pr_body}")
+            logger.info(f"Generated PR info: {branch_name}, {pr_title}")
         except Exception as e:
             logger.warning(f"Failed to generate PR info: {str(e)}")
             # Use default values if PR info generation fails
