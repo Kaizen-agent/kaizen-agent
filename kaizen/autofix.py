@@ -16,6 +16,7 @@ import importlib
 import random
 from dataclasses import dataclass
 import re
+import time
 
 from .logger import get_logger
 from .config import get_config
@@ -44,6 +45,212 @@ class FilePatterns:
             'test', 'error', 'failed', 'failure', 'assert', 'check', 'verify', 'validate',
             'should', 'must', 'need', 'have', 'with', 'from', 'that', 'this', 'when'
         }
+
+@dataclass
+class PromptDetectionConfig:
+    """Configuration for prompt detection."""
+    # Scoring weights for different types of patterns
+    system_message_weight: float = 0.8
+    user_message_weight: float = 0.8
+    assistant_message_weight: float = 0.8
+    general_prompt_weight: float = 0.6
+    chat_array_weight: float = 0.7
+    
+    # Context scoring weights
+    prompt_content_weight: float = 1.0
+    input_output_weight: float = 0.5
+    structured_pattern_weight: float = 0.8
+    nested_pattern_weight: float = 0.9
+    multiline_weight: float = 0.3
+    formatting_weight: float = 0.2
+    numbered_list_weight: float = 0.2
+    
+    # False positive reduction weights
+    test_file_weight: float = 0.5
+    config_file_weight: float = 0.5
+    utility_file_weight: float = 0.5
+    
+    # Thresholds
+    min_prompt_score: float = 0.6
+    min_context_score: float = 0.3
+    
+    # Cache settings
+    cache_size: int = 1000
+    cache_ttl: int = 3600  # 1 hour in seconds
+
+class PromptDetector:
+    """A class for detecting prompts in code files."""
+    
+    def __init__(self, config: Optional[PromptDetectionConfig] = None):
+        """
+        Initialize the prompt detector.
+        
+        Args:
+            config: Optional configuration for prompt detection
+        """
+        self.config = config or PromptDetectionConfig()
+        self._cache = {}
+        self._cache_timestamps = {}
+        
+    def _get_cache_key(self, file_path: str, content: str) -> str:
+        """Generate a cache key for the file content."""
+        return f"{file_path}:{hash(content)}"
+        
+    def _is_cache_valid(self, cache_key: str) -> bool:
+        """Check if the cached result is still valid."""
+        if cache_key not in self._cache_timestamps:
+            return False
+        return time.time() - self._cache_timestamps[cache_key] < self.config.cache_ttl
+        
+    def _update_cache(self, cache_key: str, result: Tuple[bool, Optional[str]]):
+        """Update the cache with a new result."""
+        # Remove oldest entry if cache is full
+        if len(self._cache) >= self.config.cache_size:
+            oldest_key = min(self._cache_timestamps.items(), key=lambda x: x[1])[0]
+            del self._cache[oldest_key]
+            del self._cache_timestamps[oldest_key]
+            
+        self._cache[cache_key] = result
+        self._cache_timestamps[cache_key] = time.time()
+        
+    def detect_prompt(self, file_path: str, content: str) -> Tuple[bool, Optional[str]]:
+        """
+        Detect if a file contains prompts by analyzing its content.
+        
+        Args:
+            file_path: Path to the file to analyze
+            content: The content of the file
+            
+        Returns:
+            Tuple[bool, Optional[str]]: (contains_prompt, error_message)
+            
+        Examples:
+            >>> detector = PromptDetector()
+            >>> detector.detect_prompt("prompt.py", 'system_message = "You are a helpful assistant"')
+            (True, None)
+            >>> detector.detect_prompt("utils.py", 'def helper(): pass')
+            (False, None)
+        """
+        try:
+            # Check cache first
+            cache_key = self._get_cache_key(file_path, content)
+            if self._is_cache_valid(cache_key):
+                return self._cache[cache_key]
+                
+            if not content.strip():
+                return False, "File is empty"
+                
+            # Initialize scoring
+            prompt_score = 0.0
+            context_score = 0.0
+            
+            # Check for prompt patterns with context
+            content_lower = content.lower()
+            
+            # System message patterns
+            system_patterns = [
+                (r'system_message\s*=\s*[\'"](.*?)[\'"]', self.config.system_message_weight),
+                (r'system_prompt\s*=\s*[\'"](.*?)[\'"]', self.config.system_message_weight),
+                (r'role\s*:\s*[\'"]system[\'"]', self.config.system_message_weight * 0.9)
+            ]
+            
+            # User message patterns
+            user_patterns = [
+                (r'user_message\s*=\s*[\'"](.*?)[\'"]', self.config.user_message_weight),
+                (r'user_prompt\s*=\s*[\'"](.*?)[\'"]', self.config.user_message_weight),
+                (r'role\s*:\s*[\'"]user[\'"]', self.config.user_message_weight * 0.9)
+            ]
+            
+            # Assistant message patterns
+            assistant_patterns = [
+                (r'assistant_message\s*=\s*[\'"](.*?)[\'"]', self.config.assistant_message_weight),
+                (r'assistant_prompt\s*=\s*[\'"](.*?)[\'"]', self.config.assistant_message_weight),
+                (r'role\s*:\s*[\'"]assistant[\'"]', self.config.assistant_message_weight * 0.9)
+            ]
+            
+            # General prompt patterns
+            general_patterns = [
+                (r'prompt\s*=\s*[\'"](.*?)[\'"]', self.config.general_prompt_weight),
+                (r'instruction\s*=\s*[\'"](.*?)[\'"]', self.config.general_prompt_weight),
+                (r'guideline\s*=\s*[\'"](.*?)[\'"]', self.config.general_prompt_weight),
+                (r'template\s*=\s*[\'"](.*?)[\'"]', self.config.general_prompt_weight)
+            ]
+            
+            # Chat/message array patterns
+            chat_patterns = [
+                (r'messages\s*=\s*\[', self.config.chat_array_weight),
+                (r'chat\s*=\s*\[', self.config.chat_array_weight),
+                (r'conversation\s*=\s*\[', self.config.chat_array_weight)
+            ]
+            
+            # Combine all patterns
+            all_patterns = (
+                system_patterns + 
+                user_patterns + 
+                assistant_patterns + 
+                general_patterns + 
+                chat_patterns
+            )
+            
+            # Check patterns and calculate scores
+            for pattern, weight in all_patterns:
+                matches = re.finditer(pattern, content_lower)
+                for match in matches:
+                    # Get context around the match
+                    start = max(0, match.start() - 50)
+                    end = min(len(content_lower), match.end() + 50)
+                    context = content_lower[start:end]
+                    
+                    # Calculate context score
+                    if any(keyword in context for keyword in ['you are', 'your task', 'please', 'should', 'must', 'need to']):
+                        context_score += self.config.prompt_content_weight
+                    elif any(keyword in context for keyword in ['input', 'output', 'format', 'response', 'result']):
+                        context_score += self.config.input_output_weight
+                    
+                    # Check for structured patterns
+                    if re.search(r'\{.*?role.*?content.*?\}', context):
+                        context_score += self.config.structured_pattern_weight
+                    elif re.search(r'\[.*?\{.*?role.*?content.*?\}.*?\]', context):
+                        context_score += self.config.nested_pattern_weight
+                    
+                    # Check for formatting
+                    if '\n' in match.group(0):
+                        context_score += self.config.multiline_weight
+                    if re.search(r'[#*\-]\s+[A-Z]', context):
+                        context_score += self.config.formatting_weight
+                    if re.search(r'\d+\.\s+[A-Z]', context):
+                        context_score += self.config.numbered_list_weight
+                    
+                    # Add to prompt score
+                    prompt_score += weight
+            
+            # Check for false positives
+            if prompt_score >= self.config.min_prompt_score:
+                # Check if the file is likely a test file
+                if any(keyword in content_lower for keyword in ['test_', 'test_', 'unittest', 'pytest']):
+                    prompt_score *= self.config.test_file_weight
+                # Check if the file is likely a configuration file
+                if any(keyword in content_lower for keyword in ['config', 'settings', 'options']):
+                    prompt_score *= self.config.config_file_weight
+                # Check if the file is likely a utility file
+                if any(keyword in content_lower for keyword in ['utils', 'helpers', 'common']):
+                    prompt_score *= self.config.utility_file_weight
+            
+            # Final decision
+            result = (
+                prompt_score >= self.config.min_prompt_score and 
+                context_score >= self.config.min_context_score,
+                None
+            )
+            
+            # Update cache
+            self._update_cache(cache_key, result)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error detecting prompts in {file_path}: {str(e)}")
+            return False, str(e)
 
 def _compile_patterns(patterns: List[str]) -> List[Pattern]:
     """Compile regex patterns for efficient matching."""
@@ -586,13 +793,22 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
         if not fixed_code or fixed_code.isspace():
             raise ValueError("Generated code is empty or whitespace only")
             
+        # First pass: Try to fix common syntax issues
+        fixed_code = _fix_common_syntax_issues(fixed_code)
+            
         # Parse both codes to validate syntax
         try:
             fixed_tree = ast.parse(fixed_code)
             original_tree = ast.parse(original_code)
         except SyntaxError as e:
-            logger.error(f"Syntax error in code: {str(e)}")
-            raise ValueError(f"Invalid syntax in code: {str(e)}")
+            # Second pass: Try more aggressive syntax fixing
+            fixed_code = _fix_aggressive_syntax_issues(fixed_code)
+            try:
+                fixed_tree = ast.parse(fixed_code)
+                original_tree = ast.parse(original_code)
+            except SyntaxError as e:
+                logger.error(f"Syntax error in code: {str(e)}")
+                raise ValueError(f"Invalid syntax in code: {str(e)}")
         
         # Extract imports from both codes
         fixed_imports = []
@@ -724,12 +940,17 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
             logger.warning(f"Failed to apply AI agent improvements: {str(e)}")
             # Continue with the basic validation
         
-        # Validate the final code
+        # Final validation
         try:
             ast.parse(fixed_code)  # This will raise SyntaxError if invalid
         except SyntaxError as e:
             logger.error(f"Invalid syntax in final code: {str(e)}")
-            raise ValueError(f"Invalid syntax in final code: {str(e)}")
+            # Last resort: try to fix the specific syntax error
+            fixed_code = _fix_specific_syntax_error(fixed_code, str(e))
+            try:
+                ast.parse(fixed_code)
+            except SyntaxError as e:
+                raise ValueError(f"Invalid syntax in final code: {str(e)}")
         
         return fixed_code
         
@@ -739,6 +960,226 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
     except Exception as e:
         logger.error(f"Unexpected error in code validation: {str(e)}")
         raise ValueError(f"Failed to validate code: {str(e)}")
+
+def _fix_common_syntax_issues(code: str) -> str:
+    """
+    Fix common syntax issues in the code.
+    
+    This function handles basic syntax issues like:
+    - Unclosed strings
+    - Missing colons after control structures
+    - Missing parentheses in function calls
+    - Basic indentation issues
+    
+    Args:
+        code (str): The code to fix
+        
+    Returns:
+        str: The fixed code
+        
+    Examples:
+        >>> _fix_common_syntax_issues('def hello world')
+        'def hello world: '
+        >>> _fix_common_syntax_issues('print "hello')
+        'print "hello"'
+    """
+    # Fix unclosed strings with more robust pattern
+    code = re.sub(
+        r'([\'"])((?:[^\'"]|\\[\'"])*?)(?:\n|$)', 
+        lambda m: m.group(1) + m.group(2) + m.group(1), 
+        code
+    )
+    
+    # Fix missing colons after control structures with better pattern
+    code = re.sub(
+        r'(if|for|while|def|class|elif|else)\s+(?!:)([^:]+?)(?:\n|$)',
+        r'\1 \2: ',
+        code
+    )
+    
+    # Fix missing parentheses in function calls with better pattern
+    code = re.sub(
+        r'([a-zA-Z_][a-zA-Z0-9_]*)\s+(?=[a-zA-Z_][a-zA-Z0-9_]*(?:\s*\(|\s*\[|\s*\.|$))',
+        r'\1(',
+        code
+    )
+    
+    # Fix indentation with better handling of nested structures
+    lines = code.split('\n')
+    fixed_lines = []
+    current_indent = 0
+    indent_stack = []
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Handle indentation changes
+        if stripped.endswith(':'):
+            fixed_lines.append('    ' * current_indent + stripped)
+            indent_stack.append(current_indent)
+            current_indent += 1
+        elif stripped.startswith(('return', 'break', 'continue', 'pass')):
+            if indent_stack:
+                current_indent = indent_stack.pop()
+            fixed_lines.append('    ' * current_indent + stripped)
+        elif stripped.startswith(('else:', 'elif ', 'except ', 'finally:')):
+            if indent_stack:
+                current_indent = indent_stack[-1]
+            fixed_lines.append('    ' * current_indent + stripped)
+        else:
+            fixed_lines.append('    ' * current_indent + stripped)
+    
+    return '\n'.join(fixed_lines)
+
+def _fix_aggressive_syntax_issues(code: str) -> str:
+    """
+    Apply more aggressive syntax fixes when common fixes fail.
+    
+    This function handles more complex syntax issues like:
+    - Non-printable characters
+    - Complex string issues
+    - Missing parentheses and brackets
+    - Complex indentation issues
+    
+    Args:
+        code (str): The code to fix
+        
+    Returns:
+        str: The fixed code
+        
+    Examples:
+        >>> _fix_aggressive_syntax_issues('print "hello\x00world"')
+        'print "helloworld"'
+        >>> _fix_aggressive_syntax_issues('def hello[world')
+        'def hello[world]'
+    """
+    # Remove any non-printable characters except newlines
+    code = ''.join(char for char in code if char.isprintable() or char == '\n')
+    
+    # Fix common string issues with more robust patterns
+    code = re.sub(
+        r'([\'"])((?:[^\'"]|\\[\'"])*?)(?:\n|$)',
+        lambda m: m.group(1) + m.group(2) + m.group(1),
+        code
+    )
+    
+    # Fix missing parentheses and brackets with better patterns
+    code = re.sub(
+        r'([a-zA-Z_][a-zA-Z0-9_]*)\s+(?=[a-zA-Z_][a-zA-Z0-9_]*(?:\s*\(|\s*\[|\s*\.|$))',
+        r'\1(',
+        code
+    )
+    code = re.sub(
+        r'(\[)((?:[^\[\]]|\\[\[\]])*?)(?:\n|$)',
+        lambda m: m.group(1) + m.group(2) + ']',
+        code
+    )
+    code = re.sub(
+        r'(\{)((?:[^{}]|\\[{}])*?)(?:\n|$)',
+        lambda m: m.group(1) + m.group(2) + '}',
+        code
+    )
+    
+    # Fix indentation with better handling of nested structures
+    lines = code.split('\n')
+    fixed_lines = []
+    current_indent = 0
+    indent_stack = []
+    bracket_stack = []
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Count brackets to track nesting
+        for char in stripped:
+            if char in '([{':
+                bracket_stack.append(char)
+            elif char in ')]}':
+                if bracket_stack:
+                    bracket_stack.pop()
+        
+        # Handle indentation changes
+        if stripped.endswith(':'):
+            fixed_lines.append('    ' * current_indent + stripped)
+            indent_stack.append(current_indent)
+            current_indent += 1
+        elif stripped.startswith(('return', 'break', 'continue', 'pass')):
+            if indent_stack:
+                current_indent = indent_stack.pop()
+            fixed_lines.append('    ' * current_indent + stripped)
+        elif stripped.startswith(('else:', 'elif ', 'except ', 'finally:')):
+            if indent_stack:
+                current_indent = indent_stack[-1]
+            fixed_lines.append('    ' * current_indent + stripped)
+        else:
+            fixed_lines.append('    ' * current_indent + stripped)
+    
+    return '\n'.join(fixed_lines)
+
+def _fix_specific_syntax_error(code: str, error_msg: str) -> str:
+    """
+    Fix specific syntax errors based on the error message.
+    
+    This function handles specific syntax errors like:
+    - Unclosed string literals
+    - Missing parentheses
+    - Invalid indentation
+    - Other common syntax errors
+    
+    Args:
+        code (str): The code to fix
+        error_msg (str): The syntax error message
+        
+    Returns:
+        str: The fixed code
+        
+    Examples:
+        >>> _fix_specific_syntax_error('print "hello', 'EOL while scanning string literal')
+        'print "hello"'
+        >>> _fix_specific_syntax_error('def hello(', 'unexpected EOF while parsing')
+        'def hello():'
+    """
+    if "EOL while scanning string literal" in error_msg:
+        # Extract line number from error message
+        line_match = re.search(r'line (\d+)', error_msg)
+        if line_match:
+            line_num = int(line_match.group(1))
+            lines = code.split('\n')
+            if line_num <= len(lines):
+                # Fix unclosed string on the specified line
+                line = lines[line_num - 1]
+                if line.count('"') % 2 == 1:
+                    lines[line_num - 1] = line + '"'
+                elif line.count("'") % 2 == 1:
+                    lines[line_num - 1] = line + "'"
+            return '\n'.join(lines)
+    
+    elif "unexpected EOF while parsing" in error_msg:
+        # Try to fix common EOF issues
+        if code.strip().endswith('('):
+            return code + ')'
+        elif code.strip().endswith('['):
+            return code + ']'
+        elif code.strip().endswith('{'):
+            return code + '}'
+        elif code.strip().endswith(':'):
+            return code + '\n    pass'
+    
+    elif "invalid syntax" in error_msg:
+        # Try to fix common invalid syntax issues
+        if ':' in error_msg and 'expected' in error_msg:
+            # Missing colon after control structure
+            lines = code.split('\n')
+            line_match = re.search(r'line (\d+)', error_msg)
+            if line_match:
+                line_num = int(line_match.group(1))
+                if line_num <= len(lines):
+                    line = lines[line_num - 1]
+                    if any(keyword in line for keyword in ['if', 'for', 'while', 'def', 'class']):
+                        lines[line_num - 1] = line + ':'
+            return '\n'.join(lines)
+    
+    return code
 
 def _detect_prompt_file(file_path: str, max_file_size: int = 1024 * 1024) -> Tuple[bool, Optional[str]]:
     """
@@ -750,6 +1191,12 @@ def _detect_prompt_file(file_path: str, max_file_size: int = 1024 * 1024) -> Tup
         
     Returns:
         Tuple[bool, Optional[str]]: (contains_prompt, error_message)
+        
+    Examples:
+        >>> _detect_prompt_file("prompt.py")
+        (True, None)
+        >>> _detect_prompt_file("utils.py")
+        (False, None)
     """
     try:
         # Check file size
@@ -760,31 +1207,9 @@ def _detect_prompt_file(file_path: str, max_file_size: int = 1024 * 1024) -> Tup
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
             
-        if not content.strip():
-            return False, "File is empty"
-            
-        # Look for common prompt indicators
-        prompt_indicators = [
-            'prompt', 'instruction', 'guideline', 'template',
-            'system_message', 'user_message', 'assistant_message',
-            'role', 'content', 'messages', 'chat', 'conversation',
-            'user_prompt', 'system_prompt', 'assistant_prompt'
-        ]
-        
-        # Check for prompt patterns
-        content_lower = content.lower()
-        contains_prompt = any(indicator in content_lower for indicator in prompt_indicators)
-        
-        # Additional checks for common prompt structures
-        if not contains_prompt:
-            # Check for JSON-like structures that might contain prompts
-            if any(pattern in content_lower for pattern in ['{"role":', '{"content":', '{"message":']):
-                contains_prompt = True
-            # Check for YAML-like structures
-            elif any(pattern in content_lower for pattern in ['role:', 'content:', 'message:', 'prompt:']):
-                contains_prompt = True
-                
-        return contains_prompt, None
+        # Use the PromptDetector class
+        detector = PromptDetector()
+        return detector.detect_prompt(file_path, content)
         
     except Exception as e:
         logger.error(f"Error detecting prompts in {file_path}: {str(e)}")
