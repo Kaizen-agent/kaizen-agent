@@ -1,0 +1,87 @@
+# Prompt Detection Configuration
+prompt_detection:
+  # Scoring weights for different types of patterns
+  scoring_weights:
+    system_patterns: 2.0
+    user_patterns: 1.5
+    assistant_patterns: 1.5
+    general_patterns: 1.0
+    chat_patterns: 1.0
+  
+  # Context scoring weights
+  context_weights:
+    prompt_context: 1.5
+    code_context: 0.5
+    mixed_context: 1.0
+  
+  # False positive reduction weights
+  false_positive_weights:
+    code_ratio: 1.0
+    prompt_ratio: 1.0
+    context_score: 1.0
+  
+  # Thresholds
+  thresholds:
+    min_prompt_score: 0.6
+    min_context_score: 0.4
+    max_false_positive_score: 0.3
+  
+  # Cache settings
+  cache:
+    enabled: true
+    max_age_seconds: 3600
+
+# Test Configuration
+test:
+  enabled: true
+  regions:
+    unit:
+      test_cases:
+        - name: test_prompt_detection
+          input:
+            content: "def test_function():\n    return True"
+          expected:
+            value: False
+        - name: test_code_fixing
+          input:
+            content: "def broken_function()\n    return True"
+          expected:
+            value: True
+    integration:
+      test_cases:
+        - name: test_file_dependencies
+          input:
+            file_path: "test_file.py"
+          expected:
+            value: ["dep1.py", "dep2.py"]
+        - name: test_pr_creation
+          input:
+            changes: {"file.py": [{"type": "fix", "description": "Fixed syntax"}]}
+          expected:
+            value: {"status": "ready"}
+
+# PR Configuration
+pr:
+  pr_dir: "prs"
+  title_template: "Fix: {change_summary} ({test_summary})"
+  description_template: |
+    ## Changes
+    {changes}
+
+    ## Test Results
+    {test_results}
+  
+  # PR validation rules
+  validation:
+    require_tests: true
+    require_changes: true
+    min_description_length: 50
+    max_title_length: 100
+
+# Logging Configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "autofix.log"
+  max_size: 10485760  # 10MB
+  backup_count: 5 
