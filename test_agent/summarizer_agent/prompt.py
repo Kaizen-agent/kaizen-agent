@@ -1,11 +1,20 @@
 def get_prompt(text: str) -> str:
     """
-    Generate a prompt for the Gemini model.
+    Generate a prompt for the Gemini model, specifically for summarization.
     
     Args:
-        text (str): The user's input text
+        text (str): The text to be summarized.
         
     Returns:
         str: The formatted prompt
+        
+    Raises:
+        ValueError: If the input text is empty or whitespace only, as it cannot be summarized.
     """
-    return f"Please respond to the following user message:\n\n{text}" 
+    # AI Agent Best Practice: Validate input for utility functions, even if a higher layer handles it,
+    # to ensure robustness when called in isolation.
+    if not text or text.strip() == "":
+        raise ValueError("Cannot generate summarization prompt for empty or whitespace-only text.")
+        
+    # AI Agent Best Practice: Make prompt specific to the agent's purpose (summarization)
+    return f"Please provide a concise summary of the following text:\n\n{text}"
