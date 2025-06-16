@@ -740,6 +740,252 @@ def _validate_and_improve_code(fixed_code: str, original_code: str) -> str:
         logger.error(f"Unexpected error in code validation: {str(e)}")
         raise ValueError(f"Failed to validate code: {str(e)}")
 
+def _detect_prompt_file(file_path: str, max_file_size: int = 1024 * 1024) -> Tuple[bool, Optional[str]]:
+    """
+    Detect if a file contains prompts by analyzing its content.
+    
+    Args:
+        file_path: Path to the file to analyze
+        max_file_size: Maximum file size to process (default: 1MB)
+        
+    Returns:
+        Tuple[bool, Optional[str]]: (contains_prompt, error_message)
+    """
+    try:
+        # Check file size
+        file_size = os.path.getsize(file_path)
+        if file_size > max_file_size:
+            return False, f"File too large ({file_size} bytes)"
+            
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        if not content.strip():
+            return False, "File is empty"
+            
+        # Look for common prompt indicators
+        prompt_indicators = [
+            'prompt', 'instruction', 'guideline', 'template',
+            'system_message', 'user_message', 'assistant_message',
+            'role', 'content', 'messages', 'chat', 'conversation',
+            'user_prompt', 'system_prompt', 'assistant_prompt'
+        ]
+        
+        # Check for prompt patterns
+        content_lower = content.lower()
+        contains_prompt = any(indicator in content_lower for indicator in prompt_indicators)
+        
+        # Additional checks for common prompt structures
+        if not contains_prompt:
+            # Check for JSON-like structures that might contain prompts
+            if any(pattern in content_lower for pattern in ['{"role":', '{"content":', '{"message":']):
+                contains_prompt = True
+            # Check for YAML-like structures
+            elif any(pattern in content_lower for pattern in ['role:', 'content:', 'message:', 'prompt:']):
+                contains_prompt = True
+                
+        return contains_prompt, None
+        
+    except Exception as e:
+        logger.error(f"Error detecting prompts in {file_path}: {str(e)}")
+        return False, str(e)
+
+def _get_prompt_template(file_path: str, test_config: Dict, files_to_fix: Dict[str, List[Dict]], 
+                        file_dependencies: Dict[str, List[str]], context_files: Dict[str, str],
+                        original_codes: Dict[str, str]) -> str:
+    """
+    Get the appropriate prompt template based on file content.
+    
+    Args:
+        file_path: Path to the file being processed
+        test_config: Test configuration dictionary
+        files_to_fix: Dictionary mapping file paths to their failures
+        file_dependencies: Dictionary mapping file paths to their dependencies
+        context_files: Dictionary mapping file paths to their content
+        original_codes: Dictionary mapping file paths to their original code
+        
+    Returns:
+        str: The prompt template to use
+    """
+    contains_prompt, error = _detect_prompt_file(file_path)
+    
+    if error:
+        logger.warning(f"Prompt detection error for {file_path}: {error}")
+        # Default to code-focused template if detection fails
+        contains_prompt = False
+        
+    logger.info(f"File {file_path} {'contains' if contains_prompt else 'does not contain'} prompts")
+    
+    # Common prompt elements
+    common_elements = f"""
+Test Configuration Context:
+{json.dumps(test_config, indent=2)}
+
+IMPORTANT: You are currently fixing this file: {file_path}
+Failures in this file:
+{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failure in files_to_fix[file_path])}
+
+File Dependencies:
+{chr(10).join(f'- {path} imports: {", ".join(deps)}' for path, deps in file_dependencies.items())}
+
+All files in the codebase (for context):
+{chr(10).join(f'=== {path} ==={chr(10)}{code}{chr(10)}' for path, code in context_files.items())}
+
+The file you need to fix is: {file_path}
+Original code for this file:
+{original_codes[file_path]}
+"""
+    
+    if contains_prompt:
+        return f"""You are a senior AI agent engineer specializing in prompt engineering and AI agent development. Your task is to improve the prompts in this file while maintaining compatibility with the rest of the codebase.
+
+{common_elements}
+
+PRIMARY FOCUS: IMPROVE THE PROMPTS
+1. Analyze each prompt in the file
+2. Enhance prompt structure and clarity
+3. Add necessary context and examples
+4. Improve error handling and validation
+5. Ensure prompts are robust and maintainable
+
+Prompt Engineering Requirements:
+1. Structure and Organization:
+   - Use clear section headers and bullet points
+   - Group related instructions together
+   - Use consistent formatting and indentation
+   - Include a clear introduction and conclusion
+   - Add examples for complex instructions
+
+2. Clarity and Precision:
+   - Use clear, concise language
+   - Avoid ambiguous terms
+   - Define technical terms
+   - Use active voice
+   - Break down complex instructions into steps
+
+3. Context and Background:
+   - Provide necessary background information
+   - Explain the purpose of each section
+   - Include relevant domain knowledge
+   - Specify the target audience
+   - Add context for why certain requirements exist
+
+4. Output Requirements:
+   - Specify exact output format
+   - Include example outputs
+   - Define success criteria
+   - List required elements
+   - Specify length constraints
+   - Add validation rules
+
+5. Error Handling:
+   - Define error scenarios
+   - Specify error messages
+   - Include recovery steps
+   - Add fallback options
+   - Define retry strategies
+
+6. Safety and Quality:
+   - Add content filtering rules
+   - Include fact-checking requirements
+   - Specify ethical guidelines
+   - Add quality assurance steps
+   - Include validation checks
+
+7. AI-Specific Improvements:
+   - Add model-specific instructions
+   - Include temperature settings
+   - Specify token limits
+   - Add context window management
+   - Include model behavior controls
+
+8. Response Enhancement:
+   - Add post-processing rules
+   - Include formatting requirements
+   - Specify style guidelines
+   - Add quality checks
+   - Include enhancement steps
+
+Code Requirements (Secondary Focus):
+1. Maintain existing code structure
+2. Keep all imports and dependencies
+3. Preserve function signatures
+4. Maintain type hints
+5. Keep error handling consistent
+6. Ensure compatibility with other files
+
+Return only the fixed code for {file_path}, without any file markers or additional text."""
+    else:
+        return f"""You are a senior AI agent engineer specializing in AI agent development. Your task is to improve this code file while maintaining compatibility with the rest of the codebase.
+
+{common_elements}
+
+PRIMARY FOCUS: IMPROVE THE CODE
+1. Fix all test failures
+2. Enhance code structure and organization
+3. Improve error handling and validation
+4. Optimize performance
+5. Ensure code is maintainable and testable
+
+Code Improvement Requirements:
+1. Structure and Organization:
+   - Follow clean code principles
+   - Use clear and consistent naming
+   - Organize code logically
+   - Add proper documentation
+   - Follow design patterns
+
+2. Error Handling:
+   - Add comprehensive error handling
+   - Include proper error messages
+   - Add recovery mechanisms
+   - Handle edge cases
+   - Add proper logging
+
+3. Performance:
+   - Optimize resource usage
+   - Add caching where appropriate
+   - Handle large inputs efficiently
+   - Implement proper cleanup
+   - Add performance monitoring
+
+4. Testing:
+   - Make code testable
+   - Add proper mocking points
+   - Include validation logic
+   - Handle edge cases
+   - Add proper assertions
+
+5. Security:
+   - Add input validation
+   - Implement proper sanitization
+   - Handle sensitive data
+   - Add access controls
+   - Follow security best practices
+
+6. AI Agent Best Practices:
+   - Implement proper initialization
+   - Handle API rate limits
+   - Add retry mechanisms
+   - Validate model outputs
+   - Handle model errors
+
+7. Code Quality:
+   - Add type hints
+   - Include docstrings
+   - Follow PEP 8
+   - Add proper comments
+   - Use consistent style
+
+8. Maintainability:
+   - Keep functions focused
+   - Reduce complexity
+   - Add proper logging
+   - Include error tracking
+   - Add monitoring
+
+Return only the fixed code for {file_path}, without any file markers or additional text."""
+
 def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True, base_branch: str = 'main') -> List[Dict]:
     """
     Automatically fixes code based on test failures and optionally creates a PR.
@@ -1004,238 +1250,99 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                         })
                         file_dependencies[path] = []
                 
-                # Prepare a comprehensive prompt that includes all files and their relationships
-                prompt = f"""You are a senior AI agent engineer specializing in improving AI agent code. Your task is to fix the following code files while maintaining their structure and relationships, with a specific focus on AI agent best practices.
-
-IMPORTANT: You must return your response in a specific format. For each file, you must include:
-1. A file marker: === <file_path> ===
-2. The complete fixed code for that file
-3. A blank line between files
-
-Test Configuration Context:
-{json.dumps(test_config, indent=2)}
-
-Files to fix:
-{chr(10).join(f'- {path}: {len(failures)} failures' for path, failures in files_to_fix.items())}
-
-File Dependencies:
-{chr(10).join(f'- {path} imports: {", ".join(deps)}' for path, deps in file_dependencies.items())}
-
-Original code for each file:
-{chr(10).join(f'=== {path} ==={chr(10)}{original_codes[path]}{chr(10)}' for path in files_to_fix.keys())}
-
-Test failures:
-{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failures in files_to_fix.values() for failure in failures)}
-
-Requirements:
-1. Fix all test failures while maintaining the agent's core functionality
-2. Follow the evaluation criteria from the test configuration
-3. Ensure proper error handling and input validation
-4. Maintain code quality standards (type hints, documentation, etc.)
-5. Keep changes minimal and focused on fixing the specific issues
-6. Return each file's code in the exact format specified above
-7. DO NOT return empty code blocks or invalid syntax
-8. The returned code must be valid Python code that can be executed
-
-Code Structure Requirements:
-1. All imports must be at the top of the file
-2. All classes and functions must be properly defined with type hints
-3. All functions must have docstrings explaining their purpose and parameters
-4. All classes must have proper initialization methods
-5. All methods must handle their own exceptions and return appropriate values
-6. All code must be properly indented and follow PEP 8 style
-7. All variables must be properly initialized before use
-8. All required dependencies must be imported
-9. All code must be executable in a Python environment
-10. All code must be compatible with Python 3.8+
-11. The code must be a complete, valid Python file
-12. The code must not contain any empty code blocks or invalid syntax
-
-Execution Requirements:
-1. Code must be executable in a controlled environment with proper namespace setup
-2. Code must handle all possible input types and edge cases
-3. Code must validate all inputs before processing
-4. Code must handle all possible error conditions
-5. Code must return appropriate values for all execution paths
-6. Code must not rely on external state or global variables
-7. Code must be thread-safe and reentrant
-8. Code must clean up any resources it uses
-9. Code must not have any side effects
-10. Code must be deterministic
-
-Code Improvement Guidelines:
-1. Error Handling:
-   - Add proper error handling for API calls and external services
-   - Include specific error messages for different failure scenarios
-   - Handle edge cases gracefully with appropriate fallbacks
-   - Validate inputs before processing
-
-2. AI Agent Best Practices:
-   - Ensure proper initialization of AI models and services
-   - Handle API rate limits and timeouts
-   - Implement proper logging for debugging
-   - Add retry mechanisms for transient failures
-   - Validate model outputs before returning
-
-3. Code Structure:
-   - Keep methods focused and single-purpose
-   - Use clear and descriptive variable names
-   - Add type hints for all parameters and return values
-   - Include docstrings explaining method purpose and parameters
-   - Follow consistent code style
-
-4. Testing Considerations:
-   - Make code testable by avoiding hard-coded values
-   - Use dependency injection where appropriate
-   - Add proper mocking points for external services
-   - Ensure error cases are testable
-   - Make validation logic explicit and testable
-
-5. Performance:
-   - Optimize API calls and external service interactions
-   - Cache results where appropriate
-   - Handle large inputs efficiently
-   - Implement proper resource cleanup
-
-6. Security:
-   - Never expose API keys or sensitive data
-   - Validate and sanitize all inputs
-   - Implement proper access controls
-   - Handle sensitive data appropriately
-
-7. AI Agent Prompt Engineering:
-   When test failures indicate output quality issues (e.g., missing expected content, incorrect format, or poor response quality):
-   
-   a) Analyze the Failure:
-      - Identify which specific aspects of the output failed (content, format, style, etc.)
-      - Check if the failure is due to missing context or unclear instructions
-      - Determine if the model needs more specific guidance or constraints
-   
-   b) Improve the Prompt:
-      - Add clear output format requirements
-      - Include specific examples of expected outputs
-      - Specify required content elements
-      - Add constraints for response length and style
-      - Include validation criteria in the prompt
-   
-   c) Add Output Validation:
-      - Implement checks for required content elements
-      - Validate output format and structure
-      - Add length and style validation
-      - Include fallback responses for invalid outputs
-   
-   d) Enhance Context:
-      - Add relevant background information
-      - Include domain-specific terminology
-      - Specify the target audience
-      - Add style and tone requirements
-   
-   e) Add Safety and Quality Checks:
-      - Include content filtering requirements
-      - Add fact-checking instructions
-      - Specify ethical guidelines
-      - Include quality assurance steps
-
-8. Output Quality Improvements:
-   - Add post-processing for output formatting
-   - Implement content validation
-   - Add response enhancement logic
-   - Include output sanitization
-   - Add quality scoring mechanisms
-
-Return your response in the exact format specified above, with each file's code separated by file markers and blank lines."""
+                # Sort files by dependencies (files with no dependencies first)
+                sorted_files = []
+                remaining_files = set(files_to_fix.keys())
                 
-                logger.debug("Generated prompt", extra={
-                    'prompt_length': len(prompt)
-                })
-                
-                # Get fixes for all files at once
-                response = model.generate_content(prompt)
-                fixed_content = response.text.strip()
-                logger.debug("Received model response", extra={
-                    'response_length': len(fixed_content)
-                })
-                
-                # Parse the response to extract fixes for each file
-                current_file = None
-                current_code = []
-                file_markers = set()
-                retry_count = 0
-                max_retries = 3
-                
-                for line in fixed_content.split('\n'):
-                    if line.startswith('=== ') and line.endswith(' ==='):
-                        file_marker = line[4:-4].strip()
-                        if file_marker in file_markers:
-                            logger.warning("Duplicate file marker detected", extra={
-                                'file': file_marker
-                            })
-                            continue
+                while remaining_files:
+                    # Find files with no remaining dependencies
+                    independent_files = {
+                        f for f in remaining_files 
+                        if not any(dep in remaining_files for dep in file_dependencies.get(f, []))
+                    }
+                    
+                    if not independent_files:
+                        # If no independent files found but we still have remaining files,
+                        # there might be a circular dependency. Just take the first file.
+                        independent_files = {next(iter(remaining_files))}
+                    
+                    sorted_files.extend(independent_files)
+                    remaining_files -= independent_files
+
+                # Fix files one by one, using previously fixed files as context
+                for current_file in sorted_files:
+                    logger.info(f"Fixing file: {current_file}")
+                    
+                    # Prepare context from all files
+                    context_files = {}
+                    # Add previously fixed files
+                    for fixed_file in fixed_codes:
+                        context_files[fixed_file] = fixed_codes[fixed_file]
+                    
+                    # Add original code for unfixed files
+                    for unfixed_file in files_to_fix:
+                        if unfixed_file not in fixed_codes:
+                            context_files[unfixed_file] = original_codes[unfixed_file]
+                    
+                    # Get appropriate prompt template
+                    prompt = _get_prompt_template(
+                        current_file,
+                        test_config,
+                        files_to_fix,
+                        file_dependencies,
+                        context_files,
+                        original_codes
+                    )
+                    
+                    logger.debug("Generated prompt for file", extra={
+                        'file': current_file,
+                        'prompt_length': len(prompt)
+                    })
+                    
+                    # Get fix for current file
+                    retry_count = 0
+                    max_retries = 3
+                    
+                    while retry_count < max_retries:
+                        try:
+                            response = model.generate_content(prompt)
+                            fixed_code = response.text.strip()
                             
-                        if current_file and current_code:
-                            try:
-                                fixed_code = '\n'.join(current_code)
-                                # Validate and improve the generated code
-                                fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                            # Validate and improve the generated code
+                            fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                            
+                            # Additional validation
+                            if not fixed_code or fixed_code.isspace():
+                                raise ValueError("Generated code is empty or whitespace only")
                                 
-                                # Additional validation
-                                if not fixed_code or fixed_code.isspace():
-                                    raise ValueError("Generated code is empty or whitespace only")
-                                    
-                                if fixed_code == original_codes[current_file]:
-                                    logger.warning("Generated code is identical to original", extra={
-                                        'file': current_file
-                                    })
-                                    # Try to get a different fix
-                                    if retry_count < max_retries:
-                                        retry_count += 1
-                                        logger.info(f"Retrying fix for {current_file} (attempt {retry_count})")
-                                        continue
-                                
-                                fixed_codes[current_file] = fixed_code
-                                logger.info("Successfully fixed code", extra={
-                                    'file': current_file,
-                                    'content_length': len(fixed_code)
+                            if fixed_code == original_codes[current_file]:
+                                logger.warning("Generated code is identical to original", extra={
+                                    'file': current_file
                                 })
-                                retry_count = 0  # Reset retry count for next file
-                                
-                            except Exception as e:
-                                logger.error("Failed to process file", extra={
-                                    'file': current_file,
-                                    'error': str(e),
-                                    'error_type': type(e).__name__
+                                retry_count += 1
+                                continue
+                            
+                            fixed_codes[current_file] = fixed_code
+                            logger.info("Successfully fixed code", extra={
+                                'file': current_file,
+                                'content_length': len(fixed_code)
+                            })
+                            break
+                            
+                        except Exception as e:
+                            logger.error("Failed to process file", extra={
+                                'file': current_file,
+                                'error': str(e),
+                                'error_type': type(e).__name__
+                            })
+                            retry_count += 1
+                            if retry_count >= max_retries:
+                                # If all retries failed, keep original code
+                                fixed_codes[current_file] = original_codes[current_file]
+                                logger.warning("Using original code after failed fixes", extra={
+                                    'file': current_file
                                 })
-                                if retry_count < max_retries:
-                                    retry_count += 1
-                                    logger.info(f"Retrying fix for {current_file} (attempt {retry_count})")
-                                    continue
-                                else:
-                                    # If all retries failed, keep original code
-                                    fixed_codes[current_file] = original_codes[current_file]
-                                    logger.warning("Using original code after failed fixes", extra={
-                                        'file': current_file
-                                    })
-                                
-                        current_file = file_marker
-                        file_markers.add(file_marker)
-                        current_code = []
-                    elif current_file:
-                        current_code.append(line)
-                
-                # Handle the last file
-                if current_file and current_code:
-                    try:
-                        fixed_code = '\n'.join(current_code)
-                        fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
-                        fixed_codes[current_file] = fixed_code
-                        logger.info("Processed last file", extra={
-                            'file': current_file
-                        })
-                    except Exception as e:
-                        logger.error("Failed to process last file", extra={
-                            'file': current_file,
-                            'error': str(e)
-                        })
+                            continue
             
             # Write all fixed code to disk before running tests
             logger.info("Writing fixed code to disk", extra={
