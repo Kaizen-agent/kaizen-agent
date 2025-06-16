@@ -924,7 +924,7 @@ def _reload_modules(file_paths: set) -> None:
             except Exception as e:
                 logger.warning(f"Failed to reload module {module_name}: {str(e)}")
 
-def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True, base_branch: str = 'main') -> None:
+def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True, base_branch: str = 'main') -> List[Dict]:
     """
     Automatically fixes code based on test failures and optionally creates a PR.
     
@@ -935,6 +935,9 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         max_retries: Maximum number of retry attempts for fixing tests (default: 1)
         create_pr: Whether to create a pull request with the fixes (default: True)
         base_branch: The base branch to create the PR against (default: 'main')
+        
+    Returns:
+        List of dictionaries containing information about each fix attempt
         
     Raises:
         ValueError: If required environment variables are not set
@@ -1676,7 +1679,7 @@ Return only the fixed code without any explanations or markdown formatting.""")
             except subprocess.CalledProcessError:
                 # Ignore errors if branch doesn't exist
                 pass
-            return
+            return all_test_attempts
         
         logger.info("Tests fixed successfully", extra={
             'fixed_test_count': len(fixed_tests)
@@ -1805,6 +1808,8 @@ Return only the fixed code without any explanations or markdown formatting.""")
             'branch': original_branch
         })
         subprocess.run(["git", "checkout", original_branch], check=True)
+        
+        return all_test_attempts
         
     except subprocess.CalledProcessError as e:
         logger.error("Git command failed", extra={
