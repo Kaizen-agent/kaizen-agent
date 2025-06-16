@@ -767,6 +767,19 @@ def _analyze_failure_dependencies(failure_data: List[Dict], referenced_files: se
     """
     file_failures = {file_path: [] for file_path in referenced_files}
     
+    # Create a mapping of module names to file paths
+    module_to_file = {}
+    for file_path in referenced_files:
+        # Get the module name from the file path
+        module_name = os.path.splitext(os.path.basename(file_path))[0]
+        module_to_file[module_name] = file_path
+        
+        # Also map the full path components
+        path_parts = file_path.split(os.sep)
+        for i in range(len(path_parts)):
+            module_name = '.'.join(path_parts[i:])
+            module_to_file[module_name] = file_path
+    
     for failure in failure_data:
         # Extract all relevant information from the failure
         error_message = failure.get('error_message', '')
@@ -791,44 +804,98 @@ def _analyze_failure_dependencies(failure_data: List[Dict], referenced_files: se
             continue
             
         # Analyze error message and context to determine affected files
-        for file_path in referenced_files:
-            file_name = os.path.basename(file_path)
+        affected_files = set()
+        
+        # Check error message for module references
+        if error_message:
+            # Look for module references in error messages
+            for module_name, file_path in module_to_file.items():
+                if module_name in error_message:
+                    affected_files.add(file_path)
+                    logger.info(f"Found module {module_name} in error message: {error_message}")
             
-            # Check various conditions that might indicate this file needs fixing
-            should_fix = False
+            # Look for file paths in error messages
+            for file_path in referenced_files:
+                file_name = os.path.basename(file_path)
+                if file_name in error_message:
+                    affected_files.add(file_path)
+                    logger.info(f"Found file {file_name} in error message: {error_message}")
+        
+        # Check test name for module references
+        if test_name:
+            # Look for module references in test names
+            for module_name, file_path in module_to_file.items():
+                if module_name in test_name:
+                    affected_files.add(file_path)
+                    logger.info(f"Found module {module_name} in test name: {test_name}")
             
-            # Check error message if it exists
-            if error_message and file_name in error_message:
-                should_fix = True
-                logger.info(f"File {file_name} mentioned in error message: {error_message}")
+            # Look for file paths in test names
+            for file_path in referenced_files:
+                file_name = os.path.basename(file_path)
+                if file_name in test_name:
+                    affected_files.add(file_path)
+                    logger.info(f"Found file {file_name} in test name: {test_name}")
+        
+        # Check output for module references
+        if output:
+            # Look for module references in output
+            for module_name, file_path in module_to_file.items():
+                if module_name in output:
+                    affected_files.add(file_path)
+                    logger.info(f"Found module {module_name} in output: {output}")
             
-            # Check test name if it exists
-            if test_name and file_name in test_name:
-                should_fix = True
-                logger.info(f"File {file_name} mentioned in test name: {test_name}")
+            # Look for file paths in output
+            for file_path in referenced_files:
+                file_name = os.path.basename(file_path)
+                if file_name in output:
+                    affected_files.add(file_path)
+                    logger.info(f"Found file {file_name} in output: {output}")
+        
+        # Check details for module references
+        if details:
+            # Look for module references in details
+            for module_name, file_path in module_to_file.items():
+                if module_name in details:
+                    affected_files.add(file_path)
+                    logger.info(f"Found module {module_name} in details: {details}")
             
-            # Check output if it exists
-            if output and file_name in output:
-                should_fix = True
-                logger.info(f"File {file_name} mentioned in output: {output}")
-            
-            # Check details if they exist
-            if details and file_name in details:
-                should_fix = True
-                logger.info(f"File {file_name} mentioned in details: {details}")
-            
-            # Check if the file is in the same region as the failure
-            if region and file_name.startswith(region):
-                should_fix = True
-                logger.info(f"File {file_name} is in the same region as failure: {region}")
-            
-            # If any condition is met, add the failure with its context
-            if should_fix:
-                file_failures[file_path].append({
-                    **failure,
-                    'error_context': error_context
-                })
-                logger.info(f"Added failure to {file_name} with context: {error_context}")
+            # Look for file paths in details
+            for file_path in referenced_files:
+                file_name = os.path.basename(file_path)
+                if file_name in details:
+                    affected_files.add(file_path)
+                    logger.info(f"Found file {file_name} in details: {details}")
+        
+        # Check region information
+        if region:
+            # Look for region matches in file paths
+            for file_path in referenced_files:
+                if region in file_path:
+                    affected_files.add(file_path)
+                    logger.info(f"Found region {region} in file path: {file_path}")
+        
+        # If no files were matched, try to infer from the test name
+        if not affected_files and test_name:
+            # Try to extract module/package names from test name
+            test_parts = test_name.split('.')
+            for i in range(len(test_parts)):
+                module_name = '.'.join(test_parts[:i+1])
+                if module_name in module_to_file:
+                    affected_files.add(module_to_file[module_name])
+                    logger.info(f"Inferred module {module_name} from test name: {test_name}")
+        
+        # If still no files were matched, add to all referenced files
+        if not affected_files:
+            logger.warning(f"No specific files matched for failure, adding to all referenced files")
+            affected_files = referenced_files
+        
+        # Add the failure to all affected files
+        for file_path in affected_files:
+            file_failures[file_path].append({
+                **failure,
+                'error_context': error_context
+            })
+            logger.info(f"Added failure to {os.path.basename(file_path)} with context: {error_context}")
     
     # Log summary of file failures
     for file_path, failures in file_failures.items():
@@ -875,52 +942,111 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         GithubException: If GitHub API operations fail
     """
     try:
+        # Start with a clear section marker
         logger.info("=" * 50)
         logger.info("Starting run_autofix_and_pr")
-        logger.info(f"Failure data: {failure_data}")
-        logger.info(f"File path: {file_path}")
-        logger.info(f"Test config path: {test_config_path}")
+        
+        # Log basic information with sanitized data
+        logger.info("Processing request", extra={
+            'file_path': file_path,
+            'test_config_path': test_config_path,
+            'max_retries': max_retries,
+            'create_pr': create_pr,
+            'base_branch': base_branch,
+            'failure_count': len(failure_data)
+        })
         
         # Store the original file path to avoid shadowing
         main_file_path = file_path
         
         # Store the original branch
         original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
-        logger.info(f"Stored original branch: {original_branch}")
+        logger.info("Retrieved original branch", extra={'branch': original_branch})
         
         # Initialize branch_name with a default value
         branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         
         config = get_config()
-        logger.info(f"Starting auto-fix process for {file_path} with {len(failure_data)} failures")
+        logger.info("Starting auto-fix process", extra={
+            'file_path': file_path,
+            'failure_count': len(failure_data)
+        })
         
         # Create a set of failing test names for quick lookup
         failing_test_names = {failure["test_name"] for failure in failure_data}
-        logger.info(f"Tests that were failing: {failing_test_names}")
+        logger.debug("Failing test names", extra={'test_names': list(failing_test_names)})
         
         # Load test configuration
         try:
             with open(test_config_path, 'r') as f:
                 test_config = yaml.safe_load(f)
-                logger.info(f"Loaded test config: {test_config}")
+                logger.info("Loaded test configuration", extra={
+                    'config_path': test_config_path,
+                    'config_name': test_config.get('name', 'Unnamed'),
+                    'test_count': sum(len(result.get('test_cases', [])) 
+                                    for result in test_config.get('regions', {}).values())
+                })
         except Exception as e:
-            logger.error(f"Error loading test config: {str(e)}")
+            logger.error("Failed to load test configuration", extra={
+                'error': str(e),
+                'config_path': test_config_path
+            })
             raise
         
         # Collect all referenced files
         try:
             referenced_files = _collect_referenced_files(file_path)
-            logger.info(f"Found referenced files: {referenced_files}")
+            logger.info("Collected referenced files", extra={
+                'file_count': len(referenced_files),
+                'files': list(referenced_files)
+            })
+            
+            # Log details about each referenced file
+            for ref_file in referenced_files:
+                try:
+                    with open(ref_file, 'r') as f:
+                        content = f.read()
+                        logger.debug("File content details", extra={
+                            'file': ref_file,
+                            'content_length': len(content),
+                            'content_preview': content[:100] if len(content) > 100 else content
+                        })
+                except Exception as e:
+                    logger.error("Failed to read file", extra={
+                        'file': ref_file,
+                        'error': str(e)
+                    })
         except Exception as e:
-            logger.error(f"Error collecting referenced files: {str(e)}")
+            logger.error("Failed to collect referenced files", extra={
+                'error': str(e),
+                'file_path': file_path
+            })
             raise
         
         # Analyze which files need to be fixed based on failures
         try:
             file_failures = _analyze_failure_dependencies(failure_data, referenced_files)
-            logger.info(f"File failures analysis: {file_failures}")
+            logger.info("Analyzed failure dependencies", extra={
+                'file_count': len(file_failures),
+                'files_with_failures': [f for f, fails in file_failures.items() if fails]
+            })
+            
+            # Log detailed failure analysis for each file
+            for file_path, failures in file_failures.items():
+                if failures:
+                    logger.debug("File failure details", extra={
+                        'file': file_path,
+                        'failure_count': len(failures),
+                        'failures': [{
+                            'test_name': f.get('test_name'),
+                            'error_message': f.get('error_message'),
+                            'region': f.get('region')
+                        } for f in failures]
+                    })
         except Exception as e:
-            logger.error(f"Error analyzing failure dependencies: {str(e)}")
+            logger.error("Failed to analyze failure dependencies", extra={
+                'error': str(e)
+            })
             raise
         
         # Load original code for all files
@@ -929,17 +1055,29 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             try:
                 with open(ref_file, 'r') as f:
                     original_codes[ref_file] = f.read()
-                logger.info(f"Loaded original code for {ref_file}")
+                logger.debug("Loaded original code", extra={
+                    'file': ref_file,
+                    'content_length': len(original_codes[ref_file])
+                })
             except Exception as e:
-                logger.error(f"Error loading original code for {ref_file}: {str(e)}")
+                logger.error("Failed to load original code", extra={
+                    'file': ref_file,
+                    'error': str(e)
+                })
                 raise
         
         # Generate PR info with test configuration
         try:
             branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], {}, test_config, original_codes[main_file_path])
-            logger.info(f"Generated PR info: {branch_name}, {pr_title}")
+            logger.info("Generated PR info", extra={
+                'branch_name': branch_name,
+                'pr_title': pr_title,
+                'pr_body_length': len(pr_body)
+            })
         except Exception as e:
-            logger.warning(f"Failed to generate PR info: {str(e)}")
+            logger.warning("Failed to generate PR info", extra={
+                'error': str(e)
+            })
             # Use default values if PR info generation fails
             timestamp = datetime.now().strftime('%Y%m%d')
             branch_name = f"fix-tests-{timestamp}"
@@ -955,7 +1093,10 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         all_test_attempts = []
         
         for attempt in range(max_retries):
-            logger.info(f"Auto-fix attempt {attempt + 1}/{max_retries}")
+            logger.info("Starting auto-fix attempt", extra={
+                'attempt': attempt + 1,
+                'max_retries': max_retries
+            })
             
             # Get the fixed code from Gemini for each file that needs fixing
             genai.configure(api_key=config.get_api_key("google"))
@@ -966,7 +1107,10 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             files_to_fix = {path: failures for path, failures in file_failures.items() if failures}
             
             if files_to_fix:
-                logger.info(f"Requesting code fixes for {len(files_to_fix)} files")
+                logger.info("Requesting code fixes", extra={
+                    'file_count': len(files_to_fix),
+                    'files': list(files_to_fix.keys())
+                })
                 
                 # Analyze dependencies between files
                 file_dependencies = {}
@@ -983,8 +1127,15 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                                     else:
                                         imports.append(node.module.split('.')[0])
                             file_dependencies[path] = imports
+                            logger.debug("File dependencies", extra={
+                                'file': path,
+                                'imports': imports
+                            })
                     except Exception as e:
-                        logger.warning(f"Error analyzing dependencies for {path}: {str(e)}")
+                        logger.warning("Failed to analyze dependencies", extra={
+                            'file': path,
+                            'error': str(e)
+                        })
                         file_dependencies[path] = []
                 
                 # Prepare a comprehensive prompt that includes all files and their relationships
@@ -1002,73 +1153,6 @@ Original code for each file:
 Test failures:
 {chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failures in files_to_fix.values() for failure in failures)}
 
-AI Agent Best Practices Requirements:
-1. Prompt Engineering:
-   - Ensure prompts are clear, specific, and well-structured
-   - Include proper context and constraints
-   - Add validation criteria in prompts
-   - Maintain consistent prompt formatting
-   - Include error handling instructions in prompts
-
-2. Response Handling:
-   - Implement robust response parsing
-   - Add validation for response format and content
-   - Include fallback mechanisms for invalid responses
-   - Handle edge cases in responses
-   - Maintain proper error messages
-
-3. Context Management:
-   - Preserve conversation history appropriately
-   - Handle context window limitations
-   - Implement proper context pruning
-   - Maintain relevant context across interactions
-   - Handle context switching gracefully
-
-4. Error Handling:
-   - Implement comprehensive error handling
-   - Add proper logging for debugging
-   - Include retry mechanisms for transient failures
-   - Handle API rate limits and timeouts
-   - Provide meaningful error messages
-
-5. Performance Optimization:
-   - Optimize API calls and external service interactions
-   - Implement proper caching where appropriate
-   - Handle large inputs efficiently
-   - Manage resource usage effectively
-   - Implement proper cleanup
-
-6. Security:
-   - Never expose API keys or sensitive data
-   - Validate and sanitize all inputs
-   - Implement proper access controls
-   - Handle sensitive data appropriately
-   - Follow security best practices
-
-7. Code Structure:
-   - Maintain clear separation of concerns
-   - Keep functions focused and single-purpose
-   - Use clear and descriptive variable names
-   - Add proper type hints and documentation
-   - Follow consistent code style
-
-8. Testing Considerations:
-   - Make code testable by avoiding hard-coded values
-   - Use dependency injection where appropriate
-   - Add proper mocking points for external services
-   - Ensure error cases are testable
-   - Make validation logic explicit and testable
-
-General Requirements:
-1. Fix all test failures while maintaining the existing file structure
-2. Ensure fixes are consistent across all files
-3. Maintain all imports and dependencies
-4. Keep the same class and function signatures
-5. Only modify the necessary parts of the code
-6. Ensure all imports are valid and resolve correctly
-7. Maintain proper error handling and logging
-8. Keep code style consistent with the original
-
 Return the fixed code for each file in the following format:
 
 === file_path ===
@@ -1079,9 +1163,16 @@ fixed code here
 
 Do not include any explanations or markdown formatting."""
                 
+                logger.debug("Generated prompt", extra={
+                    'prompt_length': len(prompt)
+                })
+                
                 # Get fixes for all files at once
                 response = model.generate_content(prompt)
                 fixed_content = response.text.strip()
+                logger.debug("Received model response", extra={
+                    'response_length': len(fixed_content)
+                })
                 
                 # Parse the response to extract fixes for each file
                 current_file = None
@@ -1093,6 +1184,10 @@ Do not include any explanations or markdown formatting."""
                             fixed_code = '\n'.join(current_code)
                             # Validate and improve the generated code
                             fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                            logger.debug("Generated fixed code", extra={
+                                'file': current_file,
+                                'content_length': len(fixed_code)
+                            })
                             
                             # Additional validation steps
                             try:
@@ -1104,11 +1199,17 @@ Do not include any explanations or markdown formatting."""
                                             for name in node.names:
                                                 module_name = name.name.split('.')[0]
                                                 if module_name not in file_dependencies.get(current_file, []):
-                                                    logger.warning(f"New import detected in {current_file}: {module_name}")
+                                                    logger.warning("New import detected", extra={
+                                                        'file': current_file,
+                                                        'import': module_name
+                                                    })
                                         else:
                                             module_name = node.module.split('.')[0]
                                             if module_name not in file_dependencies.get(current_file, []):
-                                                logger.warning(f"New import detected in {current_file}: {module_name}")
+                                                logger.warning("New import detected", extra={
+                                                    'file': current_file,
+                                                    'import': module_name
+                                                })
                                 
                                 # Check if all functions and classes are preserved
                                 original_tree = ast.parse(original_codes[current_file])
@@ -1118,16 +1219,25 @@ Do not include any explanations or markdown formatting."""
                                              if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
                                 
                                 if original_names != fixed_names:
-                                    logger.warning(f"Function/class mismatch in {current_file}")
-                                    logger.warning(f"Missing: {original_names - fixed_names}")
-                                    logger.warning(f"Added: {fixed_names - original_names}")
+                                    logger.warning("Function/class mismatch", extra={
+                                        'file': current_file,
+                                        'missing': list(original_names - fixed_names),
+                                        'added': list(fixed_names - original_names)
+                                    })
                                 
                                 fixed_codes[current_file] = fixed_code
-                                logger.info(f"Validated and improved generated code for {current_file}")
+                                logger.info("Validated and improved code", extra={
+                                    'file': current_file
+                                })
                             except Exception as e:
-                                logger.error(f"Error validating code for {current_file}: {str(e)}")
+                                logger.error("Failed to validate code", extra={
+                                    'file': current_file,
+                                    'error': str(e)
+                                })
                                 # Try to fix the code again individually
-                                logger.info(f"Attempting individual fix for {current_file}")
+                                logger.info("Attempting individual fix", extra={
+                                    'file': current_file
+                                })
                                 response = model.generate_content(f"""Fix the following code file:
 
 === {current_file} ===
@@ -1140,7 +1250,9 @@ Return only the fixed code without any explanations or markdown formatting.""")
                                 fixed_code = response.text.strip()
                                 fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
                                 fixed_codes[current_file] = fixed_code
-                                logger.info(f"Validated and improved generated code for {current_file}")
+                                logger.info("Successfully fixed code individually", extra={
+                                    'file': current_file
+                                })
                                 
                         current_file = line[4:-4].strip()
                         current_code = []
@@ -1152,15 +1264,21 @@ Return only the fixed code without any explanations or markdown formatting.""")
                     fixed_code = '\n'.join(current_code)
                     fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
                     fixed_codes[current_file] = fixed_code
-                    logger.info(f"Validated and improved generated code for {current_file}")
+                    logger.info("Processed last file", extra={
+                        'file': current_file
+                    })
                 
                 # Verify that all files were fixed
                 missing_files = set(files_to_fix.keys()) - set(fixed_codes.keys())
                 if missing_files:
-                    logger.warning(f"Some files were not fixed: {missing_files}")
+                    logger.warning("Some files were not fixed", extra={
+                        'missing_files': list(missing_files)
+                    })
                     # Try to fix remaining files individually
                     for file_path in missing_files:
-                        logger.info(f"Requesting individual fix for {file_path}")
+                        logger.info("Requesting individual fix", extra={
+                            'file': file_path
+                        })
                         response = model.generate_content(f"""Fix the following code file:
 
 === {file_path} ===
@@ -1173,14 +1291,21 @@ Return only the fixed code without any explanations or markdown formatting.""")
                         fixed_code = response.text.strip()
                         fixed_code = _validate_and_improve_code(fixed_code, original_codes[file_path])
                         fixed_codes[file_path] = fixed_code
-                        logger.info(f"Validated and improved generated code for {file_path}")
+                        logger.info("Successfully fixed file individually", extra={
+                            'file': file_path
+                        })
             
             # Write all fixed code to disk before running tests
-            logger.info("Writing best fixed code back to disk")
+            logger.info("Writing fixed code to disk", extra={
+                'file_count': len(fixed_codes)
+            })
             for current_file_path, code in fixed_codes.items():
                 with open(current_file_path, 'w') as f:
                     f.write(code)
-                logger.info(f"Updated file: {current_file_path}")
+                logger.debug("Updated file", extra={
+                    'file': current_file_path,
+                    'content_length': len(code)
+                })
             
             # Reload all affected modules
             _reload_modules(set(fixed_codes.keys()))
@@ -1193,8 +1318,9 @@ Return only the fixed code without any explanations or markdown formatting.""")
             
             # Extract file path from the root of the configuration
             test_file_path = test_config.get('file_path')
-            logger.info(f"Test file path from config: {test_file_path}")
-            logger.info(f"Test config content: {test_config}")
+            logger.info("Retrieved test file path", extra={
+                'test_file_path': test_file_path
+            })
             
             if not test_file_path:
                 error_msg = "No file_path found in test configuration"
@@ -1204,18 +1330,24 @@ Return only the fixed code without any explanations or markdown formatting.""")
             # Resolve the test file path relative to the YAML config file's directory
             config_dir = os.path.dirname(os.path.abspath(test_config_path))
             resolved_test_file_path = os.path.normpath(os.path.join(config_dir, test_file_path))
-            logger.info(f"Resolved test file path: {resolved_test_file_path}")
-            logger.info(f"Config directory: {config_dir}")
+            logger.info("Resolved test file path", extra={
+                'resolved_path': resolved_test_file_path,
+                'config_dir': config_dir
+            })
             
-            logger.info(f"Running tests for {resolved_test_file_path}")
+            logger.info("Running tests", extra={
+                'file_path': resolved_test_file_path
+            })
             try:
                 test_results = test_runner.run_tests(Path(resolved_test_file_path))
-                logger.info(f"Raw test results type: {type(test_results)}")
-                logger.info(f"Raw test results content: {test_results}")
+                logger.info("Test execution completed", extra={
+                    'result_type': type(test_results).__name__
+                })
             except Exception as e:
-                logger.error(f"Error during test execution: {str(e)}")
-                logger.error(f"Error type: {type(e)}")
-                logger.error(f"Error args: {e.args}")
+                logger.error("Test execution failed", extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__
+                })
                 raise
             
             # Validate test results
@@ -1229,8 +1361,6 @@ Return only the fixed code without any explanations or markdown formatting.""")
                 logger.error(error_msg)
                 raise ValueError(error_msg)
             
-            logger.info(f"Test results: {test_results}")
-            
             # Store this attempt's results
             all_test_attempts.append({
                 'attempt': attempt + 1,
@@ -1241,66 +1371,90 @@ Return only the fixed code without any explanations or markdown formatting.""")
             # Check if test results indicate an error
             if isinstance(test_results, dict) and test_results.get('overall_status') == 'error':
                 error_msg = test_results.get('error', 'Unknown error')
-                logger.error(f"Test execution failed: {error_msg}")
+                logger.error("Test execution failed", extra={
+                    'error': error_msg
+                })
                 raise RuntimeError(f"Test execution failed: {error_msg}")
             
             # Track which previously failing tests are now passing
             fixed_tests = []
-            logger.info(f"Processing test results for {len(test_results)} regions")
+            logger.info("Processing test results", extra={
+                'region_count': len(test_results)
+            })
             for region, result in test_results.items():
-                logger.info(f"Processing region: {region}")
-                logger.info(f"Region result type: {type(result)}")
-                logger.info(f"Region result content: {result}")
-                
                 if isinstance(result, str) or region in ('_status', 'overall_status'):
-                    logger.info(f"Skipping region {region} as it's a string or special status")
+                    logger.debug("Skipping special region", extra={
+                        'region': region
+                    })
                     continue
                     
                 if not isinstance(result, dict):
-                    logger.warning(f"Skipping invalid result format for region {region}: {result}")
+                    logger.warning("Invalid result format", extra={
+                        'region': region,
+                        'result_type': type(result).__name__
+                    })
                     continue
                     
                 test_cases = result.get('test_cases', [])
-                logger.info(f"Test cases for region {region}: {test_cases}")
+                logger.debug("Processing test cases", extra={
+                    'region': region,
+                    'test_case_count': len(test_cases)
+                })
                 
                 if not isinstance(test_cases, list):
-                    logger.warning(f"Skipping invalid test_cases format for region {region}: {test_cases}")
+                    logger.warning("Invalid test cases format", extra={
+                        'region': region,
+                        'test_cases_type': type(test_cases).__name__
+                    })
                     continue
                     
                 for test_case in test_cases:
-                    logger.info(f"Processing test case: {test_case}")
                     if not isinstance(test_case, dict):
-                        logger.warning(f"Skipping invalid test case format: {test_case}")
+                        logger.warning("Invalid test case format", extra={
+                            'region': region,
+                            'test_case_type': type(test_case).__name__
+                        })
                         continue
                         
                     test_name = test_case.get('name')
-                    logger.info(f"Test name: {test_name}")
-                    logger.info(f"Test status: {test_case.get('status')}")
-                    logger.info(f"Failing test names: {failing_test_names}")
+                    test_status = test_case.get('status')
                     
-                    if test_name in failing_test_names and test_case.get('status') == 'passed':
-                        logger.info(f"Found fixed test: {test_name}")
+                    if test_name in failing_test_names and test_status == 'passed':
+                        logger.info("Found fixed test", extra={
+                            'test_name': test_name,
+                            'region': region
+                        })
                         fixed_tests.append({
                             'region': region,
                             'test_name': test_name
                         })
             
-            logger.info(f"Total fixed tests: {len(fixed_tests)}")
-            logger.info(f"Fixed tests details: {fixed_tests}")
+            logger.info("Test processing completed", extra={
+                'fixed_test_count': len(fixed_tests)
+            })
             
             # Update best attempt if this one fixed more tests
             if len(fixed_tests) > len(best_fixed_tests):
                 best_fixed_tests = fixed_tests
                 best_fixed_codes = fixed_codes
+                logger.info("Updated best attempt", extra={
+                    'fixed_test_count': len(fixed_tests)
+                })
             
             # If we fixed all tests, we can stop early
             if len(fixed_tests) == len(failing_test_names):
-                logger.info("All tests fixed! Stopping retries.")
+                logger.info("All tests fixed", extra={
+                    'fixed_test_count': len(fixed_tests)
+                })
                 break
             
             # If this is not the last attempt, continue to next iteration
             if attempt < max_retries - 1:
-                logger.info(f"Fixed {len(fixed_tests)} tests in attempt {attempt + 1}, trying again...")
+                logger.info("Continuing to next attempt", extra={
+                    'current_attempt': attempt + 1,
+                    'max_retries': max_retries,
+                    'fixed_test_count': len(fixed_tests)
+                })
                 continue
         
         # Use the best attempt's results
@@ -1308,7 +1462,7 @@ Return only the fixed code without any explanations or markdown formatting.""")
         fixed_codes = best_fixed_codes
         
         if not fixed_tests:
-            logger.info("No previously failing tests were fixed after all attempts. Reverting changes.")
+            logger.info("No tests were fixed, reverting changes")
             subprocess.run(["git", "checkout", original_branch], check=True)
             # Only try to delete the branch if we created it
             try:
@@ -1322,41 +1476,62 @@ Return only the fixed code without any explanations or markdown formatting.""")
                 pass
             return
         
-        logger.info(f"Fixed {len(fixed_tests)} previously failing tests")
+        logger.info("Tests fixed successfully", extra={
+            'fixed_test_count': len(fixed_tests)
+        })
         
         # Update PR info with fixed tests
         branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results, test_config, original_codes[main_file_path])
-        logger.info(f"Updated branch name: {branch_name}")
+        logger.info("Updated PR info", extra={
+            'branch_name': branch_name,
+            'pr_title': pr_title
+        })
         
         # Create a new branch
-        logger.info(f"Creating new branch: {branch_name}")
+        logger.info("Creating new branch", extra={
+            'branch_name': branch_name
+        })
         try:
             subprocess.run(["git", "checkout", "-b", branch_name], check=True)
         except subprocess.CalledProcessError:
             # If branch already exists, add a unique suffix
-            logger.info(f"Branch {branch_name} already exists, adding unique suffix")
+            logger.info("Branch already exists, adding unique suffix", extra={
+                'branch_name': branch_name
+            })
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             random_suffix = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=4))
             unique_branch_name = f"{branch_name}-{timestamp}-{random_suffix}"
-            logger.info(f"Trying with new branch name: {unique_branch_name}")
+            logger.info("Trying with new branch name", extra={
+                'new_branch_name': unique_branch_name
+            })
             subprocess.run(["git", "checkout", "-b", unique_branch_name], check=True)
             branch_name = unique_branch_name
         
         # Write the best fixed code back to disk before committing
-        logger.info("Writing best fixed code back to disk")
+        logger.info("Writing fixed code to disk", extra={
+            'file_count': len(fixed_codes)
+        })
         for current_file_path, code in fixed_codes.items():
             with open(current_file_path, 'w') as f:
                 f.write(code)
+            logger.debug("Updated file", extra={
+                'file': current_file_path,
+                'content_length': len(code)
+            })
         
         # Commit changes with a proper commit message
         subprocess.run(["git", "add", *fixed_codes.keys()], check=True)
         commit_message = f"Fix: {pr_title}\n\n{pr_body}"
         subprocess.run(["git", "commit", "-m", commit_message], check=True)
-        logger.info("Committed changes")
+        logger.info("Committed changes", extra={
+            'commit_message': commit_message[:100] + "..." if len(commit_message) > 100 else commit_message
+        })
         
         # Push branch
         subprocess.run(["git", "push", "-u", "origin", branch_name], check=True)
-        logger.info(f"Pushed branch: {branch_name}")
+        logger.info("Pushed branch", extra={
+            'branch_name': branch_name
+        })
         
         # Create PR using GitHub API
         if create_pr:
@@ -1375,26 +1550,26 @@ Return only the fixed code without any explanations or markdown formatting.""")
                 repo_name = repo_url.split('/')[-1]
                 repo_owner = repo_url.split('/')[-2]
                 repo = g.get_repo(f"{repo_owner}/{repo_name}")
-                logger.info(f"Successfully connected to repository: {repo_owner}/{repo_name}")
+                logger.info("Connected to repository", extra={
+                    'repo': f"{repo_owner}/{repo_name}"
+                })
             except subprocess.CalledProcessError:
                 raise ValueError("Could not determine repository information. Please ensure you're in a git repository with a remote origin.")
             except GithubException as e:
                 raise ValueError(f"Error accessing GitHub repository: {str(e)}")
             
             # Create PR
-            logger.info("Preparing to create PR with test results")
-            logger.info(f"Test results type: {type(test_results)}")
-            logger.info(f"Test results content: {test_results}")
-            logger.info(f"Fixed tests: {fixed_tests}")
-            logger.info(f"Test config: {test_config}")
-            
+            logger.info("Preparing to create PR")
             try:
                 enhanced_pr_body = _enhance_pr_body(failure_data, fixed_tests, test_results, test_config, all_test_attempts)
-                logger.info("Successfully enhanced PR body")
+                logger.info("Enhanced PR body", extra={
+                    'body_length': len(enhanced_pr_body)
+                })
             except Exception as e:
-                logger.error(f"Error enhancing PR body: {str(e)}")
-                logger.error(f"Error type: {type(e)}")
-                logger.error(f"Error args: {e.args}")
+                logger.error("Failed to enhance PR body", extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__
+                })
                 raise
             
             try:
@@ -1402,7 +1577,9 @@ Return only the fixed code without any explanations or markdown formatting.""")
                 if not pr_title or not pr_title.strip():
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     pr_title = f"Fix: Resolved test failures ({timestamp})"
-                    logger.warning(f"Empty PR title detected, using default title: {pr_title}")
+                    logger.warning("Empty PR title detected", extra={
+                        'new_title': pr_title
+                    })
                 
                 pr = repo.create_pull(
                     title=pr_title,
@@ -1410,20 +1587,29 @@ Return only the fixed code without any explanations or markdown formatting.""")
                     head=branch_name,
                     base=base_branch
                 )
-                logger.info(f"Created Pull Request: {pr.html_url}")
+                logger.info("Created Pull Request", extra={
+                    'pr_url': pr.html_url
+                })
                 print(f"Pull Request created: {pr.html_url}")
             except Exception as e:
-                logger.error(f"Error creating PR: {str(e)}")
-                logger.error(f"Error type: {type(e)}")
-                logger.error(f"Error args: {e.args}")
+                logger.error("Failed to create PR", extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__
+                })
                 raise
         
         # Return to the original branch
-        logger.info(f"Returning to original branch: {original_branch}")
+        logger.info("Returning to original branch", extra={
+            'branch': original_branch
+        })
         subprocess.run(["git", "checkout", original_branch], check=True)
         
     except subprocess.CalledProcessError as e:
-        logger.error(f"Git command failed: {e}")
+        logger.error("Git command failed", extra={
+            'error': str(e),
+            'command': e.cmd,
+            'returncode': e.returncode
+        })
         # Try to return to original branch even if there was an error
         try:
             subprocess.run(["git", "checkout", original_branch], check=True)
@@ -1431,7 +1617,11 @@ Return only the fixed code without any explanations or markdown formatting.""")
             pass
         raise
     except GithubException as e:
-        logger.error(f"GitHub API error: {e}")
+        logger.error("GitHub API error", extra={
+            'error': str(e),
+            'status': e.status,
+            'data': e.data
+        })
         # Try to return to original branch even if there was an error
         try:
             subprocess.run(["git", "checkout", original_branch], check=True)
@@ -1439,9 +1629,11 @@ Return only the fixed code without any explanations or markdown formatting.""")
             pass
         raise
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        logger.error(f"Error type: {type(e)}")
-        logger.error(f"Error args: {e.args}")
+        logger.error("Unexpected error", extra={
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'error_args': e.args
+        })
         # Try to return to original branch even if there was an error
         try:
             subprocess.run(["git", "checkout", original_branch], check=True)
