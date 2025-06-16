@@ -676,20 +676,25 @@ All fixed tests have been verified to pass in the following environments:
 
     return pr_body
 
-def _collect_referenced_files(file_path: str, processed_files: set = None, base_dir: str = None) -> set:
+def _collect_referenced_files(file_path: str, processed_files: set = None, base_dir: str = None, failure_data: List[Dict] = None, llm_checked_files: set = None) -> set:
     """
     Recursively collect all Python files referenced by imports in the given file.
+    Also uses heuristics and LLM to check if files might be relevant for fixes even if not directly imported.
     
     Args:
         file_path: Path to the main file
         processed_files: Set of already processed files to avoid cycles
         base_dir: Base directory for resolving relative imports
+        failure_data: List of test failures to check relevance against
+        llm_checked_files: Set of files that have already been checked by LLM
         
     Returns:
         set: Set of all referenced file paths
     """
     if processed_files is None:
         processed_files = set()
+    if llm_checked_files is None:
+        llm_checked_files = set()
     
     if file_path in processed_files:
         return processed_files
@@ -708,7 +713,15 @@ def _collect_referenced_files(file_path: str, processed_files: set = None, base_
         if base_dir is None:
             base_dir = file_dir
         
+        # First, collect all Python files in the same directory
+        dir_python_files = set()
+        for other_file in os.listdir(file_dir):
+            if other_file.endswith('.py') and other_file != os.path.basename(file_path):
+                other_file_path = os.path.join(file_dir, other_file)
+                dir_python_files.add(other_file_path)
+        
         # Find all imports
+        imported_files = set()
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 if isinstance(node, ast.Import):
@@ -720,7 +733,7 @@ def _collect_referenced_files(file_path: str, processed_files: set = None, base_
                             if spec is not None and spec.origin is not None:
                                 # Only process Python files
                                 if spec.origin.endswith('.py'):
-                                    _collect_referenced_files(spec.origin, processed_files, base_dir)
+                                    imported_files.add(spec.origin)
                         except (ImportError, ValueError) as e:
                             logger.warning(f"Failed to find module {module_name}: {str(e)}")
                 else:  # ImportFrom
@@ -740,9 +753,97 @@ def _collect_referenced_files(file_path: str, processed_files: set = None, base_
                             if spec is not None and spec.origin is not None:
                                 # Only process Python files
                                 if spec.origin.endswith('.py'):
-                                    _collect_referenced_files(spec.origin, processed_files, base_dir)
+                                    imported_files.add(spec.origin)
                         except (ImportError, ValueError) as e:
                             logger.warning(f"Failed to find module {module_name}: {str(e)}")
+        
+        # If we have failure data and haven't checked this file with LLM yet
+        if failure_data and file_path not in llm_checked_files:
+            # First, use heuristics to check if the file might be relevant
+            should_check_with_llm = False
+            
+            # Check if file contains any keywords from test failures
+            failure_keywords = set()
+            for failure in failure_data:
+                # Extract keywords from test name and error message
+                test_name = failure.get('test_name', '').lower()
+                error_msg = failure.get('error_message', '').lower()
+                failure_keywords.update(test_name.split())
+                failure_keywords.update(error_msg.split())
+            
+            # Remove common words and short terms
+            failure_keywords = {k for k in failure_keywords if len(k) > 3 and k not in {
+                'test', 'error', 'failed', 'failure', 'assert', 'check', 'verify', 'validate',
+                'should', 'must', 'need', 'have', 'with', 'from', 'that', 'this', 'when'
+            }}
+            
+            # Check for relevant code patterns
+            relevant_patterns = {
+                'prompt': ['prompt', 'instruction', 'guideline', 'template'],
+                'config': ['config', 'setting', 'parameter', 'option'],
+                'ai': ['model', 'llm', 'gpt', 'ai', 'agent', 'assistant'],
+                'test': ['test', 'assert', 'verify', 'check'],
+                'error': ['error', 'exception', 'fail', 'invalid']
+            }
+            
+            content_lower = content.lower()
+            
+            # Check if file contains any failure keywords
+            if any(keyword in content_lower for keyword in failure_keywords):
+                should_check_with_llm = True
+                logger.info(f"File contains failure keywords: {file_path}")
+            
+            # Check if file contains relevant patterns
+            if not should_check_with_llm:
+                for pattern_type, patterns in relevant_patterns.items():
+                    if any(pattern in content_lower for pattern in patterns):
+                        # Check if any failure is related to this pattern type
+                        if any(pattern_type in failure.get('error_message', '').lower() 
+                              for failure in failure_data):
+                            should_check_with_llm = True
+                            logger.info(f"File contains relevant {pattern_type} patterns: {file_path}")
+                            break
+            
+            # Only call LLM if heuristics suggest the file might be relevant
+            if should_check_with_llm:
+                try:
+                    config = get_config()
+                    genai.configure(api_key=config.get_api_key("google"))
+                    model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+                    
+                    # Prepare prompt for LLM
+                    prompt = f"""You are a senior software engineer specializing in AI agent development. Your task is to analyze if a Python file might be relevant for fixing test failures, even if it's not directly imported.
+
+File Content:
+{content}
+
+Test Failures:
+{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failure in failure_data)}
+
+Please analyze if this file might be relevant for fixing any of the test failures. Consider:
+1. Does it contain prompts or configurations that might need improvement?
+2. Does it have functions that might be related to the failing tests?
+3. Does it contain code that might be indirectly related to the failures?
+4. Does it have any AI agent-specific code that might need enhancement?
+
+Return only "YES" if the file is relevant, or "NO" if it's not relevant. Be conservative - if there's any chance the file might be relevant, return "YES"."""
+                    
+                    response = model.generate_content(prompt)
+                    is_relevant = response.text.strip().upper() == "YES"
+                    llm_checked_files.add(file_path)
+                    
+                    if is_relevant:
+                        logger.info(f"LLM determined file is relevant for fixes: {file_path}")
+                        # Add all Python files in the same directory to imported_files
+                        imported_files.update(dir_python_files)
+                    
+                except Exception as e:
+                    logger.warning(f"Error checking file relevance with LLM: {str(e)}")
+        
+        # Process all collected files
+        for imported_file in imported_files:
+            if imported_file not in processed_files:
+                _collect_referenced_files(imported_file, processed_files, base_dir, failure_data, llm_checked_files)
     
     except Exception as e:
         logger.warning(f"Error processing imports in {file_path}: {str(e)}")
@@ -1069,7 +1170,7 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         
         # Collect all referenced files
         try:
-            referenced_files = _collect_referenced_files(main_file_path)
+            referenced_files = _collect_referenced_files(main_file_path, failure_data=failure_data)
             logger.info("Collected referenced files", extra={
                 'file_count': len(referenced_files),
                 'files': list(referenced_files)
