@@ -768,14 +768,76 @@ def _analyze_failure_dependencies(failure_data: List[Dict], referenced_files: se
     file_failures = {file_path: [] for file_path in referenced_files}
     
     for failure in failure_data:
+        # Extract all relevant information from the failure
         error_message = failure.get('error_message', '')
         test_name = failure.get('test_name', '')
+        output = failure.get('output', '')
+        region = failure.get('region', '')
+        details = failure.get('details', '')
         
-        # Analyze error message to determine affected files
+        # Create a comprehensive error context
+        error_context = {
+            'error_message': error_message,
+            'test_name': test_name,
+            'output': output,
+            'region': region,
+            'details': details,
+            'raw_failure': failure  # Keep the original failure data for reference
+        }
+        
+        # Skip if we have no useful information at all
+        if not any([error_message, test_name, output, details]):
+            logger.warning(f"Skipping failure with no useful information: {failure}")
+            continue
+            
+        # Analyze error message and context to determine affected files
         for file_path in referenced_files:
             file_name = os.path.basename(file_path)
-            if file_name in error_message or file_name in test_name:
-                file_failures[file_path].append(failure)
+            
+            # Check various conditions that might indicate this file needs fixing
+            should_fix = False
+            
+            # Check error message if it exists
+            if error_message and file_name in error_message:
+                should_fix = True
+                logger.info(f"File {file_name} mentioned in error message: {error_message}")
+            
+            # Check test name if it exists
+            if test_name and file_name in test_name:
+                should_fix = True
+                logger.info(f"File {file_name} mentioned in test name: {test_name}")
+            
+            # Check output if it exists
+            if output and file_name in output:
+                should_fix = True
+                logger.info(f"File {file_name} mentioned in output: {output}")
+            
+            # Check details if they exist
+            if details and file_name in details:
+                should_fix = True
+                logger.info(f"File {file_name} mentioned in details: {details}")
+            
+            # Check if the file is in the same region as the failure
+            if region and file_name.startswith(region):
+                should_fix = True
+                logger.info(f"File {file_name} is in the same region as failure: {region}")
+            
+            # If any condition is met, add the failure with its context
+            if should_fix:
+                file_failures[file_path].append({
+                    **failure,
+                    'error_context': error_context
+                })
+                logger.info(f"Added failure to {file_name} with context: {error_context}")
+    
+    # Log summary of file failures
+    for file_path, failures in file_failures.items():
+        if failures:
+            logger.info(f"File {os.path.basename(file_path)} has {len(failures)} failures:")
+            for failure in failures:
+                logger.info(f"  - Test: {failure.get('test_name')}")
+                logger.info(f"    Error: {failure.get('error_message')}")
+                logger.info(f"    Region: {failure.get('region')}")
     
     return file_failures
 
