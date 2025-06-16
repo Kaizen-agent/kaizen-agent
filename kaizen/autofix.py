@@ -1107,6 +1107,9 @@ Return only the fixed code without any explanations or markdown formatting.""")
             
             # Extract file path from the root of the configuration
             test_file_path = test_config.get('file_path')
+            logger.info(f"Test file path from config: {test_file_path}")
+            logger.info(f"Test config content: {test_config}")
+            
             if not test_file_path:
                 error_msg = "No file_path found in test configuration"
                 logger.error(error_msg)
@@ -1115,9 +1118,19 @@ Return only the fixed code without any explanations or markdown formatting.""")
             # Resolve the test file path relative to the YAML config file's directory
             config_dir = os.path.dirname(os.path.abspath(test_config_path))
             resolved_test_file_path = os.path.normpath(os.path.join(config_dir, test_file_path))
+            logger.info(f"Resolved test file path: {resolved_test_file_path}")
+            logger.info(f"Config directory: {config_dir}")
             
             logger.info(f"Running tests for {resolved_test_file_path}")
-            test_results = test_runner.run_tests(Path(resolved_test_file_path))
+            try:
+                test_results = test_runner.run_tests(Path(resolved_test_file_path))
+                logger.info(f"Raw test results type: {type(test_results)}")
+                logger.info(f"Raw test results content: {test_results}")
+            except Exception as e:
+                logger.error(f"Error during test execution: {str(e)}")
+                logger.error(f"Error type: {type(e)}")
+                logger.error(f"Error args: {e.args}")
+                raise
             
             # Validate test results
             if test_results is None:
@@ -1147,26 +1160,47 @@ Return only the fixed code without any explanations or markdown formatting.""")
             
             # Track which previously failing tests are now passing
             fixed_tests = []
+            logger.info(f"Processing test results for {len(test_results)} regions")
             for region, result in test_results.items():
+                logger.info(f"Processing region: {region}")
+                logger.info(f"Region result type: {type(result)}")
+                logger.info(f"Region result content: {result}")
+                
                 if isinstance(result, str) or region in ('_status', 'overall_status'):
+                    logger.info(f"Skipping region {region} as it's a string or special status")
                     continue
+                    
                 if not isinstance(result, dict):
                     logger.warning(f"Skipping invalid result format for region {region}: {result}")
                     continue
+                    
                 test_cases = result.get('test_cases', [])
+                logger.info(f"Test cases for region {region}: {test_cases}")
+                
                 if not isinstance(test_cases, list):
                     logger.warning(f"Skipping invalid test_cases format for region {region}: {test_cases}")
                     continue
+                    
                 for test_case in test_cases:
+                    logger.info(f"Processing test case: {test_case}")
                     if not isinstance(test_case, dict):
                         logger.warning(f"Skipping invalid test case format: {test_case}")
                         continue
+                        
                     test_name = test_case.get('name')
+                    logger.info(f"Test name: {test_name}")
+                    logger.info(f"Test status: {test_case.get('status')}")
+                    logger.info(f"Failing test names: {failing_test_names}")
+                    
                     if test_name in failing_test_names and test_case.get('status') == 'passed':
+                        logger.info(f"Found fixed test: {test_name}")
                         fixed_tests.append({
                             'region': region,
                             'test_name': test_name
                         })
+            
+            logger.info(f"Total fixed tests: {len(fixed_tests)}")
+            logger.info(f"Fixed tests details: {fixed_tests}")
             
             # Update best attempt if this one fixed more tests
             if len(fixed_tests) > len(best_fixed_tests):
