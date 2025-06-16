@@ -16,6 +16,7 @@ import types
 from pathlib import Path
 import io
 from contextlib import redirect_stdout
+import ast
 
 class AgentRunner(ABC):
     """Base class for all agent runners."""
@@ -426,13 +427,14 @@ class DynamicRegionRunner(AgentRunner):
                 sys.path.insert(0, file_dir)
 
             try:
-                # Handle imports first
+                # Parse imports using AST
+                tree = ast.parse(code)
                 import_lines = []
-                for line in code.split('\n'):
-                    if line.startswith('import ') or line.startswith('from '):
-                        import_lines.append(line)
-                    elif line.strip() and not line.startswith('#'):
-                        break
+                
+                # Extract all import statements
+                for node in ast.walk(tree):
+                    if isinstance(node, (ast.Import, ast.ImportFrom)):
+                        import_lines.append(ast.unparse(node))
                 
                 if import_lines:
                     import_block = '\n'.join(import_lines)

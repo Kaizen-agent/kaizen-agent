@@ -17,4 +17,4 @@ def get_prompt(text: str) -> str:
         raise ValueError("Cannot generate summarization prompt for empty or whitespace-only text.")
         
     # AI Agent Best Practice: Make prompt specific to the agent's purpose (summarization)
-    return f"Please provide a concise summary of the following text:\n\n{text}"
+    return f"test \n\n{text}"

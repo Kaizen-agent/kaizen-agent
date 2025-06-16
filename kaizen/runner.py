@@ -11,6 +11,7 @@ import json
 import datetime
 import types
 import importlib
+import inspect
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Type, TypeVar, Callable, Sequence, Mapping, Set, FrozenSet, Tuple
@@ -204,6 +205,9 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         if not os.path.exists(code_file):
             return f"Error: File not found at {code_file} (resolved from {file_path})"
 
+        # Initialize parent_dir to None
+        parent_dir = None
+
         # Add the file's directory and parent directories to Python path
         file_dir = os.path.dirname(os.path.abspath(code_file))
         parent_dir = os.path.dirname(file_dir)
@@ -244,6 +248,9 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         spec = importlib.util.spec_from_file_location(f"{package_name}.{module_name}", code_file)
         if spec is None:
             return f"Error: Could not create module spec for {code_file}"
+            
+        if spec.loader is None:
+            return f"Error: No loader found for module {package_name}.{module_name} at {code_file}"
             
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
@@ -301,7 +308,7 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         return f"Error: {str(e)}"
     finally:
         # Clean up: remove the added path
-        if parent_dir in sys.path:
+        if parent_dir is not None and parent_dir in sys.path:
             sys.path.remove(parent_dir)
             console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
 
@@ -703,7 +710,9 @@ class TestRunner:
                                 input_text = step.get('input', {}).get('input', '')
                                 console.print("[blue]Debug: Running with input[/blue]")
                                 
-                                if isinstance(cls.run, staticmethod):
+                                # Get the run method using inspect.getattr_static to avoid descriptor logic
+                                run_method = inspect.getattr_static(cls, 'run')
+                                if isinstance(run_method, staticmethod):
                                     output = str(cls.run(input_text))
                                 else:
                                     instance = cls()
@@ -880,7 +889,7 @@ class TestRunner:
                 return results
             finally:
                 # Clean up: remove the added path
-                if parent_dir in sys.path:
+                if parent_dir is not None and parent_dir in sys.path:
                     sys.path.remove(parent_dir)
                     console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
         except Exception as e:
