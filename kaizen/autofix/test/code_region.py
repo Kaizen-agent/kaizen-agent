@@ -5,11 +5,14 @@ import ast
 import logging
 import os
 import sys
+import importlib
+import importlib.util
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Set, FrozenSet
+from collections import defaultdict
 
 # Third-party imports
 # (none in this file)
@@ -25,6 +28,14 @@ class RegionType(Enum):
     FUNCTION = 'function'
     MODULE = 'module'
 
+@dataclass(frozen=True)
+class ModuleInfo:
+    """Information about a Python module."""
+    name: str
+    path: Path
+    is_package: bool
+    is_third_party: bool
+
 @dataclass
 class RegionInfo:
     """Information about a code region."""
@@ -34,13 +45,178 @@ class RegionInfo:
     start_line: int
     end_line: int
     imports: List[str]
+    dependencies: FrozenSet[ModuleInfo]  # Immutable set of module dependencies
     class_methods: List[str] = None  # List of methods if this is a class
+    file_path: Optional[Path] = None  # Path to the file containing this region
+
+class DependencyResolver:
+    """Resolves module dependencies and handles import cycles."""
+    
+    def __init__(self, workspace_root: Path):
+        """Initialize the dependency resolver.
+        
+        Args:
+            workspace_root: Root directory of the workspace
+        """
+        self.workspace_root = workspace_root
+        self._module_cache: Dict[str, ModuleInfo] = {}
+        self._import_graph: Dict[str, Set[str]] = defaultdict(set)
+        self._visited: Set[str] = set()
+        self._temp_visited: Set[str] = set()
+    
+    def resolve_dependencies(self, file_path: Path) -> FrozenSet[ModuleInfo]:
+        """Resolve all dependencies for a file.
+        
+        Args:
+            file_path: Path to the file to analyze
+            
+        Returns:
+            FrozenSet of ModuleInfo objects representing all dependencies
+            
+        Raises:
+            ValueError: If circular dependencies are detected
+        """
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read()
+            
+            tree = ast.parse(content)
+            imports = self._extract_imports(tree)
+            
+            # Reset state for new resolution
+            self._visited.clear()
+            self._temp_visited.clear()
+            self._import_graph.clear()
+            
+            # Build import graph
+            for imp in imports:
+                self._import_graph[file_path.name].add(imp)
+            
+            # Check for cycles
+            self._check_cycles(file_path.name)
+            
+            # Resolve all dependencies
+            dependencies = set()
+            for imp in imports:
+                module_info = self._resolve_module(imp)
+                if module_info:
+                    dependencies.add(module_info)
+            
+            return frozenset(dependencies)
+            
+        except Exception as e:
+            raise ValueError(f"Failed to resolve dependencies for {file_path}: {str(e)}")
+    
+    def _extract_imports(self, tree: ast.AST) -> List[str]:
+        """Extract all imports from the AST."""
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                if isinstance(node, ast.Import):
+                    for name in node.names:
+                        imports.append(name.name)
+                else:
+                    module = node.module or ''
+                    for name in node.names:
+                        imports.append(f"{module}.{name.name}")
+        return imports
+    
+    def _check_cycles(self, module_name: str) -> None:
+        """Check for circular dependencies using DFS.
+        
+        Args:
+            module_name: Name of the module to check
+            
+        Raises:
+            ValueError: If a circular dependency is detected
+        """
+        if module_name in self._temp_visited:
+            cycle = list(self._temp_visited)
+            cycle.append(module_name)
+            raise ValueError(f"Circular dependency detected: {' -> '.join(cycle)}")
+        
+        if module_name in self._visited:
+            return
+        
+        self._temp_visited.add(module_name)
+        
+        for dep in self._import_graph[module_name]:
+            self._check_cycles(dep)
+        
+        self._temp_visited.remove(module_name)
+        self._visited.add(module_name)
+    
+    def _resolve_module(self, module_name: str) -> Optional[ModuleInfo]:
+        """Resolve a module to its file path and metadata.
+        
+        Args:
+            module_name: Name of the module to resolve
+            
+        Returns:
+            ModuleInfo if module is found, None otherwise
+        """
+        if module_name in self._module_cache:
+            return self._module_cache[module_name]
+        
+        try:
+            # Try to import the module
+            spec = importlib.util.find_spec(module_name)
+            if spec and spec.origin:
+                path = Path(spec.origin)
+                is_package = spec.submodule_search_locations is not None
+                is_third_party = not str(path).startswith(str(self.workspace_root))
+                
+                module_info = ModuleInfo(
+                    name=module_name,
+                    path=path,
+                    is_package=is_package,
+                    is_third_party=is_third_party
+                )
+                
+                self._module_cache[module_name] = module_info
+                return module_info
+            
+            # Try relative to workspace root
+            module_path = self.workspace_root / module_name.replace('.', '/')
+            if module_path.with_suffix('.py').exists():
+                path = module_path.with_suffix('.py')
+                module_info = ModuleInfo(
+                    name=module_name,
+                    path=path,
+                    is_package=False,
+                    is_third_party=False
+                )
+                self._module_cache[module_name] = module_info
+                return module_info
+            elif module_path.is_dir() and (module_path / '__init__.py').exists():
+                path = module_path / '__init__.py'
+                module_info = ModuleInfo(
+                    name=module_name,
+                    path=path,
+                    is_package=True,
+                    is_third_party=False
+                )
+                self._module_cache[module_name] = module_info
+                return module_info
+            
+            return None
+            
+        except ImportError:
+            return None
 
 class CodeRegionExtractor:
     """Extracts and analyzes code regions from files."""
     
-    @staticmethod
-    def extract_region(file_path: Path, region_name: str) -> RegionInfo:
+    def __init__(self, workspace_root: Optional[Path] = None):
+        """Initialize the code region extractor.
+        
+        Args:
+            workspace_root: Root directory of the workspace
+        """
+        self.workspace_root = workspace_root or Path.cwd()
+        self.dependency_resolver = DependencyResolver(self.workspace_root)
+    
+    def extract_region(self, file_path: Path, region_name: str) -> RegionInfo:
         """
         Extract a code region from a file.
         
@@ -61,7 +237,7 @@ class CodeRegionExtractor:
             # If region_name is 'main', use the entire file
             if region_name == 'main':
                 code = content
-                return CodeRegionExtractor._analyze_region(code, region_name)
+                return self._analyze_region(code, region_name, file_path)
             
             # Otherwise look for region markers
             start_marker = f"# kaizen:start:{region_name}"
@@ -78,18 +254,18 @@ class CodeRegionExtractor:
             start_idx = content.find('\n', start_idx) + 1
             code = content[start_idx:end_idx].strip()
             
-            return CodeRegionExtractor._analyze_region(code, region_name)
+            return self._analyze_region(code, region_name, file_path)
             
         except Exception as e:
             raise ValueError(f"Failed to extract region '{region_name}': {str(e)}")
     
-    @staticmethod
-    def _analyze_region(code: str, region_name: str) -> RegionInfo:
-        """Analyze the code region to determine its type and structure."""
+    def _analyze_region(self, code: str, region_name: str, file_path: Path) -> RegionInfo:
+        """Analyze the code region to determine its type, structure, and dependencies."""
         try:
             tree = ast.parse(code)
-            imports = CodeRegionExtractor._extract_imports(tree)
-            region_type, name, methods = CodeRegionExtractor._determine_region_type(tree)
+            imports = self._extract_imports(tree)
+            region_type, name, methods = self._determine_region_type(tree)
+            dependencies = self.dependency_resolver.resolve_dependencies(file_path)
             
             return RegionInfo(
                 type=region_type,
@@ -98,15 +274,16 @@ class CodeRegionExtractor:
                 start_line=tree.body[0].lineno if tree.body else 1,
                 end_line=tree.body[-1].end_lineno if tree.body else 1,
                 imports=imports,
-                class_methods=methods
+                dependencies=dependencies,
+                class_methods=methods,
+                file_path=file_path
             )
         except SyntaxError as e:
             raise ValueError(f"Invalid Python code in region: {str(e)}")
         except Exception as e:
             raise ValueError(f"Failed to analyze region code: {str(e)}")
     
-    @staticmethod
-    def _extract_imports(tree: ast.AST) -> List[str]:
+    def _extract_imports(self, tree: ast.AST) -> List[str]:
         """Extract all imports from the AST."""
         imports = []
         for node in ast.walk(tree):
@@ -120,8 +297,7 @@ class CodeRegionExtractor:
                         imports.append(f"{module}.{name.name}")
         return imports
     
-    @staticmethod
-    def _determine_region_type(tree: ast.AST) -> tuple[RegionType, str, List[str]]:
+    def _determine_region_type(self, tree: ast.AST) -> tuple[RegionType, str, List[str]]:
         """Determine the type, name, and methods of the region."""
         methods = []
         for node in ast.walk(tree):
@@ -204,6 +380,13 @@ class CodeRegionExecutor:
             ValueError: If execution fails
         """
         try:
+            # Add all dependency paths to Python path
+            for dep in region_info.dependencies:
+                if not dep.is_third_party:  # Only add local dependencies to path
+                    dep_dir = str(dep.path.parent)
+                    if dep_dir not in sys.path:
+                        sys.path.insert(0, dep_dir)
+            
             with self._create_execution_context(region_info) as namespace:
                 if region_info.type == RegionType.CLASS:
                     return self._execute_class_method(namespace, region_info, method_name, input_data)
@@ -213,13 +396,20 @@ class CodeRegionExecutor:
                     return self._execute_module(namespace, region_info, method_name, input_data)
         except Exception as e:
             raise ValueError(f"Failed to execute region '{region_info.name}': {str(e)}")
+        finally:
+            # Clean up added paths
+            for dep in region_info.dependencies:
+                if not dep.is_third_party:
+                    dep_dir = str(dep.path.parent)
+                    if dep_dir in sys.path:
+                        sys.path.remove(dep_dir)
     
     @contextmanager
     def _create_execution_context(self, region_info: RegionInfo):
         """Create a safe execution context with required imports."""
         namespace = {
             '__name__': '__main__',
-            '__file__': str(region_info.file_path) if hasattr(region_info, 'file_path') else None,
+            '__file__': str(region_info.file_path) if region_info.file_path else None,
             '__package__': None,
             '__builtins__': __builtins__
         }

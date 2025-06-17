@@ -49,6 +49,13 @@ class TestRunner:
         self.code_region_executor = CodeRegionExecutor(self.workspace_root)
         self.llm_evaluator = LLMEvaluator()
         self.assertion_runner = AssertionRunner()
+        
+        # Add imports from metadata to each test case
+        if 'metadata' in test_config and 'imports' in test_config['metadata']:
+            for test in test_config.get('tests', []):
+                if 'input' not in test:
+                    test['input'] = {}
+                test['input']['imports'] = test_config['metadata']['imports']
     
     def _validate_config(self) -> None:
         """Validate the test configuration structure."""
@@ -89,6 +96,10 @@ class TestRunner:
                 test_file_path, 
                 test_case_obj.input['region']
             )
+            
+            # Add imports from test case to region info
+            if 'imports' in test_case_obj.input:
+                region_info.imports.extend(test_case_obj.input['imports'])
             
             # Execute the code region
             actual_output = self.code_region_executor.execute_region(
