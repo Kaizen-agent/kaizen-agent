@@ -115,12 +115,9 @@ class EmailAgent:
         except ValueError as e:
             # Re-raise ValueError as is
             raise
-        except (ImportError, AttributeError) as e:
-            # Convert specific exceptions to ValueError
-            raise ValueError(f"Failed to generate improved email: {str(e)}")
         except Exception as e:
-            # Catch any other unexpected exceptions
-            raise ValueError(f"Unexpected error generating improved email: {str(e)}")
+            # Convert all other exceptions to ValueError
+            raise ValueError(f"Failed to generate improved email: {str(e)}")
 # kaizen:end:email_agent
 
 # kaizen:start:cli_interface
