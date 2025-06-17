@@ -1,14 +1,20 @@
-"""Test command implementations."""
+"""Test command implementations for Kaizen CLI.
+
+This module provides the core command implementations for running tests in Kaizen.
+It includes the base command interface and concrete implementations for different
+test execution strategies. The module handles test execution, result collection,
+and auto-fix functionality.
+"""
 
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Protocol, runtime_checkable
 from abc import ABC, abstractmethod
 
-from ...autofix.test.runner import TestRunner
-from ...utils.test_utils import collect_failed_tests
-from .models import TestConfiguration, TestResult, Result
-from .types import TestExecutionError, AutoFixError
+from kaizen.autofix.test.runner import TestRunner
+from kaizen.utils.test_utils import collect_failed_tests
+from kaizen.cli.commands.models import TestConfiguration, TestResult, Result
+from kaizen.cli.commands.errors import TestExecutionError, AutoFixError
 
 @runtime_checkable
 class TestCommand(Protocol):
@@ -144,7 +150,7 @@ class TestAllCommand(BaseTestCommand):
             return None
             
         self.logger.info(f"Attempting to fix {len(failed_tests)} failing tests (max retries: {self.config.settings.max_retries})")
-        from ...autofix.main import AutoFix, FixStatus
+        from kaizen.autofix.main import AutoFix, FixStatus
         
         try:
             # Create AutoFix instance and run fixes
