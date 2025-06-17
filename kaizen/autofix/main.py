@@ -222,62 +222,172 @@ class CodeStateManager:
         """Clean up backup directory."""
         shutil.rmtree(self.backup_dir)
 
+class TestResultAnalyzer:
+    """Analyzes test results and determines improvement status."""
+    
+    @staticmethod
+    def count_passed_tests(test_results: Dict) -> int:
+        """Count the number of passed tests in the results."""
+        if not test_results:
+            return 0
+            
+        passed_tests = 0
+        for region, result in test_results.items():
+            if region == 'overall_status':
+                continue
+            if not isinstance(result, dict):
+                continue
+                
+            test_cases = result.get('test_cases', [])
+            passed_tests += sum(1 for tc in test_cases if tc.get('status') == 'passed')
+        
+        return passed_tests
+    
+    @staticmethod
+    def is_successful(test_results: Dict) -> bool:
+        """Check if all tests passed."""
+        if not test_results:
+            return False
+            
+        overall_status = test_results.get('overall_status', {})
+        if isinstance(overall_status, dict):
+            return overall_status.get('status') == 'passed'
+        return overall_status == 'passed'
+    
+    @staticmethod
+    def has_improvements(test_results: Dict) -> bool:
+        """Check if there are any test improvements."""
+        return TestResultAnalyzer.count_passed_tests(test_results) > 0
+    
+    @staticmethod
+    def get_improvement_summary(test_results: Dict) -> Dict:
+        """Get a summary of test improvements."""
+        if not test_results:
+            return {'total': 0, 'passed': 0, 'improved': False}
+            
+        total_tests = 0
+        passed_tests = 0
+        
+        for region, result in test_results.items():
+            if region == 'overall_status':
+                continue
+            if not isinstance(result, dict):
+                continue
+                
+            test_cases = result.get('test_cases', [])
+            total_tests += len(test_cases)
+            passed_tests += sum(1 for tc in test_cases if tc.get('status') == 'passed')
+        
+        return {
+            'total': total_tests,
+            'passed': passed_tests,
+            'improved': passed_tests > 0
+        }
+
 class FixAttemptTracker:
-    """Tracks and manages fix attempts."""
+    """Tracks fix attempts and their results."""
     
     def __init__(self, max_retries: int):
         self.max_retries = max_retries
         self.attempts: List[FixAttempt] = []
-        self.current_attempt = 0
+        self.current_attempt: Optional[FixAttempt] = None
+    
+    def should_continue(self) -> bool:
+        """Check if more attempts should be made."""
+        return len(self.attempts) < self.max_retries
     
     def start_attempt(self) -> FixAttempt:
         """Start a new fix attempt."""
-        self.current_attempt += 1
-        attempt = FixAttempt(
-            attempt_number=self.current_attempt,
-            status=FixStatus.PENDING,
-            changes={}
-        )
+        attempt = FixAttempt(attempt_number=len(self.attempts) + 1)
+        self.current_attempt = attempt
         self.attempts.append(attempt)
         return attempt
     
     def update_attempt(self, attempt: FixAttempt, status: FixStatus, 
-                      changes: Dict[str, Any], test_results: Optional[Dict[str, Any]] = None,
-                      error: Optional[str] = None) -> None:
-        """Update an attempt with results."""
+                      changes: Dict, test_results: Dict, error: Optional[str] = None) -> None:
+        """Update attempt with results."""
         attempt.status = status
         attempt.changes = changes
         attempt.test_results = test_results
         attempt.error = error
     
-    def should_continue(self) -> bool:
-        """Determine if more attempts should be made."""
-        if not self.attempts:
-            return True
-        last_attempt = self.attempts[-1]
-        return (last_attempt.status in [FixStatus.RETRY, FixStatus.FAILED] and 
-                self.current_attempt < self.max_retries)
-    
     def get_successful_attempt(self) -> Optional[FixAttempt]:
-        """Get the first successful attempt."""
-        return next((attempt for attempt in self.attempts 
-                    if attempt.status == FixStatus.SUCCESS), None)
+        """Get the first successful attempt if any."""
+        return next((attempt for attempt in self.attempts if attempt.status == FixStatus.SUCCESS), None)
+    
+    def get_best_attempt(self) -> Optional[FixAttempt]:
+        """Get the best attempt based on test results."""
+        if not self.attempts:
+            return None
+            
+        # First try to find a successful attempt
+        successful = self.get_successful_attempt()
+        if successful:
+            return successful
+            
+        # If no successful attempt, find any attempt with improvements
+        for attempt in self.attempts:
+            if TestResultAnalyzer.has_improvements(attempt.test_results):
+                return attempt
+        
+        return None
+
+class PRStrategy(Enum):
+    """Strategy for when to create pull requests."""
+    ALL_PASSING = auto()  # Only create PR when all tests pass
+    ANY_IMPROVEMENT = auto()  # Create PR when any test improves
+    NONE = auto()  # Never create PR
+
+class AutoFixError(Exception):
+    """Base exception for AutoFix errors."""
+    pass
+
+class ConfigurationError(AutoFixError):
+    """Error in configuration."""
+    pass
+
+class TestExecutionError(AutoFixError):
+    """Error during test execution."""
+    pass
+
+class PRCreationError(AutoFixError):
+    """Error during PR creation."""
+    pass
+
+@dataclass
+class FixConfig:
+    """Configuration for code fixing."""
+    max_retries: int = 1
+    create_pr: bool = False
+    pr_strategy: PRStrategy = PRStrategy.ALL_PASSING
+    base_branch: str = 'main'
+    auto_fix: bool = True
+    
+    @classmethod
+    def from_dict(cls, config: Dict) -> 'FixConfig':
+        """Create FixConfig from dictionary."""
+        return cls(
+            max_retries=config.get('max_retries', 1),
+            create_pr=config.get('create_pr', False),
+            pr_strategy=PRStrategy[config.get('pr_strategy', 'ALL_PASSING')],
+            base_branch=config.get('base_branch', 'main'),
+            auto_fix=config.get('auto_fix', True)
+        )
 
 class AutoFix:
-    """Main class for automatic code fixing."""
+    """Handles automatic code fixing."""
     
-    def __init__(self, config_path: str):
-        """
-        Initialize the AutoFix system.
-        
-        Args:
-            config_path: Path to the configuration file
-        """
-        self.config = self._load_config(config_path)
-        self.test_runner = TestRunner(self.config.get('test', {}))
-        self.pr_manager = PRManager(self.config.get('pr', {}))
-        self.llm_fixer = LLMCodeFixer(self.config.get('llm', {}))
-        self.compatibility_checker = CompatibilityChecker()
+    def __init__(self, config: Dict):
+        """Initialize AutoFix with configuration."""
+        try:
+            self.config = FixConfig.from_dict(config)
+            self.test_runner = TestRunner(config)
+            self.pr_manager = PRManager(config)
+            logger.info("AutoFix initialized", extra={
+                'config': vars(self.config)
+            })
+        except Exception as e:
+            raise ConfigurationError(f"Failed to initialize AutoFix: {str(e)}")
     
     def _load_config(self, config_path: str) -> Dict:
         """Load configuration from file."""
@@ -465,34 +575,23 @@ class AutoFix:
             results['pr'] = pr_data
     
     def fix_code(self, file_path: str, failure_data: Optional[Dict] = None, 
-                user_goal: Optional[str] = None, max_retries: int = 1,
-                create_pr: bool = False, base_branch: str = 'main') -> Dict:
-        """
-        Fix code in the given file with retry logic.
-        
-        Args:
-            file_path: Path to the file to fix
-            failure_data: Data about the failures
-            user_goal: Optional user goal for the fix
-            max_retries: Maximum number of retry attempts
-            create_pr: Whether to create a pull request
-            base_branch: Base branch for pull request
-            
-        Returns:
-            Dict containing fix results
-        """
+                user_goal: Optional[str] = None) -> Dict:
+        """Fix code in the given file with retry logic."""
         try:
-            logger.info("Starting code fix", extra={'file_path': file_path})
+            logger.info("Starting code fix", extra={
+                'file_path': file_path,
+                'pr_strategy': self.config.pr_strategy.name
+            })
             
             # Initialize components
             affected_files = self._get_affected_files(file_path, failure_data)
             state_manager = CodeStateManager(affected_files)
-            attempt_tracker = FixAttemptTracker(max_retries)
+            attempt_tracker = FixAttemptTracker(self.config.max_retries)
             
             try:
                 while attempt_tracker.should_continue():
                     attempt = attempt_tracker.start_attempt()
-                    logger.info(f"Starting attempt {attempt.attempt_number} of {max_retries}")
+                    logger.info(f"Starting attempt {attempt.attempt_number} of {self.config.max_retries}")
                     
                     try:
                         # Store original code state
@@ -528,29 +627,44 @@ class AutoFix:
                         )
                         state_manager.restore_files()
                 
-                # Create PR if requested and we have successful fixes
-                successful_attempt = attempt_tracker.get_successful_attempt()
-                if create_pr and successful_attempt:
-                    pr_data = self.pr_manager.create_pr(
-                        successful_attempt.changes,
-                        successful_attempt.test_results
-                    )
-                    return {
-                        'status': 'success',
-                        'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
-                        'pr': pr_data
-                    }
+                # Create PR based on strategy
+                if self.config.create_pr:
+                    try:
+                        best_attempt = self._get_attempt_for_pr(attempt_tracker)
+                        if best_attempt and best_attempt.changes:
+                            # Add improvement summary to test results
+                            improvement_summary = TestResultAnalyzer.get_improvement_summary(best_attempt.test_results)
+                            best_attempt.test_results['improvement_summary'] = improvement_summary
+                            
+                            pr_data = self.pr_manager.create_pr(
+                                best_attempt.changes,
+                                best_attempt.test_results
+                            )
+                            return {
+                                'status': 'success' if best_attempt.status == FixStatus.SUCCESS else 'improved',
+                                'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                                'pr': pr_data,
+                                'improvement_summary': improvement_summary
+                            }
+                    except Exception as e:
+                        raise PRCreationError(f"Failed to create PR: {str(e)}")
                 
                 return {
-                    'status': 'success' if successful_attempt else 'failed',
+                    'status': 'success' if attempt_tracker.get_successful_attempt() else 'failed',
                     'attempts': [vars(attempt) for attempt in attempt_tracker.attempts]
                 }
                 
             finally:
                 state_manager.cleanup()
                 
+        except AutoFixError as e:
+            logger.error("AutoFix error", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
+            return {'status': 'error', 'error': str(e)}
         except Exception as e:
-            logger.error("Code fix failed", extra={
+            logger.error("Unexpected error", extra={
                 'error': str(e),
                 'error_type': type(e).__name__
             })
@@ -607,6 +721,21 @@ class AutoFix:
             return FixStatus.FAILED
         else:
             return FixStatus.ERROR
+    
+    def _get_attempt_for_pr(self, attempt_tracker: FixAttemptTracker) -> Optional[FixAttempt]:
+        """Get the appropriate attempt for PR creation based on strategy."""
+        if self.config.pr_strategy == PRStrategy.NONE:
+            return None
+            
+        if self.config.pr_strategy == PRStrategy.ALL_PASSING:
+            return attempt_tracker.get_successful_attempt()
+            
+        # For ANY_IMPROVEMENT, return first attempt with any improvement
+        for attempt in attempt_tracker.attempts:
+            if TestResultAnalyzer.has_improvements(attempt.test_results):
+                return attempt
+                
+        return None
     
     def fix_directory(self, directory_path: str, failure_data: Optional[Dict] = None) -> Dict:
         """Fix code in all Python files in the given directory."""

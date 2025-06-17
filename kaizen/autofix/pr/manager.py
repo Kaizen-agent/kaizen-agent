@@ -2,11 +2,48 @@ import os
 import logging
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TypedDict, Union
+from dataclasses import dataclass
 from datetime import datetime
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+class TestCase(TypedDict):
+    name: str
+    status: str
+    input: Optional[str]
+    expected_output: Optional[str]
+    actual_output: Optional[str]
+    evaluation: Optional[str]
+    reason: Optional[str]
+
+class Attempt(TypedDict):
+    status: str
+    test_cases: List[TestCase]
+
+class AgentInfo(TypedDict):
+    name: str
+    version: str
+    description: str
+
+class TestResults(TypedDict):
+    agent_info: Optional[AgentInfo]
+    attempts: List[Attempt]
+    additional_summary: Optional[str]
+
+class CodeChange(TypedDict):
+    description: str
+    reason: Optional[str]
+
+class PromptChange(TypedDict):
+    before: str
+    after: str
+    reason: Optional[str]
+
+class Changes(TypedDict):
+    prompt_changes: Optional[List[PromptChange]]
+    # Other file changes will be Dict[str, List[CodeChange]]
 
 class PRManager:
     """A class for managing pull requests."""
@@ -108,51 +145,30 @@ class PRManager:
             })
             return "Fix: Code changes"
     
-    def _generate_pr_description(self, changes: Dict, test_results: Dict) -> str:
+    def _generate_pr_description(self, changes: Dict[str, List[CodeChange]], test_results: TestResults) -> str:
         """
         Generate a description for the pull request.
         
         Args:
-            changes: Dictionary containing code changes
-            test_results: Dictionary containing test results
+            changes: Dictionary containing code changes, keyed by file path
+            test_results: Dictionary containing test results and agent information
             
         Returns:
-            str: PR description
+            str: Formatted PR description
+            
+        Raises:
+            ValueError: If required data is missing or malformed
         """
         try:
             description = []
             
-            # Add change details
-            description.append("## Changes")
-            for file_path, file_changes in changes.items():
-                description.append(f"\n### {file_path}")
-                for change in file_changes:
-                    description.append(f"- {change['description']}")
-            
-            # Add test results
-            if test_results:
-                description.append("\n## Test Results")
-                description.append(f"\nOverall Status: {test_results['overall_status']}")
-                
-                if 'summary' in test_results:
-                    summary = test_results['summary']
-                    description.append(f"\n- Total Regions: {summary['total_regions']}")
-                    description.append(f"- Passed Regions: {summary['passed_regions']}")
-                    description.append(f"- Failed Regions: {summary['failed_regions']}")
-                    description.append(f"- Error Regions: {summary['error_regions']}")
-                
-                # Add region details
-                for region_name, region_data in test_results.items():
-                    if region_name not in ('overall_status', '_status', 'summary'):
-                        description.append(f"\n### {region_name}")
-                        description.append(f"Status: {region_data['status']}")
-                        
-                        if 'summary' in region_data:
-                            region_summary = region_data['summary']
-                            description.append(f"\n- Total Tests: {region_summary['total']}")
-                            description.append(f"- Passed Tests: {region_summary['passed']}")
-                            description.append(f"- Failed Tests: {region_summary['failed']}")
-                            description.append(f"- Error Tests: {region_summary['error']}")
+            # Add each section
+            description.extend(self._generate_agent_summary(test_results))
+            description.extend(self._generate_test_results_summary(test_results))
+            description.extend(self._generate_detailed_results(test_results))
+            description.extend(self._generate_code_changes(changes))
+            description.extend(self._generate_prompt_changes(changes))
+            description.extend(self._generate_additional_summary(test_results))
             
             return "\n".join(description)
             
@@ -162,6 +178,128 @@ class PRManager:
                 'error_type': type(e).__name__
             })
             return "Code changes and test results"
+    
+    def _generate_agent_summary(self, test_results: TestResults) -> List[str]:
+        """Generate the agent summary section."""
+        description = ["## Agent Summary"]
+        
+        if not test_results.get('agent_info'):
+            description.append("\nNo agent information available")
+            return description
+        
+        agent_info = test_results['agent_info']
+        description.extend([
+            f"\nAgent: {agent_info.get('name', 'Unknown')}",
+            f"Version: {agent_info.get('version', 'Unknown')}",
+            f"Description: {agent_info.get('description', 'No description available')}"
+        ])
+        
+        return description
+    
+    def _generate_test_results_summary(self, test_results: TestResults) -> List[str]:
+        """Generate the test results summary table."""
+        description = ["\n## Test Results Summary"]
+        
+        if not test_results.get('attempts'):
+            description.append("\nNo test results available")
+            return description
+        
+        # Create table header
+        description.extend([
+            "\n| Test Case | Attempt 1 | Attempt 2 | Attempt 3 | Reason |",
+            "|-----------|-----------|-----------|-----------|--------|"
+        ])
+        
+        # Add test cases
+        for test_case in test_results['attempts'][0]['test_cases']:
+            case_name = test_case['name']
+            row = [case_name]
+            
+            # Add results for each attempt
+            for attempt in test_results['attempts']:
+                result = next((tc['status'] for tc in attempt['test_cases'] if tc['name'] == case_name), 'N/A')
+                row.append(result)
+            
+            # Add reason from the last attempt
+            reason = next((tc['reason'] for tc in test_results['attempts'][-1]['test_cases'] if tc['name'] == case_name), 'N/A')
+            row.append(reason)
+            
+            description.append(f"| {' | '.join(row)} |")
+        
+        return description
+    
+    def _generate_detailed_results(self, test_results: TestResults) -> List[str]:
+        """Generate detailed test results for each attempt."""
+        description = ["\n## Detailed Results"]
+        
+        if not test_results.get('attempts'):
+            return description
+        
+        for i, attempt in enumerate(test_results['attempts'], 1):
+            description.extend([
+                f"\n### Attempt {i}",
+                f"Status: {attempt['status']}"
+            ])
+            
+            for test_case in attempt['test_cases']:
+                description.extend([
+                    f"\n#### {test_case['name']}",
+                    f"Input: {test_case.get('input', 'N/A')}",
+                    f"Expected Output: {test_case.get('expected_output', 'N/A')}",
+                    f"Actual Output: {test_case.get('actual_output', 'N/A')}",
+                    f"Result: {test_case['status']}",
+                    f"Evaluation: {test_case.get('evaluation', 'N/A')}"
+                ])
+        
+        return description
+    
+    def _generate_code_changes(self, changes: Dict[str, List[CodeChange]]) -> List[str]:
+        """Generate the code changes section."""
+        description = ["\n## Code Changes"]
+        
+        for file_path, file_changes in changes.items():
+            if file_path == 'prompt_changes':
+                continue
+            
+            description.append(f"\n### {file_path}")
+            for change in file_changes:
+                description.append(f"- {change['description']}")
+                if change.get('reason'):
+                    description.append(f"  Reason: {change['reason']}")
+        
+        return description
+    
+    def _generate_prompt_changes(self, changes: Dict[str, List[CodeChange]]) -> List[str]:
+        """Generate the prompt changes section."""
+        description = []
+        
+        if 'prompt_changes' not in changes:
+            return description
+        
+        description.append("\n## Prompt Changes")
+        for prompt_change in changes['prompt_changes']:
+            description.extend([
+                "\n### Before",
+                f"```\n{prompt_change['before']}\n```",
+                "\n### After",
+                f"```\n{prompt_change['after']}\n```"
+            ])
+            if prompt_change.get('reason'):
+                description.append(f"\nReason: {prompt_change['reason']}")
+        
+        return description
+    
+    def _generate_additional_summary(self, test_results: TestResults) -> List[str]:
+        """Generate the additional summary section."""
+        description = []
+        
+        if test_results.get('additional_summary'):
+            description.extend([
+                "\n## Additional Summary",
+                test_results['additional_summary']
+            ])
+        
+        return description
     
     def _get_change_summary(self, changes: Dict) -> str:
         """

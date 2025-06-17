@@ -15,7 +15,8 @@ class ConfigurationManager:
         auto_fix: bool = False,
         create_pr: bool = False,
         max_retries: int = 1,
-        base_branch: str = 'main'
+        base_branch: str = 'main',
+        pr_strategy: str = 'ALL_PASSING'
     ) -> Result[TestConfiguration]:
         """Load and validate test configuration from file.
         
@@ -25,47 +26,45 @@ class ConfigurationManager:
             create_pr: Whether to create a pull request with fixes
             max_retries: Maximum number of retry attempts
             base_branch: Base branch for pull request
+            pr_strategy: Strategy for when to create PRs ('ALL_PASSING', 'ANY_IMPROVEMENT', 'NONE')
             
         Returns:
             Result containing TestConfiguration if successful, error otherwise
         """
         try:
-            with open(config_path, 'r') as f:
+            # Load config file
+            with open(config_path) as f:
                 config_data = yaml.safe_load(f)
             
-            if not config_data:
-                return Result.failure(ConfigurationError("Test configuration file is empty"))
+            # Validate PR strategy
+            valid_strategies = ['ALL_PASSING', 'ANY_IMPROVEMENT', 'NONE']
+            if pr_strategy not in valid_strategies:
+                return Result.failure(ConfigurationError(
+                    f"Invalid PR strategy: {pr_strategy}. Must be one of {valid_strategies}"
+                ))
             
-            validation_result = ConfigurationManager._validate_configuration(config_data)
-            if not validation_result.is_success:
-                return Result.failure(validation_result.error)
-            
-            file_path = ConfigurationManager._resolve_file_path(config_path, config_data['file_path'])
-            if not file_path:
-                return Result.failure(ConfigurationError(f"File not found: {config_data['file_path']}"))
-            
-            metadata = ConfigurationManager._parse_metadata(config_data)
-            evaluation = ConfigurationManager._parse_evaluation(config_data)
-            
-            return Result.success(TestConfiguration(
-                name=config_data['name'],
-                file_path=file_path,
+            # Create configuration
+            config = TestConfiguration(
+                name=config_data.get('name', 'Unnamed Test'),
+                file_path=Path(config_data['file_path']),
                 config_path=config_path,
-                agent_type=config_data.get('agent_type'),
+                agent_type=config_data.get('agent_type', 'default'),
                 description=config_data.get('description'),
-                metadata=metadata,
-                evaluation=evaluation,
-                regions=config_data.get('regions'),
-                steps=config_data.get('steps'),
+                metadata=TestMetadata(**config_data.get('metadata', {})),
+                evaluation=EvaluationCriteria(**config_data.get('evaluation', {})),
+                regions=config_data.get('regions', []),
+                steps=config_data.get('steps', []),
                 auto_fix=auto_fix,
                 create_pr=create_pr,
                 max_retries=max_retries,
-                base_branch=base_branch
-            ))
-        except yaml.YAMLError as e:
-            return Result.failure(ConfigurationError(f"Invalid YAML configuration: {str(e)}"))
+                base_branch=base_branch,
+                pr_strategy=pr_strategy
+            )
+            
+            return Result.success(config)
+            
         except Exception as e:
-            return Result.failure(ConfigurationError(f"Error loading configuration: {str(e)}"))
+            return Result.failure(ConfigurationError(f"Failed to load configuration: {str(e)}"))
     
     @staticmethod
     def _validate_configuration(config_data: Dict[str, Any]) -> Result[None]:

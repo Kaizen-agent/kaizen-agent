@@ -364,7 +364,9 @@ class TestReportWriter:
 @click.option('--create-pr', is_flag=True, help='Create a pull request with fixes')
 @click.option('--max-retries', type=int, default=DEFAULT_MAX_RETRIES, help=f'Maximum number of retry attempts for auto-fix (default: {DEFAULT_MAX_RETRIES})')
 @click.option('--base-branch', default=DEFAULT_BASE_BRANCH, help=f'Base branch for pull request (default: {DEFAULT_BASE_BRANCH})')
-def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, base_branch: str):
+@click.option('--pr-strategy', type=click.Choice(['ALL_PASSING', 'ANY_IMPROVEMENT', 'NONE']), 
+              default='ALL_PASSING', help='Strategy for when to create PRs (default: ALL_PASSING)')
+def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, base_branch: str, pr_strategy: str):
     """Run all tests specified in the configuration file."""
     console = Console()
     
@@ -375,7 +377,8 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
             auto_fix=auto_fix,
             create_pr=create_pr,
             max_retries=max_retries,
-            base_branch=base_branch
+            base_branch=base_branch,
+            pr_strategy=pr_strategy
         )
         
         if not config_result.is_success:
