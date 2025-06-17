@@ -3,7 +3,7 @@
 import click
 from rich.console import Console
 
-from .commands.test import test_all, run_test
+from .commands.test import test_all
 from .commands.fix import fix_tests
 
 console = Console()
@@ -15,7 +15,6 @@ def cli():
 
 # Register commands
 cli.add_command(test_all)
-cli.add_command(run_test)
 cli.add_command(fix_tests)
 
 if __name__ == '__main__':
