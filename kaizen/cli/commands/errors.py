@@ -33,12 +33,10 @@ class ConfigurationError(TestError):
     """Error raised when there is a problem with test configuration.
     
     This error is raised when:
-    - Configuration file is invalid or missing
-    - Required configuration parameters are missing
-    - Configuration values are invalid
-    
-    Example:
-        >>> raise ConfigurationError("Missing required field 'name' in config")
+    - Required fields are missing
+    - Field values are invalid
+    - Configuration file cannot be loaded
+    - Configuration validation fails
     """
     pass
 
@@ -69,15 +67,12 @@ class ReportGenerationError(TestError):
     pass
 
 class ValidationError(TestError):
-    """Error raised when validation fails.
+    """Error raised when configuration validation fails.
     
     This error is raised when:
-    - Test results fail validation
-    - Test configuration fails validation
-    - Test environment fails validation
-    
-    Example:
-        >>> raise ValidationError("Test results validation failed", {"failed_checks": ["check1", "check2"]})
+    - Field values are invalid
+    - Required fields are missing
+    - Field types are incorrect
     """
     pass
 
@@ -91,5 +86,15 @@ class AutoFixError(TestError):
     
     Example:
         >>> raise AutoFixError("Auto-fix failed after 3 attempts", {"attempts": 3, "failed_tests": ["test1", "test2"]})
+    """
+    pass
+
+class FileNotFoundError(Exception):
+    """Error raised when a required file cannot be found.
+    
+    This error is raised when:
+    - Test file does not exist
+    - Configuration file does not exist
+    - Required file is not accessible
     """
     pass 
