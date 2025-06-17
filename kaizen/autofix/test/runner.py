@@ -155,12 +155,14 @@ class TestRunner:
         summary = TestSummary()
         
         try:
-            if not test_file_path.exists():
-                raise FileNotFoundError(f"Test file not found: {test_file_path}")
+            # Resolve the file path relative to workspace root
+            resolved_path = self.workspace_root / test_file_path
+            if not resolved_path.exists():
+                raise FileNotFoundError(f"Test file not found: {resolved_path}")
             
             for test_case in self.test_config.get('tests', []):
                 test_name = test_case.get('name', 'Unknown')
-                test_result = self._run_test_case(test_case, test_file_path)
+                test_result = self._run_test_case(test_case, resolved_path)
                 results[test_name] = self._create_test_result(test_result)
                 
                 summary.total_regions += 1
