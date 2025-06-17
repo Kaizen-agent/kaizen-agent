@@ -1,11 +1,21 @@
-"""Code region handling for Kaizen tests."""
+"""Code region extraction and execution."""
 
+# Standard library imports
 import ast
+import logging
+import os
+import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Dict, Any, Optional, Callable
-import logging
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# Third-party imports
+# (none in this file)
+
+# Local application imports
+# (none in this file)
 
 logger = logging.getLogger(__name__)
 
