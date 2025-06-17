@@ -3,7 +3,7 @@
 from typing import Dict, Any, List, Union
 from rich.console import Console
 from rich.table import Table
-from .test import TestResultFormatter, STATUS_EMOJI
+from .types import TestResultFormatter, STATUS_EMOJI
 
 class MarkdownTestResultFormatter(TestResultFormatter):
     """Formats test results in Markdown format.

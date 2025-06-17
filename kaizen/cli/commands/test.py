@@ -8,7 +8,7 @@ import sys
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union, Protocol, runtime_checkable
+from typing import Dict, Any, Optional, List, Union
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.traceback import install as install_rich_traceback
@@ -26,6 +26,7 @@ from .models import (
     Result
 )
 from .config import ConfigurationManager
+from .types import TestResultFormatter, STATUS_EMOJI
 
 # Configure rich traceback
 install_rich_traceback(show_locals=True)
@@ -42,12 +43,6 @@ logger = logging.getLogger("kaizen.test")
 # Constants
 DEFAULT_MAX_RETRIES = 1
 DEFAULT_BASE_BRANCH = 'main'
-STATUS_EMOJI = {
-    'passed': '✅',
-    'failed': '❌',
-    'completed': '✓',
-    'unknown': '?'
-}
 
 class TestError(Exception):
     """Base exception for test-related errors."""
