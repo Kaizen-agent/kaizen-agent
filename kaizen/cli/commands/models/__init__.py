@@ -6,6 +6,7 @@ from .settings import TestSettings
 from .step import TestStep
 from .configuration import TestConfiguration
 from .result import TestResult
+from .operation_result import Result
 
 __all__ = [
     'TestMetadata',
@@ -13,5 +14,6 @@ __all__ = [
     'TestSettings',
     'TestStep',
     'TestConfiguration',
-    'TestResult'
+    'TestResult',
+    'Result'
 ] 
