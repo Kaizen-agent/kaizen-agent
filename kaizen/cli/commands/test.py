@@ -26,7 +26,17 @@ from .models import (
     Result
 )
 from .config import ConfigurationManager
-from .types import TestResultFormatter, STATUS_EMOJI
+from .types import (
+    TestError,
+    ConfigurationError,
+    TestExecutionError,
+    ReportGenerationError,
+    ValidationError,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_BASE_BRANCH,
+    TestResultFormatter,
+    STATUS_EMOJI
+)
 
 # Configure rich traceback
 install_rich_traceback(show_locals=True)
@@ -39,30 +49,6 @@ logging.basicConfig(
     handlers=[RichHandler(rich_tracebacks=True)]
 )
 logger = logging.getLogger("kaizen.test")
-
-# Constants
-DEFAULT_MAX_RETRIES = 1
-DEFAULT_BASE_BRANCH = 'main'
-
-class TestError(Exception):
-    """Base exception for test-related errors."""
-    pass
-
-class ConfigurationError(TestError):
-    """Exception for configuration-related errors."""
-    pass
-
-class TestExecutionError(TestError):
-    """Exception for test execution errors."""
-    pass
-
-class ReportGenerationError(TestError):
-    """Exception for report generation errors."""
-    pass
-
-class ValidationError(TestError):
-    """Exception for validation errors."""
-    pass
 
 @runtime_checkable
 class StatusFormatter(Protocol):

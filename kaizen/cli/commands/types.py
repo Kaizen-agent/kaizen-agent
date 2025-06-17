@@ -24,4 +24,30 @@ class TableFormatter(Protocol):
 @runtime_checkable
 class TestResultFormatter(StatusFormatter, TableFormatter, Protocol):
     """Protocol for test result formatting."""
-    pass 
+    pass
+
+"""Common types and errors for CLI commands."""
+
+class TestError(Exception):
+    """Base exception for test-related errors."""
+    pass
+
+class ConfigurationError(TestError):
+    """Exception for configuration-related errors."""
+    pass
+
+class TestExecutionError(TestError):
+    """Exception for test execution errors."""
+    pass
+
+class ReportGenerationError(TestError):
+    """Exception for report generation errors."""
+    pass
+
+class ValidationError(TestError):
+    """Exception for validation errors."""
+    pass
+
+# Constants
+DEFAULT_MAX_RETRIES = 1
+DEFAULT_BASE_BRANCH = 'main' 

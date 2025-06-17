@@ -4,7 +4,7 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 from .models import TestConfiguration, TestMetadata, EvaluationCriteria, Result
-from .test import ConfigurationError
+from .types import ConfigurationError
 
 class ConfigurationManager:
     """Manages test configuration loading and validation."""
