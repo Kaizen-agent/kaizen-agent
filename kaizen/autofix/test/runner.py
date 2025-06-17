@@ -314,6 +314,34 @@ class TestRunner:
         except Exception as e:
             raise ImportError(f"Failed to import module {test_file_path}: {str(e)}")
         
+    def _find_class_in_module(self, module: Any, class_name: str) -> Any:
+        """
+        Find a class in a module, case-insensitive.
+        
+        Args:
+            module: The module to search in
+            class_name: Name of the class to find
+            
+        Returns:
+            The found class
+            
+        Raises:
+            AttributeError: If class is not found
+        """
+        # First try exact match
+        if hasattr(module, class_name):
+            return getattr(module, class_name)
+            
+        # Try case-insensitive match
+        class_name_lower = class_name.lower()
+        for attr_name in dir(module):
+            if attr_name.lower() == class_name_lower:
+                attr = getattr(module, attr_name)
+                if isinstance(attr, type):  # Check if it's a class
+                    return attr
+                    
+        raise AttributeError(f"Class '{class_name}' not found in module")
+            
     def _run_test_case(self, test_case: Dict, test_file_path: Path) -> Dict:
         """
         Run a single test case.
@@ -348,10 +376,20 @@ class TestRunner:
             test_module = self._import_test_module(test_file_path)
             
             # Get the class and method
-            if not hasattr(test_module, region):
-                raise AttributeError(f"Region '{region}' not found in module")
-                
-            test_class = getattr(test_module, region)
+            try:
+                test_class = self._find_class_in_module(test_module, region)
+            except AttributeError as e:
+                # Try to get the class from the module's __all__ if available
+                if hasattr(test_module, '__all__'):
+                    for name in test_module.__all__:
+                        if name.lower() == region.lower():
+                            test_class = getattr(test_module, name)
+                            break
+                    else:
+                        raise e
+                else:
+                    raise e
+                    
             if not hasattr(test_class, method):
                 raise AttributeError(f"Method '{method}' not found in class '{region}'")
                 
