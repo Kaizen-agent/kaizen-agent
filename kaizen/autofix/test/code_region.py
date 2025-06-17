@@ -23,12 +23,31 @@ import typing
 # Local application imports
 # (none in this file)
 
+# Configure colored logging
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter with colors."""
+    
+    COLORS = {
+        'DEBUG': '\033[36m',  # Cyan
+        'INFO': '\033[32m',   # Green
+        'WARNING': '\033[33m', # Yellow
+        'ERROR': '\033[31m',   # Red
+        'CRITICAL': '\033[41m', # Red background
+        'RESET': '\033[0m'    # Reset
+    }
+    
+    def format(self, record):
+        if record.levelname in self.COLORS:
+            record.levelname = f"{self.COLORS[record.levelname]}{record.levelname}{self.COLORS['RESET']}"
+            record.msg = f"{self.COLORS[record.levelname]}{record.msg}{self.COLORS['RESET']}"
+        return super().format(record)
+
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s: %(message)s'
-)
 logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+handler.setFormatter(ColoredFormatter('%(levelname)s: %(message)s'))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 # Type variables for generic types
 T = TypeVar('T')
@@ -228,6 +247,27 @@ class DependencyResolver:
         self._visited: Set[str] = set()
         self._temp_visited: Set[str] = set()
     
+    def _extract_imports(self, tree: ast.AST) -> List[str]:
+        """Extract all imports from the AST.
+        
+        Args:
+            tree: AST to analyze
+            
+        Returns:
+            List of import statements
+        """
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                if isinstance(node, ast.Import):
+                    for name in node.names:
+                        imports.append(name.name)
+                else:  # ImportFrom
+                    module = node.module or ''
+                    for name in node.names:
+                        imports.append(f"{module}.{name.name}")
+        return imports
+    
     def resolve_dependencies(self, file_path: Path) -> FrozenSet[ModuleInfo]:
         """Resolve all dependencies for a file.
         
@@ -241,12 +281,14 @@ class DependencyResolver:
             DependencyResolutionError: If dependencies cannot be resolved
             RegionExtractionError: If file cannot be read or parsed
         """
+        logger.info(f"Resolving dependencies for {file_path}")
         try:
             with open(file_path, 'r') as f:
                 content = f.read()
             
             tree = ast.parse(content)
             imports = self._extract_imports(tree)
+            logger.debug(f"Found imports: {imports}")
             
             # Reset state for new resolution
             self._reset_state()
@@ -259,12 +301,16 @@ class DependencyResolver:
             
             # Resolve all dependencies
             dependencies = self._resolve_all_dependencies(imports)
+            logger.info(f"Resolved {len(dependencies)} dependencies")
             
             return frozenset(dependencies)
             
         except (IOError, SyntaxError) as e:
+            logger.error(f"Failed to read or parse file {file_path}: {str(e)}")
             raise RegionExtractionError(f"Failed to read or parse file {file_path}: {str(e)}")
         except Exception as e:
+            logger.error(f"Failed to resolve dependencies: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise DependencyResolutionError(f"Failed to resolve dependencies for {file_path}: {str(e)}")
     
     def _reset_state(self) -> None:
