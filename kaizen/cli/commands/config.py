@@ -1,24 +1,31 @@
-"""Configuration management for test commands.
+"""Configuration management for Kaizen CLI test commands.
 
 This module provides a high-level interface for managing test configurations,
-combining loading, validation, and configuration object creation.
+combining loading, validation, and configuration object creation. It handles
+the parsing and validation of test configuration files, ensuring they meet
+the required schema and contain all necessary information for test execution.
+
+The ConfigurationManager class serves as the main entry point for configuration
+operations, providing methods for loading, validating, and parsing test
+configurations.
 """
 
 # Standard library imports
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 # Local application imports
-from .errors import ConfigurationError
-from .types import PRStrategy
-from .result import Result
-from .models import (
+from kaizen.cli.commands.config_loader import ConfigurationLoader
+from kaizen.cli.commands.config_parser import ConfigurationParser
+from kaizen.cli.commands.config_validator import ConfigurationValidator
+from kaizen.cli.commands.errors import ConfigurationError
+from kaizen.cli.commands.models import (
     TestConfiguration,
+    TestEvaluation,
     TestMetadata,
 )
-from .config_loader import ConfigurationLoader
-from .config_validator import ConfigurationValidator
-from .config_parser import ConfigurationParser
+from kaizen.cli.commands.result import Result
+from kaizen.cli.commands.types import PRStrategy
 
 class ConfigurationManager:
     """Manages test configuration loading and validation.
