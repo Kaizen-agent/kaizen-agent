@@ -8,10 +8,11 @@ import sys
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, Protocol
 from dataclasses import dataclass
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.table import Table
 
 from ...autofix.test.runner import TestRunner
 from ...autofix.test.logger import TestLogger
@@ -48,12 +49,36 @@ class TestExecutionError(TestError):
     """Exception for test execution errors."""
     pass
 
+class ReportGenerationError(TestError):
+    """Exception for report generation errors."""
+    pass
+
+@dataclass
+class TestMetadata:
+    """Metadata for test configuration."""
+    version: str
+    dependencies: List[str]
+    environment_variables: List[str]
+
+@dataclass
+class EvaluationCriteria:
+    """Evaluation criteria for tests."""
+    llm_provider: str
+    model: str
+    criteria: List[Dict[str, Any]]
+
 @dataclass
 class TestConfiguration:
     """Configuration for test execution."""
     name: str
     file_path: Path
     config_path: Path
+    agent_type: Optional[str] = None
+    description: Optional[str] = None
+    metadata: Optional[TestMetadata] = None
+    evaluation: Optional[EvaluationCriteria] = None
+    regions: Optional[List[Dict[str, Any]]] = None
+    steps: Optional[List[Dict[str, Any]]] = None
     auto_fix: bool = False
     create_pr: bool = False
     max_retries: int = DEFAULT_MAX_RETRIES
@@ -76,15 +101,39 @@ class TestConfiguration:
             if missing_fields:
                 raise ConfigurationError(f"Missing required fields in configuration: {', '.join(missing_fields)}")
             
-            # Resolve file path relative to config file
+            if 'regions' not in config_data and 'steps' not in config_data:
+                raise ConfigurationError("Test configuration must contain either 'regions' or 'steps'")
+            
             file_path = (config_path.parent / config_data['file_path']).resolve()
             if not file_path.exists():
                 raise ConfigurationError(f"File not found: {file_path}")
+
+            metadata = None
+            if 'metadata' in config_data:
+                metadata = TestMetadata(
+                    version=config_data['metadata']['version'],
+                    dependencies=config_data['metadata']['dependencies'],
+                    environment_variables=config_data['metadata']['environment_variables']
+                )
+
+            evaluation = None
+            if 'evaluation' in config_data:
+                evaluation = EvaluationCriteria(
+                    llm_provider=config_data['evaluation']['llm_provider'],
+                    model=config_data['evaluation']['model'],
+                    criteria=config_data['evaluation']['criteria']
+                )
             
             return cls(
                 name=config_data['name'],
                 file_path=file_path,
                 config_path=config_path,
+                agent_type=config_data.get('agent_type'),
+                description=config_data.get('description'),
+                metadata=metadata,
+                evaluation=evaluation,
+                regions=config_data.get('regions'),
+                steps=config_data.get('steps'),
                 auto_fix=auto_fix,
                 create_pr=create_pr,
                 max_retries=max_retries,
@@ -105,66 +154,13 @@ class TestResult:
     failed_tests: List[Dict[str, Any]]
     test_attempts: Optional[List[Dict[str, Any]]] = None
 
-class TestExecutor:
-    """Handles test execution and result processing."""
-    
-    def __init__(self, config: TestConfiguration):
-        self.config = config
-        self.console = Console()
-        self.logger = TestLogger(config.name)
-    
-    def execute(self) -> TestResult:
-        """Execute tests and return results."""
-        try:
-            self.logger.info(f"Running test: {self.config.name}")
-            self.console.print("=" * 50)
-            
-            # Run tests
-            runner = TestRunner(self._create_runner_config())
-            results = runner.run_tests(self.config.file_path)
-            failed_tests = collect_failed_tests(results)
-            
-            # Handle auto-fix if enabled
-            test_attempts = self._handle_auto_fix(failed_tests) if self.config.auto_fix else None
-            
-            return TestResult(
-                name=self.config.name,
-                file_path=self.config.file_path,
-                config_path=self.config.config_path,
-                results=results,
-                failed_tests=failed_tests,
-                test_attempts=test_attempts
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error executing tests: {str(e)}")
-            raise TestExecutionError(f"Failed to execute tests: {str(e)}")
-    
-    def _create_runner_config(self) -> Dict[str, Any]:
-        """Create configuration for test runner."""
-        return {
-            'name': self.config.name,
-            'file_path': str(self.config.file_path),
-            'config_file': str(self.config.config_path)
-        }
-    
-    def _handle_auto_fix(self, failed_tests: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
-        """Handle auto-fix for failed tests."""
-        if not failed_tests:
-            return None
-            
-        self.logger.info(f"Attempting to fix {len(failed_tests)} failing tests (max retries: {self.config.max_retries})")
-        from ...autofix.main import AutoFix
-        return AutoFix(self.config.config_path).fix_code(
-            str(self.config.file_path),
-            failed_tests,
-            max_retries=self.config.max_retries,
-            create_pr=self.config.create_pr,
-            base_branch=self.config.base_branch
-        )
+class TestResultFormatter(Protocol):
+    """Protocol for test result formatting."""
+    def format_overall_status(self, results: Dict[str, Any]) -> tuple[str, str]: ...
+    def format_test_results_table(self, results: Dict[str, Any]) -> List[str]: ...
 
-class TestResultFormatter:
-    """Formats test results for display and file output."""
+class MarkdownTestResultFormatter:
+    """Formats test results in Markdown format."""
     
     @staticmethod
     def get_status_emoji(status: str) -> str:
@@ -176,7 +172,7 @@ class TestResultFormatter:
         """Format overall status with emoji."""
         overall_status = results.get('overall_status', 'unknown')
         status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
-        status_emoji = TestResultFormatter.get_status_emoji(status)
+        status_emoji = MarkdownTestResultFormatter.get_status_emoji(status)
         return status, status_emoji
     
     @staticmethod
@@ -203,29 +199,66 @@ class TestResultFormatter:
         
         return table_lines
 
-class TestReportGenerator:
-    """Generates test reports."""
+class RichTestResultFormatter:
+    """Formats test results using Rich library."""
     
-    def __init__(self, result: TestResult):
+    def __init__(self, console: Console):
+        self.console = console
+    
+    def format_overall_status(self, results: Dict[str, Any]) -> tuple[str, str]:
+        """Format overall status with emoji."""
+        overall_status = results.get('overall_status', 'unknown')
+        status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
+        status_emoji = STATUS_EMOJI.get(status.lower(), STATUS_EMOJI['unknown'])
+        return status, status_emoji
+    
+    def format_test_results_table(self, results: Dict[str, Any]) -> Table:
+        """Format test results as a Rich table."""
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Test Name")
+        table.add_column("Region")
+        table.add_column("Status")
+        table.add_column("Details")
+        
+        for region, result in results.items():
+            if region == 'overall_status':
+                continue
+                
+            test_cases = result.get('test_cases', [])
+            for test_case in test_cases:
+                status = "✅ PASS" if test_case.get('status') == 'passed' else "❌ FAIL"
+                details = str(test_case.get('details', ''))
+                if len(details) > 50:
+                    details = details[:47] + "..."
+                table.add_row(
+                    test_case.get('name', 'Unknown'),
+                    region,
+                    status,
+                    details
+                )
+        
+        return table
+
+class TestReportWriter:
+    """Handles writing test reports to files."""
+    
+    def __init__(self, result: TestResult, formatter: TestResultFormatter):
         self.result = result
-        self.console = Console()
+        self.formatter = formatter
     
-    def generate_report(self) -> Path:
-        """Generate and save test report."""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_file = Path("test-results") / f"{self.result.name}_{timestamp}_report.txt"
-        result_file.parent.mkdir(exist_ok=True)
-        
-        with open(result_file, 'w') as f:
-            self._write_report_header(f)
-            self._write_configuration_details(f)
-            self._write_overall_status(f)
-            self._write_detailed_results(f)
-            self._write_failed_tests(f)
-            if self.result.test_attempts:
-                self._write_autofix_attempts(f)
-        
-        return result_file
+    def write_report(self, file_path: Path) -> None:
+        """Write test report to file."""
+        try:
+            with open(file_path, 'w') as f:
+                self._write_report_header(f)
+                self._write_configuration_details(f)
+                self._write_overall_status(f)
+                self._write_detailed_results(f)
+                self._write_failed_tests(f)
+                if self.result.test_attempts:
+                    self._write_autofix_attempts(f)
+        except Exception as e:
+            raise ReportGenerationError(f"Failed to write report: {str(e)}")
     
     def _write_report_header(self, f) -> None:
         f.write("Test Results Report\n")
@@ -238,7 +271,7 @@ class TestReportGenerator:
         f.write(f"- Config: {self.result.config_path}\n\n")
     
     def _write_overall_status(self, f) -> None:
-        status, status_emoji = TestResultFormatter.format_overall_status(self.result.results)
+        status, status_emoji = self.formatter.format_overall_status(self.result.results)
         f.write(f"Overall Status: {status_emoji} {status.upper()}\n\n")
     
     def _write_detailed_results(self, f) -> None:
@@ -298,7 +331,7 @@ class TestReportGenerator:
         else:
             f.write("No tests were fixed in this attempt\n")
         
-        status, _ = TestResultFormatter.format_overall_status(attempt['results'])
+        status, _ = self.formatter.format_overall_status(attempt['results'])
         f.write(f"\nOverall Status: {status.upper()}\n")
         
         overall_status = attempt['results'].get('overall_status', {})
@@ -321,6 +354,75 @@ class TestReportGenerator:
                     })
         return fixed_tests
 
+class TestExecutor:
+    """Handles test execution and result processing."""
+    
+    def __init__(self, config: TestConfiguration):
+        self.config = config
+        self.console = Console()
+        self.logger = TestLogger(config.name)
+    
+    def execute(self) -> TestResult:
+        """Execute tests and return results."""
+        try:
+            self.logger.info(f"Running test: {self.config.name}")
+            if self.config.description:
+                self.logger.info(f"Description: {self.config.description}")
+            self.console.print("=" * 50)
+            
+            runner = TestRunner(self._create_runner_config())
+            results = runner.run_tests(self.config.file_path)
+            failed_tests = collect_failed_tests(results)
+            
+            test_attempts = self._handle_auto_fix(failed_tests) if self.config.auto_fix else None
+            
+            return TestResult(
+                name=self.config.name,
+                file_path=self.config.file_path,
+                config_path=self.config.config_path,
+                results=results,
+                failed_tests=failed_tests,
+                test_attempts=test_attempts
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error executing tests: {str(e)}")
+            raise TestExecutionError(f"Failed to execute tests: {str(e)}")
+    
+    def _create_runner_config(self) -> Dict[str, Any]:
+        """Create configuration for test runner."""
+        config = {
+            'name': self.config.name,
+            'file_path': str(self.config.file_path),
+            'config_file': str(self.config.config_path),
+            'agent_type': self.config.agent_type,
+            'description': self.config.description,
+            'metadata': self.config.metadata.__dict__ if self.config.metadata else None,
+            'evaluation': self.config.evaluation.__dict__ if self.config.evaluation else None
+        }
+        
+        if self.config.regions:
+            config['regions'] = self.config.regions
+        if self.config.steps:
+            config['steps'] = self.config.steps
+            
+        return config
+    
+    def _handle_auto_fix(self, failed_tests: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """Handle auto-fix for failed tests."""
+        if not failed_tests:
+            return None
+            
+        self.logger.info(f"Attempting to fix {len(failed_tests)} failing tests (max retries: {self.config.max_retries})")
+        from ...autofix.main import AutoFix
+        return AutoFix(self.config.config_path).fix_code(
+            str(self.config.file_path),
+            failed_tests,
+            max_retries=self.config.max_retries,
+            create_pr=self.config.create_pr,
+            base_branch=self.config.base_branch
+        )
+
 @click.command()
 @click.option('--config', '-c', type=click.Path(exists=True), required=True, help='Test configuration file')
 @click.option('--auto-fix', is_flag=True, help='Automatically fix failing tests')
@@ -332,7 +434,6 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
     console = Console()
     
     try:
-        # Load and validate configuration
         test_config = TestConfiguration.from_file(
             Path(config),
             auto_fix=auto_fix,
@@ -341,32 +442,35 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
             base_branch=base_branch
         )
         
-        # Execute tests
         executor = TestExecutor(test_config)
         test_result = executor.execute()
         
-        # Generate and display report
-        report_generator = TestReportGenerator(test_result)
-        result_file = report_generator.generate_report()
+        # Generate report
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_file = Path("test-results") / f"{test_result.name}_{timestamp}_report.txt"
+        result_file.parent.mkdir(exist_ok=True)
         
-        # Display results summary
+        # Use Markdown formatter for file output
+        markdown_formatter = MarkdownTestResultFormatter()
+        report_writer = TestReportWriter(test_result, markdown_formatter)
+        report_writer.write_report(result_file)
+        
+        # Use Rich formatter for console output
+        rich_formatter = RichTestResultFormatter(console)
+        
         console.print("\nTest Results Summary")
         console.print("=" * 50)
         
-        # Print configuration details
         console.print(f"\nTest Configuration:")
         console.print(f"- Name: {test_result.name}")
         console.print(f"- File: {test_result.file_path}")
         console.print(f"- Config: {test_result.config_path}")
         
-        # Print overall status
-        status, status_emoji = TestResultFormatter.format_overall_status(test_result.results)
+        status, status_emoji = rich_formatter.format_overall_status(test_result.results)
         console.print(f"\nOverall Status: {status_emoji} {status.upper()}")
         
-        # Print test results table
         console.print("\nTest Results Table:")
-        for line in TestResultFormatter.format_test_results_table(test_result.results):
-            console.print(line)
+        console.print(rich_formatter.format_test_results_table(test_result.results))
         
         console.print(f"\nDetailed report saved to: {result_file}")
         
@@ -408,14 +512,10 @@ def run_block(file_path: str, input_text: str = None, output: str = None):
 def run_test(test_file: str):
     """Run a test file and display results."""
     try:
-        # Load configuration
         test_config = TestConfiguration.from_file(Path(test_file))
-        
-        # Execute tests
         executor = TestExecutor(test_config)
         test_result = executor.execute()
         
-        # Display results
         if not test_result.failed_tests:
             logger.info("\nAll steps passed! See test-results/ for details.")
         else:
