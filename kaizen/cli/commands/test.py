@@ -9,10 +9,12 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union, Protocol, runtime_checkable
+from abc import ABC, abstractmethod
+
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.traceback import install as install_rich_traceback
-from abc import ABC, abstractmethod
+from rich.table import Table
 
 from ...autofix.test.runner import TestRunner
 from ...autofix.test.logger import TestLogger
