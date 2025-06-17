@@ -1126,32 +1126,14 @@ class CodeRegionExecutor:
     """Executes code regions and manages their execution context."""
     
     def __init__(self, workspace_root: Path):
-        """Initialize the code region executor.
-        
-        Args:
-            workspace_root: Root directory of the workspace
-        """
+        """Initialize the code region executor."""
         self.workspace_root = workspace_root
         self.import_manager = ImportManager(workspace_root)
     
     def execute_region(self, region_info: RegionInfo, method_name: Optional[str] = None, 
                       input_data: Any = None) -> Any:
-        """Execute a code region and return its result.
-        
-        Args:
-            region_info: Information about the code region to execute
-            method_name: Optional name of the method to execute (for classes)
-            input_data: Optional input data for the execution
-            
-        Returns:
-            Result of the execution
-            
-        Raises:
-            ValueError: If execution fails or required parameters are missing
-            ImportError: If required imports cannot be loaded
-            AttributeError: If method or attribute not found
-            TypeError: If input data is invalid
-        """
+        """Execute a code region and return its result."""
+        logger.info(f"Executing region: {region_info.name}")
         try:
             with self.import_manager.managed_imports(region_info) as namespace:
                 # Execute the code
@@ -1163,31 +1145,16 @@ class CodeRegionExecutor:
                     return self._execute_function(namespace, region_info, input_data)
                 else:
                     return self._execute_module(namespace, region_info, method_name, input_data)
-        except ImportError as e:
-            raise ImportError(f"Failed to import required modules: {str(e)}")
-        except ValueError as e:
-            raise ValueError(f"Failed to execute region '{region_info.name}': {str(e)}")
-        except Exception as e:
+        except (ImportError, ValueError, AttributeError, TypeError) as e:
+            logger.error(f"✗ Execution failed: {region_info.name} - {str(e)}")
+            raise
+        except BaseException as e:
+            logger.error(f"✗ Unexpected error: {region_info.name} - {str(e)}")
             raise ValueError(f"Unexpected error executing region '{region_info.name}': {str(e)}")
     
     def _execute_class_method(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                             method_name: str, input_data: Any) -> Any:
-        """Execute a method from a class.
-        
-        Args:
-            namespace: Execution namespace
-            region_info: Information about the code region
-            method_name: Name of the method to execute
-            input_data: Input data for the method
-            
-        Returns:
-            Result of the method execution
-            
-        Raises:
-            ValueError: If method execution fails or parameters are invalid
-            AttributeError: If method not found
-            TypeError: If input data is invalid
-        """
+        """Execute a method from a class."""
         if not method_name:
             raise ValueError(f"Method name required for class region '{region_info.name}'")
         
@@ -1209,29 +1176,16 @@ class CodeRegionExecutor:
             
             # Execute the method
             return method(input_data)
-        except AttributeError as e:
-            raise AttributeError(f"Method '{method_name}' not found in class '{region_info.name}': {str(e)}")
-        except TypeError as e:
-            raise TypeError(f"Invalid input data for method '{method_name}': {str(e)}")
-        except Exception as e:
+        except (AttributeError, TypeError) as e:
+            logger.error(f"✗ Method error: {method_name} - {str(e)}")
+            raise
+        except BaseException as e:
+            logger.error(f"✗ Method execution failed: {method_name} - {str(e)}")
             raise ValueError(f"Error executing method '{method_name}': {str(e)}")
     
     def _execute_function(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                          input_data: Any) -> Any:
-        """Execute a function.
-        
-        Args:
-            namespace: Execution namespace
-            region_info: Information about the code region
-            input_data: Input data for the function
-            
-        Returns:
-            Result of the function execution
-            
-        Raises:
-            ValueError: If function execution fails or parameters are invalid
-            TypeError: If input data is invalid
-        """
+        """Execute a function."""
         try:
             func = namespace[region_info.name]
             
@@ -1244,29 +1198,16 @@ class CodeRegionExecutor:
                 raise ValueError(f"Input data for function '{region_info.name}' cannot be empty")
             
             return func(input_data)
-        except TypeError as e:
-            raise TypeError(f"Invalid input data for function '{region_info.name}': {str(e)}")
-        except Exception as e:
+        except (TypeError, ValueError) as e:
+            logger.error(f"✗ Function error: {region_info.name} - {str(e)}")
+            raise
+        except BaseException as e:
+            logger.error(f"✗ Function execution failed: {region_info.name} - {str(e)}")
             raise ValueError(f"Error executing function '{region_info.name}': {str(e)}")
     
     def _execute_module(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                        method_name: str, input_data: Any) -> Any:
-        """Execute a module-level function.
-        
-        Args:
-            namespace: Execution namespace
-            region_info: Information about the code region
-            method_name: Name of the function to execute
-            input_data: Input data for the function
-            
-        Returns:
-            Result of the function execution
-            
-        Raises:
-            ValueError: If function execution fails or parameters are invalid
-            AttributeError: If function not found
-            TypeError: If input data is invalid
-        """
+        """Execute a module-level function."""
         if not method_name:
             raise ValueError(f"Method name required for module region '{region_info.name}'")
         
@@ -1285,7 +1226,9 @@ class CodeRegionExecutor:
                 raise ValueError(f"Input data for function '{method_name}' cannot be empty")
             
             return func(input_data)
-        except TypeError as e:
-            raise TypeError(f"Invalid input data for function '{method_name}': {str(e)}")
-        except Exception as e:
+        except (TypeError, ValueError) as e:
+            logger.error(f"✗ Module function error: {method_name} - {str(e)}")
+            raise
+        except BaseException as e:
+            logger.error(f"✗ Module function execution failed: {method_name} - {str(e)}")
             raise ValueError(f"Error executing function '{method_name}': {str(e)}") 
