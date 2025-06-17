@@ -21,8 +21,64 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from enum import Enum
 from .types import PRStrategy
+from .errors import ConfigurationError
 
 T = TypeVar('T')
+
+class PathResolutionError(ConfigurationError):
+    """Error raised when there is a problem resolving file paths."""
+    pass
+
+@dataclass
+class PathResolver:
+    """Utility class for resolving file paths.
+    
+    This class handles path resolution relative to a base directory,
+    with proper error handling and validation.
+    
+    Attributes:
+        base_dir: Base directory for resolving relative paths
+    """
+    base_dir: Path
+
+    def resolve(self, path: Union[str, Path]) -> Path:
+        """Resolve a path relative to the base directory.
+        
+        Args:
+            path: Path to resolve (string or Path object)
+            
+        Returns:
+            Resolved absolute path
+            
+        Raises:
+            PathResolutionError: If path resolution fails
+        """
+        try:
+            path = Path(path)
+            if path.is_absolute():
+                return path
+            return (self.base_dir / path).resolve()
+        except Exception as e:
+            raise PathResolutionError(f"Failed to resolve path {path}: {str(e)}") from e
+
+    def validate_exists(self, path: Union[str, Path]) -> Path:
+        """Resolve and validate that a path exists.
+        
+        Args:
+            path: Path to resolve and validate
+            
+        Returns:
+            Resolved absolute path
+            
+        Raises:
+            PathResolutionError: If path doesn't exist or resolution fails
+        """
+        resolved_path = self.resolve(path)
+        if not resolved_path.exists():
+            raise PathResolutionError(
+                f"Path does not exist: {path} (resolved to: {resolved_path})"
+            )
+        return resolved_path
 
 class PRStrategy(str, Enum):
     """Strategy for when to create pull requests.
@@ -255,12 +311,13 @@ class TestConfiguration:
         """Validate file paths.
         
         Raises:
-            ValueError: If any file path is invalid
+            PathResolutionError: If any file path is invalid
         """
-        if not self.file_path.exists():
-            raise ValueError(f"Test file not found: {self.file_path}")
-        if not self.config_path.exists():
-            raise ValueError(f"Configuration file not found: {self.config_path}")
+        resolver = PathResolver(self.config_path.parent)
+        try:
+            resolver.validate_exists(self.file_path)
+        except PathResolutionError as e:
+            raise ValueError(str(e)) from e
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], config_path: Path) -> 'TestConfiguration':
@@ -275,13 +332,21 @@ class TestConfiguration:
             
         Raises:
             ValueError: If any configuration value is invalid
+            PathResolutionError: If file path resolution fails
         """
         # Validate and convert pr_strategy
         pr_strategy = cls._parse_pr_strategy(data.get('pr_strategy', 'ALL_PASSING'))
 
+        # Resolve file path relative to config
+        resolver = PathResolver(config_path.parent)
+        try:
+            file_path = resolver.resolve(data['file_path'])
+        except PathResolutionError as e:
+            raise ValueError(f"Invalid file path in configuration: {str(e)}") from e
+
         return cls(
             name=data['name'],
-            file_path=Path(data['file_path']),
+            file_path=file_path,
             config_path=config_path,
             agent_type=data.get('agent_type'),
             description=data.get('description'),
