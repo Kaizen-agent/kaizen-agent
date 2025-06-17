@@ -37,9 +37,9 @@ class ColoredFormatter(logging.Formatter):
     }
     
     def format(self, record):
+        # Only color the level name, not the entire message
         if record.levelname in self.COLORS:
             record.levelname = f"{self.COLORS[record.levelname]}{record.levelname}{self.COLORS['RESET']}"
-            record.msg = f"{self.COLORS[record.levelname]}{record.msg}{self.COLORS['RESET']}"
         return super().format(record)
 
 # Configure logging
@@ -47,7 +47,22 @@ logger = logging.getLogger(__name__)
 handler = logging.StreamHandler()
 handler.setFormatter(ColoredFormatter('%(levelname)s: %(message)s'))
 logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.INFO)  # Default to INFO level
+
+def set_log_level(level: str) -> None:
+    """Set the logging level.
+    
+    Args:
+        level: One of 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
+    """
+    level_map = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL
+    }
+    logger.setLevel(level_map.get(level.upper(), logging.INFO))
 
 # Type variables for generic types
 T = TypeVar('T')
@@ -269,48 +284,29 @@ class DependencyResolver:
         return imports
     
     def resolve_dependencies(self, file_path: Path) -> FrozenSet[ModuleInfo]:
-        """Resolve all dependencies for a file.
-        
-        Args:
-            file_path: Path to the file to analyze
-            
-        Returns:
-            FrozenSet of ModuleInfo objects representing all dependencies
-            
-        Raises:
-            DependencyResolutionError: If dependencies cannot be resolved
-            RegionExtractionError: If file cannot be read or parsed
-        """
-        logger.info(f"Resolving dependencies for {file_path}")
+        """Resolve all dependencies for a file."""
+        logger.info(f"Resolving dependencies: {file_path.name}")
         try:
             with open(file_path, 'r') as f:
                 content = f.read()
             
             tree = ast.parse(content)
             imports = self._extract_imports(tree)
-            logger.debug(f"Found imports: {imports}")
+            logger.debug(f"Imports: {imports}")
             
-            # Reset state for new resolution
             self._reset_state()
-            
-            # Build import graph
             self._build_import_graph(file_path.name, imports)
-            
-            # Check for cycles
             self._check_cycles(file_path.name)
-            
-            # Resolve all dependencies
             dependencies = self._resolve_all_dependencies(imports)
-            logger.info(f"Resolved {len(dependencies)} dependencies")
             
+            logger.info(f"✓ Dependencies resolved: {len(dependencies)} found")
             return frozenset(dependencies)
             
         except (IOError, SyntaxError) as e:
-            logger.error(f"Failed to read or parse file {file_path}: {str(e)}")
+            logger.error(f"✗ Failed to read/parse: {file_path.name}")
             raise RegionExtractionError(f"Failed to read or parse file {file_path}: {str(e)}")
         except Exception as e:
-            logger.error(f"Failed to resolve dependencies: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"✗ Dependency resolution failed: {file_path.name}")
             raise DependencyResolutionError(f"Failed to resolve dependencies for {file_path}: {str(e)}")
     
     def _reset_state(self) -> None:
