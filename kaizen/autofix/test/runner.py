@@ -382,10 +382,13 @@ class TestRunner:
         except Exception as e:
             return self.result_handler.create_error_result(e, f"test case {test_case.get('name', 'Unknown')}")
     
-    def run_tests(self) -> Dict:
+    def run_tests(self, test_file_path: Path) -> Dict:
         """
-        Run all tests in the configuration.
+        Run tests and return results.
         
+        Args:
+            test_file_path: Path to the test file
+            
         Returns:
             Dict containing test results
         """
@@ -393,7 +396,6 @@ class TestRunner:
         summary = TestSummary()
         
         try:
-            test_file_path = Path(self.test_config['file_path'])
             if not test_file_path.exists():
                 raise FileNotFoundError(f"Test file not found: {test_file_path}")
             
