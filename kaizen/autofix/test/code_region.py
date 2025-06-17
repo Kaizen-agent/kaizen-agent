@@ -874,12 +874,32 @@ class CodeRegionExecutor:
     """Executes code regions and manages their execution context."""
     
     def __init__(self, workspace_root: Path):
+        """Initialize the code region executor.
+        
+        Args:
+            workspace_root: Root directory of the workspace
+        """
         self.workspace_root = workspace_root
         self.import_manager = ImportManager(workspace_root)
     
     def execute_region(self, region_info: RegionInfo, method_name: Optional[str] = None, 
                       input_data: Any = None) -> Any:
-        """Execute a code region and return its result."""
+        """Execute a code region and return its result.
+        
+        Args:
+            region_info: Information about the code region to execute
+            method_name: Optional name of the method to execute (for classes)
+            input_data: Optional input data for the execution
+            
+        Returns:
+            Result of the execution
+            
+        Raises:
+            ValueError: If execution fails or required parameters are missing
+            ImportError: If required imports cannot be loaded
+            AttributeError: If method or attribute not found
+            TypeError: If input data is invalid
+        """
         try:
             with self.import_manager.managed_imports(region_info) as namespace:
                 # Execute the code
@@ -891,33 +911,30 @@ class CodeRegionExecutor:
                     return self._execute_function(namespace, region_info, input_data)
                 else:
                     return self._execute_module(namespace, region_info, method_name, input_data)
-        except Exception as e:
+        except ImportError as e:
+            raise ImportError(f"Failed to import required modules: {str(e)}")
+        except ValueError as e:
             raise ValueError(f"Failed to execute region '{region_info.name}': {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Unexpected error executing region '{region_info.name}': {str(e)}")
     
-    def _execute_class_method(self, namespace: Dict, region_info: RegionInfo, 
+    def _execute_class_method(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                             method_name: str, input_data: Any) -> Any:
         """Execute a method from a class.
         
-        Example:
-            # Given a class like:
-            class MyClass:
-                def process_data(self, data: str) -> str:
-                    return data.upper()
+        Args:
+            namespace: Execution namespace
+            region_info: Information about the code region
+            method_name: Name of the method to execute
+            input_data: Input data for the method
             
-            # We can run it with:
-            region_info = RegionInfo(
-                type=RegionType.CLASS,
-                name="MyClass",
-                code="class MyClass:\n    def process_data(self, data: str) -> str:\n        return data.upper()",
-                start_line=1,
-                end_line=3,
-                imports=[],
-                dependencies=frozenset(),
-                class_methods=["process_data"],
-                file_path=Path("example.py")
-            )
-            result = executor.execute_region(region_info, "process_data", "hello")
-            # result will be "HELLO"
+        Returns:
+            Result of the method execution
+            
+        Raises:
+            ValueError: If method execution fails or parameters are invalid
+            AttributeError: If method not found
+            TypeError: If input data is invalid
         """
         if not method_name:
             raise ValueError(f"Method name required for class region '{region_info.name}'")
@@ -925,89 +942,78 @@ class CodeRegionExecutor:
         if method_name not in region_info.class_methods:
             raise ValueError(f"Method '{method_name}' not found in class '{region_info.name}'")
         
-        # Create instance and get method
-        instance = namespace[region_info.name]()
-        method = getattr(instance, method_name)
-        
-        # Validate input data
-        if input_data is None:
-            raise ValueError(f"Input data required for method '{method_name}'")
-        
-        # If input_data is a string, ensure it's not empty
-        if isinstance(input_data, str) and not input_data.strip():
-            raise ValueError(f"Input data for method '{method_name}' cannot be empty")
-        
-        # Execute the method
         try:
+            # Create instance and get method
+            instance = namespace[region_info.name]()
+            method = getattr(instance, method_name)
+            
+            # Validate input data
+            if input_data is None:
+                raise ValueError(f"Input data required for method '{method_name}'")
+            
+            # If input_data is a string, ensure it's not empty
+            if isinstance(input_data, str) and not input_data.strip():
+                raise ValueError(f"Input data for method '{method_name}' cannot be empty")
+            
+            # Execute the method
             return method(input_data)
+        except AttributeError as e:
+            raise AttributeError(f"Method '{method_name}' not found in class '{region_info.name}': {str(e)}")
+        except TypeError as e:
+            raise TypeError(f"Invalid input data for method '{method_name}': {str(e)}")
         except Exception as e:
             raise ValueError(f"Error executing method '{method_name}': {str(e)}")
     
-    def _execute_function(self, namespace: Dict, region_info: RegionInfo, 
+    def _execute_function(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                          input_data: Any) -> Any:
         """Execute a function.
         
-        Example:
-            # Given a function like:
-            def process_data(data: str) -> str:
-                return data.upper()
+        Args:
+            namespace: Execution namespace
+            region_info: Information about the code region
+            input_data: Input data for the function
             
-            # We can run it with:
-            region_info = RegionInfo(
-                type=RegionType.FUNCTION,
-                name="process_data",
-                code="def process_data(data: str) -> str:\n    return data.upper()",
-                start_line=1,
-                end_line=2,
-                imports=[],
-                dependencies=frozenset(),
-                class_methods=None,
-                file_path=Path("example.py")
-            )
-            result = executor.execute_region(region_info, None, "hello")
-            # result will be "HELLO"
+        Returns:
+            Result of the function execution
+            
+        Raises:
+            ValueError: If function execution fails or parameters are invalid
+            TypeError: If input data is invalid
         """
-        func = namespace[region_info.name]
-        
-        # Validate input data
-        if input_data is None:
-            raise ValueError(f"Input data required for function '{region_info.name}'")
-        
-        # If input_data is a string, ensure it's not empty
-        if isinstance(input_data, str) and not input_data.strip():
-            raise ValueError(f"Input data for function '{region_info.name}' cannot be empty")
-        
         try:
+            func = namespace[region_info.name]
+            
+            # Validate input data
+            if input_data is None:
+                raise ValueError(f"Input data required for function '{region_info.name}'")
+            
+            # If input_data is a string, ensure it's not empty
+            if isinstance(input_data, str) and not input_data.strip():
+                raise ValueError(f"Input data for function '{region_info.name}' cannot be empty")
+            
             return func(input_data)
+        except TypeError as e:
+            raise TypeError(f"Invalid input data for function '{region_info.name}': {str(e)}")
         except Exception as e:
             raise ValueError(f"Error executing function '{region_info.name}': {str(e)}")
     
-    def _execute_module(self, namespace: Dict, region_info: RegionInfo, 
+    def _execute_module(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                        method_name: str, input_data: Any) -> Any:
         """Execute a module-level function.
         
-        Example:
-            # Given a module with functions:
-            def process_data(data: str) -> str:
-                return data.upper()
+        Args:
+            namespace: Execution namespace
+            region_info: Information about the code region
+            method_name: Name of the function to execute
+            input_data: Input data for the function
             
-            def validate_data(data: str) -> bool:
-                return len(data) > 0
+        Returns:
+            Result of the function execution
             
-            # We can run it with:
-            region_info = RegionInfo(
-                type=RegionType.MODULE,
-                name="module",
-                code="def process_data(data: str) -> str:\n    return data.upper()\n\ndef validate_data(data: str) -> bool:\n    return len(data) > 0",
-                start_line=1,
-                end_line=4,
-                imports=[],
-                dependencies=frozenset(),
-                class_methods=None,
-                file_path=Path("example.py")
-            )
-            result = executor.execute_region(region_info, "process_data", "hello")
-            # result will be "HELLO"
+        Raises:
+            ValueError: If function execution fails or parameters are invalid
+            AttributeError: If function not found
+            TypeError: If input data is invalid
         """
         if not method_name:
             raise ValueError(f"Method name required for module region '{region_info.name}'")
@@ -1015,17 +1021,19 @@ class CodeRegionExecutor:
         if method_name not in namespace:
             raise ValueError(f"Function '{method_name}' not found in module")
         
-        func = namespace[method_name]
-        
-        # Validate input data
-        if input_data is None:
-            raise ValueError(f"Input data required for function '{method_name}'")
-        
-        # If input_data is a string, ensure it's not empty
-        if isinstance(input_data, str) and not input_data.strip():
-            raise ValueError(f"Input data for function '{method_name}' cannot be empty")
-        
         try:
+            func = namespace[method_name]
+            
+            # Validate input data
+            if input_data is None:
+                raise ValueError(f"Input data required for function '{method_name}'")
+            
+            # If input_data is a string, ensure it's not empty
+            if isinstance(input_data, str) and not input_data.strip():
+                raise ValueError(f"Input data for function '{method_name}' cannot be empty")
+            
             return func(input_data)
+        except TypeError as e:
+            raise TypeError(f"Invalid input data for function '{method_name}': {str(e)}")
         except Exception as e:
             raise ValueError(f"Error executing function '{method_name}': {str(e)}") 
