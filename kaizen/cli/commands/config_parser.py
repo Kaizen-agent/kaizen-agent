@@ -161,16 +161,11 @@ class ConfigurationParser:
             if not isinstance(evaluation_data, dict):
                 return Result.failure("Invalid evaluation format: expected a dictionary")
             
-            settings = TestSettings(
-                timeout=evaluation_data.get('settings', {}).get('timeout'),
-                retries=evaluation_data.get('settings', {}).get('retries')
-            )
-            
             evaluation = TestEvaluation(
                 criteria=evaluation_data.get('criteria', []),
                 llm_provider=evaluation_data.get('llm_provider'),
                 model=evaluation_data.get('model'),
-                settings=settings
+                settings=evaluation_data.get('settings', {})
             )
             
             return Result.success(evaluation)

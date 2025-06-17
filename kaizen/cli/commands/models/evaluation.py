@@ -13,12 +13,14 @@ class TestEvaluation:
     
     Attributes:
         criteria: List of evaluation criteria
-        threshold: Minimum passing score
-        timeout: Maximum execution time
+        llm_provider: LLM provider to use
+        model: Model to use for evaluation
+        settings: Test settings
     """
-    criteria: Optional[List[str]] = None
-    threshold: Optional[float] = None
-    timeout: Optional[int] = None
+    criteria: List[Dict[str, Any]]
+    llm_provider: Optional[str] = None
+    model: Optional[str] = None
+    settings: Optional[Dict[str, Any]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TestEvaluation':
@@ -31,7 +33,8 @@ class TestEvaluation:
             TestEvaluation instance
         """
         return cls(
-            criteria=data.get('criteria'),
-            threshold=data.get('threshold'),
-            timeout=data.get('timeout')
+            criteria=data.get('criteria', []),
+            llm_provider=data.get('llm_provider'),
+            model=data.get('model'),
+            settings=data.get('settings', {})
         ) 
