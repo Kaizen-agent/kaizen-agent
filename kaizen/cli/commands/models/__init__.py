@@ -5,11 +5,13 @@ from .evaluation import TestEvaluation
 from .settings import TestSettings
 from .step import TestStep
 from .configuration import TestConfiguration
+from .result import TestResult
 
 __all__ = [
     'TestMetadata',
     'TestEvaluation',
     'TestSettings',
     'TestStep',
-    'TestConfiguration'
+    'TestConfiguration',
+    'TestResult'
 ] 
