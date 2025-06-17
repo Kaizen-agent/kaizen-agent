@@ -5,7 +5,7 @@ about test configurations.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 @dataclass(frozen=True)
 class TestMetadata:
