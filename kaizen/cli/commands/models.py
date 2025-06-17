@@ -179,7 +179,7 @@ class TestStep:
     description: Optional[str] = None
     input: Dict[str, Any] = field(default_factory=dict)
 
-@dataclass
+@dataclass(frozen=True)
 class TestConfiguration:
     """Configuration for test execution.
     
@@ -229,19 +229,34 @@ class TestConfiguration:
         Raises:
             ValueError: If any configuration value is invalid
         """
-        # Validate max_retries
+        self._validate_retries()
+        self._validate_branch()
+        self._validate_paths()
+
+    def _validate_retries(self) -> None:
+        """Validate max_retries value.
+        
+        Raises:
+            ValueError: If max_retries is invalid
+        """
         if not 1 <= self.max_retries <= 10:
             raise ValueError(f"max_retries must be between 1 and 10, got {self.max_retries}")
 
-        # Validate base_branch
+    def _validate_branch(self) -> None:
+        """Validate base_branch value.
+        
+        Raises:
+            ValueError: If base_branch is invalid
+        """
         if not self.base_branch or not isinstance(self.base_branch, str):
             raise ValueError("base_branch must be a non-empty string")
 
-        # Validate pr_strategy
-        if not isinstance(self.pr_strategy, PRStrategy):
-            raise ValueError(f"pr_strategy must be a PRStrategy enum value, got {type(self.pr_strategy)}")
-
-        # Validate file paths
+    def _validate_paths(self) -> None:
+        """Validate file paths.
+        
+        Raises:
+            ValueError: If any file path is invalid
+        """
         if not self.file_path.exists():
             raise ValueError(f"Test file not found: {self.file_path}")
         if not self.config_path.exists():
@@ -261,12 +276,8 @@ class TestConfiguration:
         Raises:
             ValueError: If any configuration value is invalid
         """
-        # Convert pr_strategy string to enum
-        pr_strategy_str = data.get('pr_strategy', 'ALL_PASSING')
-        try:
-            pr_strategy = PRStrategy.from_str(pr_strategy_str)
-        except ValueError as e:
-            raise ValueError(f"Invalid PR strategy: {pr_strategy_str}") from e
+        # Validate and convert pr_strategy
+        pr_strategy = cls._parse_pr_strategy(data.get('pr_strategy', 'ALL_PASSING'))
 
         return cls(
             name=data['name'],
@@ -285,6 +296,28 @@ class TestConfiguration:
             base_branch=data.get('base_branch', 'main'),
             pr_strategy=pr_strategy
         )
+
+    @staticmethod
+    def _parse_pr_strategy(value: Union[str, PRStrategy]) -> PRStrategy:
+        """Parse PR strategy value.
+        
+        Args:
+            value: PR strategy value (string or enum)
+            
+        Returns:
+            PRStrategy enum value
+            
+        Raises:
+            ValueError: If value is invalid
+        """
+        if isinstance(value, PRStrategy):
+            return value
+        if not isinstance(value, str):
+            raise ValueError(f"PR strategy must be a string or PRStrategy enum, got {type(value)}")
+        try:
+            return PRStrategy.from_str(value)
+        except ValueError as e:
+            raise ValueError(f"Invalid PR strategy: {value}") from e
 
 @dataclass
 class TestResult:
