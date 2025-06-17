@@ -13,6 +13,7 @@ from .result import Result
 from .models import TestConfiguration
 from .config_loader import ConfigurationLoader
 from .config_validator import ConfigurationValidator
+from .config_parser import ConfigurationParser
 
 class ConfigurationManager:
     """Manages test configuration loading and validation.
@@ -25,6 +26,7 @@ class ConfigurationManager:
         """Initialize the configuration manager."""
         self.validator = ConfigurationValidator()
         self.loader = ConfigurationLoader(self.validator)
+        self.parser = ConfigurationParser()
     
     def load_configuration(
         self,
@@ -56,6 +58,11 @@ class ConfigurationManager:
             
             config_data = load_result.value
             
+            # Parse configuration data
+            parse_result = self.parser.parse_configuration(config_data)
+            if not parse_result.is_success:
+                return parse_result
+            
             # Create configuration object
             config = TestConfiguration(
                 name=config_data['name'],
@@ -77,10 +84,12 @@ class ConfigurationManager:
                 config.regions = config_data['regions']
             if 'steps' in config_data:
                 config.steps = config_data['steps']
-            if 'metadata' in config_data:
-                config.metadata = config_data['metadata']
-            if 'evaluation' in config_data:
-                config.evaluation = config_data['evaluation']
+            
+            # Add parsed objects
+            if parse_result.value.metadata:
+                config.metadata = parse_result.value.metadata
+            if parse_result.value.evaluation:
+                config.evaluation = parse_result.value.evaluation
             
             return Result.success(config)
             
@@ -135,30 +144,43 @@ class ConfigurationManager:
         resolved_path = (config_path.parent / file_path).resolve()
         return resolved_path if resolved_path.exists() else None
     
-    @staticmethod
-    def _parse_metadata(config_data: Dict[str, Any]) -> Optional[TestMetadata]:
-        """Parse metadata from configuration.
+    def _parse_metadata(self, metadata_data: Dict[str, Any]) -> Optional[TestMetadata]:
+        """Parse metadata from configuration data.
         
         Args:
-            config_data: Dictionary containing configuration data
+            metadata_data: Metadata configuration data
             
         Returns:
-            TestMetadata instance if metadata exists, None otherwise
+            Parsed TestMetadata object or None if invalid
         """
-        if 'metadata' not in config_data:
+        if not isinstance(metadata_data, dict):
             return None
-        return TestMetadata.from_dict(config_data['metadata'])
+            
+        return TestMetadata(
+            version=metadata_data.get('version'),
+            author=metadata_data.get('author'),
+            created_at=metadata_data.get('created_at'),
+            updated_at=metadata_data.get('updated_at'),
+            description=metadata_data.get('description')
+        )
     
-    @staticmethod
-    def _parse_evaluation(config_data: Dict[str, Any]) -> Optional[TestEvaluation]:
-        """Parse evaluation criteria from configuration.
+    def _parse_evaluation(self, evaluation_data: Dict[str, Any]) -> Optional[TestEvaluation]:
+        """Parse evaluation criteria from configuration data.
         
         Args:
-            config_data: Dictionary containing configuration data
+            evaluation_data: Evaluation configuration data
             
         Returns:
-            TestEvaluation instance if evaluation exists, None otherwise
+            Parsed TestEvaluation object or None if invalid
         """
-        if 'evaluation' not in config_data:
+        if not isinstance(evaluation_data, dict):
             return None
-        return TestEvaluation.from_dict(config_data['evaluation']) 
+            
+        return TestEvaluation(
+            criteria=evaluation_data.get('criteria', []),
+            thresholds=evaluation_data.get('thresholds', {}),
+            settings=TestSettings(
+                timeout=evaluation_data.get('settings', {}).get('timeout'),
+                retries=evaluation_data.get('settings', {}).get('retries')
+            )
+        ) 
