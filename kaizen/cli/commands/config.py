@@ -4,13 +4,18 @@ This module provides a high-level interface for managing test configurations,
 combining loading, validation, and configuration object creation.
 """
 
+# Standard library imports
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+# Local application imports
 from .errors import ConfigurationError
 from .types import PRStrategy
 from .result import Result
-from .models import TestConfiguration
+from .models import (
+    TestConfiguration,
+    TestMetadata,
+)
 from .config_loader import ConfigurationLoader
 from .config_validator import ConfigurationValidator
 from .config_parser import ConfigurationParser
