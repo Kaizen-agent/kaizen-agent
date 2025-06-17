@@ -8,15 +8,19 @@ import sys
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union, Protocol
+from typing import Dict, Any, Optional, List, Union, Protocol, runtime_checkable
 from dataclasses import dataclass
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.table import Table
+from rich.traceback import install as install_rich_traceback
 
 from ...autofix.test.runner import TestRunner
 from ...autofix.test.logger import TestLogger
 from ...utils.test_utils import collect_failed_tests
+
+# Configure rich traceback
+install_rich_traceback(show_locals=True)
 
 # Configure logging
 logging.basicConfig(
@@ -53,6 +57,21 @@ class ReportGenerationError(TestError):
     """Exception for report generation errors."""
     pass
 
+@runtime_checkable
+class StatusFormatter(Protocol):
+    """Protocol for formatting test status."""
+    def format_status(self, status: str) -> str: ...
+
+@runtime_checkable
+class TableFormatter(Protocol):
+    """Protocol for formatting test results as tables."""
+    def format_table(self, results: Dict[str, Any]) -> Union[List[str], Table]: ...
+
+@runtime_checkable
+class TestResultFormatter(StatusFormatter, TableFormatter, Protocol):
+    """Protocol for test result formatting."""
+    pass
+
 @dataclass
 class TestMetadata:
     """Metadata for test configuration."""
@@ -60,12 +79,30 @@ class TestMetadata:
     dependencies: List[str]
     environment_variables: List[str]
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'TestMetadata':
+        """Create TestMetadata from dictionary."""
+        return cls(
+            version=data['version'],
+            dependencies=data['dependencies'],
+            environment_variables=data['environment_variables']
+        )
+
 @dataclass
 class EvaluationCriteria:
     """Evaluation criteria for tests."""
     llm_provider: str
     model: str
     criteria: List[Dict[str, Any]]
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'EvaluationCriteria':
+        """Create EvaluationCriteria from dictionary."""
+        return cls(
+            llm_provider=data['llm_provider'],
+            model=data['model'],
+            criteria=data['criteria']
+        )
 
 @dataclass
 class TestConfiguration:
@@ -96,33 +133,12 @@ class TestConfiguration:
             if not config_data:
                 raise ConfigurationError("Test configuration file is empty")
             
-            required_fields = ['name', 'file_path']
-            missing_fields = [field for field in required_fields if field not in config_data]
-            if missing_fields:
-                raise ConfigurationError(f"Missing required fields in configuration: {', '.join(missing_fields)}")
+            cls._validate_required_fields(config_data)
+            cls._validate_test_structure(config_data)
             
-            if 'regions' not in config_data and 'steps' not in config_data:
-                raise ConfigurationError("Test configuration must contain either 'regions' or 'steps'")
-            
-            file_path = (config_path.parent / config_data['file_path']).resolve()
-            if not file_path.exists():
-                raise ConfigurationError(f"File not found: {file_path}")
-
-            metadata = None
-            if 'metadata' in config_data:
-                metadata = TestMetadata(
-                    version=config_data['metadata']['version'],
-                    dependencies=config_data['metadata']['dependencies'],
-                    environment_variables=config_data['metadata']['environment_variables']
-                )
-
-            evaluation = None
-            if 'evaluation' in config_data:
-                evaluation = EvaluationCriteria(
-                    llm_provider=config_data['evaluation']['llm_provider'],
-                    model=config_data['evaluation']['model'],
-                    criteria=config_data['evaluation']['criteria']
-                )
+            file_path = cls._resolve_file_path(config_path, config_data['file_path'])
+            metadata = cls._parse_metadata(config_data)
+            evaluation = cls._parse_evaluation(config_data)
             
             return cls(
                 name=config_data['name'],
@@ -144,6 +160,42 @@ class TestConfiguration:
         except Exception as e:
             raise ConfigurationError(f"Error loading configuration: {str(e)}")
 
+    @staticmethod
+    def _validate_required_fields(config_data: Dict[str, Any]) -> None:
+        """Validate required fields in configuration."""
+        required_fields = ['name', 'file_path']
+        missing_fields = [field for field in required_fields if field not in config_data]
+        if missing_fields:
+            raise ConfigurationError(f"Missing required fields in configuration: {', '.join(missing_fields)}")
+
+    @staticmethod
+    def _validate_test_structure(config_data: Dict[str, Any]) -> None:
+        """Validate test structure in configuration."""
+        if 'regions' not in config_data and 'steps' not in config_data:
+            raise ConfigurationError("Test configuration must contain either 'regions' or 'steps'")
+
+    @staticmethod
+    def _resolve_file_path(config_path: Path, file_path: str) -> Path:
+        """Resolve file path relative to config file."""
+        resolved_path = (config_path.parent / file_path).resolve()
+        if not resolved_path.exists():
+            raise ConfigurationError(f"File not found: {resolved_path}")
+        return resolved_path
+
+    @staticmethod
+    def _parse_metadata(config_data: Dict[str, Any]) -> Optional[TestMetadata]:
+        """Parse metadata from configuration."""
+        if 'metadata' not in config_data:
+            return None
+        return TestMetadata.from_dict(config_data['metadata'])
+
+    @staticmethod
+    def _parse_evaluation(config_data: Dict[str, Any]) -> Optional[EvaluationCriteria]:
+        """Parse evaluation criteria from configuration."""
+        if 'evaluation' not in config_data:
+            return None
+        return EvaluationCriteria.from_dict(config_data['evaluation'])
+
 @dataclass
 class TestResult:
     """Data class to hold test results."""
@@ -154,29 +206,15 @@ class TestResult:
     failed_tests: List[Dict[str, Any]]
     test_attempts: Optional[List[Dict[str, Any]]] = None
 
-class TestResultFormatter(Protocol):
-    """Protocol for test result formatting."""
-    def format_overall_status(self, results: Dict[str, Any]) -> tuple[str, str]: ...
-    def format_test_results_table(self, results: Dict[str, Any]) -> List[str]: ...
-
 class MarkdownTestResultFormatter:
     """Formats test results in Markdown format."""
     
     @staticmethod
-    def get_status_emoji(status: str) -> str:
-        """Get emoji for status."""
-        return STATUS_EMOJI.get(status.lower(), STATUS_EMOJI['unknown'])
+    def format_status(status: str) -> str:
+        """Format status with emoji."""
+        return f"{STATUS_EMOJI.get(status.lower(), STATUS_EMOJI['unknown'])} {status.upper()}"
     
-    @staticmethod
-    def format_overall_status(results: Dict[str, Any]) -> tuple[str, str]:
-        """Format overall status with emoji."""
-        overall_status = results.get('overall_status', 'unknown')
-        status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
-        status_emoji = MarkdownTestResultFormatter.get_status_emoji(status)
-        return status, status_emoji
-    
-    @staticmethod
-    def format_test_results_table(results: Dict[str, Any]) -> List[str]:
+    def format_table(self, results: Dict[str, Any]) -> List[str]:
         """Format test results as a table."""
         table_lines = [
             "| Test Name | Region | Status | Details |",
@@ -187,8 +225,11 @@ class MarkdownTestResultFormatter:
             if region == 'overall_status':
                 continue
                 
-            test_cases = result.get('test_cases', [])
+            test_cases = result.get('test_cases', []) if isinstance(result, dict) else []
             for test_case in test_cases:
+                if not isinstance(test_case, dict):
+                    continue
+                    
                 status = "✅ PASS" if test_case.get('status') == 'passed' else "❌ FAIL"
                 details = str(test_case.get('details', ''))
                 if len(details) > 50:
@@ -205,14 +246,11 @@ class RichTestResultFormatter:
     def __init__(self, console: Console):
         self.console = console
     
-    def format_overall_status(self, results: Dict[str, Any]) -> tuple[str, str]:
-        """Format overall status with emoji."""
-        overall_status = results.get('overall_status', 'unknown')
-        status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
-        status_emoji = STATUS_EMOJI.get(status.lower(), STATUS_EMOJI['unknown'])
-        return status, status_emoji
+    def format_status(self, status: str) -> str:
+        """Format status with emoji."""
+        return f"{STATUS_EMOJI.get(status.lower(), STATUS_EMOJI['unknown'])} {status.upper()}"
     
-    def format_test_results_table(self, results: Dict[str, Any]) -> Table:
+    def format_table(self, results: Dict[str, Any]) -> Table:
         """Format test results as a Rich table."""
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("Test Name")
@@ -224,8 +262,11 @@ class RichTestResultFormatter:
             if region == 'overall_status':
                 continue
                 
-            test_cases = result.get('test_cases', [])
+            test_cases = result.get('test_cases', []) if isinstance(result, dict) else []
             for test_case in test_cases:
+                if not isinstance(test_case, dict):
+                    continue
+                    
                 status = "✅ PASS" if test_case.get('status') == 'passed' else "❌ FAIL"
                 details = str(test_case.get('details', ''))
                 if len(details) > 50:
@@ -242,13 +283,15 @@ class RichTestResultFormatter:
 class TestReportWriter:
     """Handles writing test reports to files."""
     
-    def __init__(self, result: TestResult, formatter: TestResultFormatter):
+    def __init__(self, result: TestResult, formatter: TestResultFormatter, logger: logging.Logger):
         self.result = result
         self.formatter = formatter
+        self.logger = logger
     
     def write_report(self, file_path: Path) -> None:
         """Write test report to file."""
         try:
+            self.logger.info(f"Writing test report to {file_path}")
             with open(file_path, 'w') as f:
                 self._write_report_header(f)
                 self._write_configuration_details(f)
@@ -257,7 +300,9 @@ class TestReportWriter:
                 self._write_failed_tests(f)
                 if self.result.test_attempts:
                     self._write_autofix_attempts(f)
+            self.logger.info("Test report written successfully")
         except Exception as e:
+            self.logger.error(f"Failed to write report: {str(e)}")
             raise ReportGenerationError(f"Failed to write report: {str(e)}")
     
     def _write_report_header(self, f) -> None:
@@ -271,8 +316,14 @@ class TestReportWriter:
         f.write(f"- Config: {self.result.config_path}\n\n")
     
     def _write_overall_status(self, f) -> None:
-        status, status_emoji = self.formatter.format_overall_status(self.result.results)
-        f.write(f"Overall Status: {status_emoji} {status.upper()}\n\n")
+        try:
+            overall_status = self.result.results.get('overall_status', 'unknown')
+            status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
+            formatted_status = self.formatter.format_status(status)
+            f.write(f"Overall Status: {formatted_status}\n\n")
+        except Exception as e:
+            self.logger.warning(f"Error formatting overall status: {str(e)}")
+            f.write("Overall Status: ❓ UNKNOWN\n\n")
     
     def _write_detailed_results(self, f) -> None:
         f.write("Detailed Test Results:\n")
@@ -285,11 +336,16 @@ class TestReportWriter:
             f.write(f"Region: {region}\n")
             f.write("-" * 30 + "\n")
             
-            test_cases = result.get('test_cases', [])
+            test_cases = result.get('test_cases', []) if isinstance(result, dict) else []
             for test_case in test_cases:
                 self._write_test_case(f, test_case)
     
     def _write_test_case(self, f, test_case: Dict[str, Any]) -> None:
+        if not isinstance(test_case, dict):
+            self.logger.warning(f"Invalid test case format: {test_case}")
+            f.write(f"Invalid test case format: {test_case}\n")
+            return
+
         f.write(f"\nTest: {test_case.get('name', 'Unknown')}\n")
         f.write(f"Status: {test_case.get('status', 'unknown')}\n")
         if test_case.get('details'):
@@ -307,34 +363,49 @@ class TestReportWriter:
         f.write("\nFailed Tests Analysis:\n")
         f.write("=" * 50 + "\n\n")
         for test in self.result.failed_tests:
-            f.write(f"Test: {test['test_name']} ({test['region']})\n")
-            f.write(f"Error: {test['error_message']}\n")
-            if test['output']:
-                f.write(f"Output:\n{test['output']}\n")
+            if not isinstance(test, dict):
+                self.logger.warning(f"Invalid failed test format: {test}")
+                f.write(f"Invalid failed test format: {test}\n")
+                continue
+
+            f.write(f"Test: {test.get('test_name', 'Unknown')} ({test.get('region', 'Unknown')})\n")
+            f.write(f"Error: {test.get('error_message', 'Unknown error')}\n")
+            if test.get('output'):
+                f.write(f"Output:\n{test.get('output')}\n")
             f.write("-" * 30 + "\n")
     
     def _write_autofix_attempts(self, f) -> None:
         f.write("\nAuto-fix Attempts:\n")
         f.write("=" * 50 + "\n\n")
         for attempt in self.result.test_attempts:
+            if not isinstance(attempt, dict):
+                self.logger.warning(f"Invalid attempt format: {attempt}")
+                f.write(f"Invalid attempt format: {attempt}\n")
+                continue
             self._write_attempt_details(f, attempt)
     
     def _write_attempt_details(self, f, attempt: Dict[str, Any]) -> None:
-        f.write(f"Attempt {attempt['attempt']}:\n")
+        f.write(f"Attempt {attempt.get('attempt', 'Unknown')}:\n")
         f.write("-" * 30 + "\n")
         
         fixed_tests = self._get_fixed_tests(attempt)
         if fixed_tests:
             f.write("Fixed Tests:\n")
             for fixed in fixed_tests:
-                f.write(f"- {fixed['test_name']} ({fixed['region']})\n")
+                f.write(f"- {fixed.get('test_name', 'Unknown')} ({fixed.get('region', 'Unknown')})\n")
         else:
             f.write("No tests were fixed in this attempt\n")
         
-        status, _ = self.formatter.format_overall_status(attempt['results'])
-        f.write(f"\nOverall Status: {status.upper()}\n")
+        try:
+            results = attempt.get('results', {})
+            overall_status = results.get('overall_status', 'unknown')
+            status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
+            formatted_status = self.formatter.format_status(status)
+            f.write(f"\nOverall Status: {formatted_status}\n")
+        except Exception as e:
+            self.logger.warning(f"Error formatting attempt status: {str(e)}")
+            f.write("\nOverall Status: UNKNOWN\n")
         
-        overall_status = attempt['results'].get('overall_status', {})
         if isinstance(overall_status, dict) and 'error' in overall_status:
             f.write(f"Error: {overall_status['error']}\n")
         
@@ -342,25 +413,29 @@ class TestReportWriter:
     
     def _get_fixed_tests(self, attempt: Dict[str, Any]) -> List[Dict[str, Any]]:
         fixed_tests = []
-        for region, result in attempt['results'].items():
+        results = attempt.get('results', {})
+        
+        for region, result in results.items():
             if region == 'overall_status':
                 continue
+            if not isinstance(result, dict):
+                continue
+                
             test_cases = result.get('test_cases', [])
             for test_case in test_cases:
-                if test_case.get('status') == 'passed':
+                if isinstance(test_case, dict) and test_case.get('status') == 'passed':
                     fixed_tests.append({
                         'region': region,
-                        'test_name': test_case.get('name')
+                        'test_name': test_case.get('name', 'Unknown')
                     })
         return fixed_tests
 
 class TestExecutor:
     """Handles test execution and result processing."""
     
-    def __init__(self, config: TestConfiguration):
+    def __init__(self, config: TestConfiguration, logger: logging.Logger):
         self.config = config
-        self.console = Console()
-        self.logger = TestLogger(config.name)
+        self.logger = logger
     
     def execute(self) -> TestResult:
         """Execute tests and return results."""
@@ -368,7 +443,6 @@ class TestExecutor:
             self.logger.info(f"Running test: {self.config.name}")
             if self.config.description:
                 self.logger.info(f"Description: {self.config.description}")
-            self.console.print("=" * 50)
             
             runner = TestRunner(self._create_runner_config())
             results = runner.run_tests(self.config.file_path)
@@ -442,7 +516,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
             base_branch=base_branch
         )
         
-        executor = TestExecutor(test_config)
+        executor = TestExecutor(test_config, logger)
         test_result = executor.execute()
         
         # Generate report
@@ -452,7 +526,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
         
         # Use Markdown formatter for file output
         markdown_formatter = MarkdownTestResultFormatter()
-        report_writer = TestReportWriter(test_result, markdown_formatter)
+        report_writer = TestReportWriter(test_result, markdown_formatter, logger)
         report_writer.write_report(result_file)
         
         # Use Rich formatter for console output
@@ -466,11 +540,11 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
         console.print(f"- File: {test_result.file_path}")
         console.print(f"- Config: {test_result.config_path}")
         
-        status, status_emoji = rich_formatter.format_overall_status(test_result.results)
-        console.print(f"\nOverall Status: {status_emoji} {status.upper()}")
+        status = rich_formatter.format_status(test_result.results.get('overall_status', 'unknown'))
+        console.print(f"\nOverall Status: {status}")
         
         console.print("\nTest Results Table:")
-        console.print(rich_formatter.format_test_results_table(test_result.results))
+        console.print(rich_formatter.format_table(test_result.results))
         
         console.print(f"\nDetailed report saved to: {result_file}")
         
@@ -513,7 +587,7 @@ def run_test(test_file: str):
     """Run a test file and display results."""
     try:
         test_config = TestConfiguration.from_file(Path(test_file))
-        executor = TestExecutor(test_config)
+        executor = TestExecutor(test_config, logger)
         test_result = executor.execute()
         
         if not test_result.failed_tests:
