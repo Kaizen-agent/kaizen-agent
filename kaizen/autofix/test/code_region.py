@@ -258,6 +258,12 @@ class DependencyResolver:
         self._visited: Set[str] = set()
         self._temp_visited: Set[str] = set()
         self._builtin_modules = frozenset(sys.builtin_module_names)
+        self._typing_types = frozenset({
+            'Optional', 'List', 'Dict', 'Tuple', 'Set', 'FrozenSet', 
+            'Union', 'Any', 'Callable', 'TypeVar', 'Generic', 'Type',
+            'Protocol', 'runtime_checkable', 'overload', 'final',
+            'Literal', 'TypedDict', 'cast', 'get_type_hints'
+        })
     
     def _extract_imports(self, tree: ast.AST) -> List[str]:
         """Extract all imports from the AST.
@@ -273,12 +279,21 @@ class DependencyResolver:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 if isinstance(node, ast.Import):
                     for name in node.names:
-                        imports.append(name.name)
+                        # Handle typing imports specially
+                        if name.name.startswith('typing.'):
+                            base_name = name.name.split('.')[0]
+                            imports.append(base_name)
+                        else:
+                            imports.append(name.name)
                 else:  # ImportFrom
                     module = node.module or ''
                     for name in node.names:
-                        imports.append(f"{module}.{name.name}")
-        return imports
+                        # Handle typing imports specially
+                        if module == 'typing' or module.startswith('typing.'):
+                            imports.append('typing')
+                        else:
+                            imports.append(f"{module}.{name.name}")
+        return list(set(imports))  # Remove duplicates
     
     def resolve_dependencies(self, file_path: Path) -> FrozenSet[ModuleInfo]:
         """Resolve all dependencies for a file."""
@@ -346,14 +361,15 @@ class DependencyResolver:
             
         Returns:
             ModuleInfo if module is found, None otherwise
-            
-        Raises:
-            DependencyResolutionError: If module resolution fails
         """
         if module_name in self._module_cache:
             return self._module_cache[module_name]
         
         try:
+            # Handle typing module specially
+            if module_name == 'typing':
+                return self._resolve_typing_module()
+            
             # Handle standard library modules
             if module_name in STANDARD_MODULES:
                 module_info = self._resolve_standard_module(module_name)
@@ -367,6 +383,21 @@ class DependencyResolver:
             logger.error(f"Failed to resolve module {module_name}: {str(e)}")
             return None
     
+    def _resolve_typing_module(self) -> ModuleInfo:
+        """Resolve the typing module with special handling.
+        
+        Returns:
+            ModuleInfo for the typing module
+        """
+        return ModuleInfo(
+            name='typing',
+            path=Path('typing'),
+            is_package=False,
+            is_third_party=False,
+            version=sys.version,
+            dependencies=frozenset()
+        )
+    
     def _resolve_standard_module(self, module_name: str) -> ModuleInfo:
         """Resolve a standard library module.
         
@@ -375,9 +406,6 @@ class DependencyResolver:
             
         Returns:
             ModuleInfo for the standard library module
-            
-        Raises:
-            DependencyResolutionError: If module cannot be resolved
         """
         try:
             # Handle built-in modules
