@@ -86,7 +86,7 @@ class EmailAgent:
             raise ValueError(f"Failed to generate improved email: {str(e)}")
 # kaizen:end:email_agent
 
-# kaizen:start:cli_interface
+
 @click.command()
 @click.option('--draft', type=str, help='Email draft to improve')
 @click.option('--file', type=str, help='Path to file containing email draft')
@@ -129,4 +129,3 @@ def main(draft: str, file: str):
 
 if __name__ == '__main__':
     main()
-# kaizen:end:cli_interface
