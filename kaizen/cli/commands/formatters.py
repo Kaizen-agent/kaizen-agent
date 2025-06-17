@@ -1,9 +1,73 @@
-"""Test result formatters for Kaizen CLI."""
+"""Test result formatters for Kaizen CLI.
 
-from typing import Dict, Any, List, Union
+This module provides formatters for converting test results into different output formats.
+It includes both Markdown and Rich console formatters, each implementing a common
+interface defined by the TestResultFormatter protocol.
+
+The formatters handle:
+- Status formatting with emojis
+- Table generation for test results
+- Consistent output formatting across different mediums
+"""
+
+# Standard library imports
+from typing import Any, Dict, List, Protocol, Union
+
+# Third-party imports
 from rich.console import Console
 from rich.table import Table
-from .types import TestResultFormatter, STATUS_EMOJI
+
+# Local application imports
+from kaizen.cli.commands.types import STATUS_EMOJI
+
+class TestResultFormatter(Protocol):
+    """Protocol for test result formatters.
+    
+    This protocol defines the interface that all test result formatters must implement.
+    Formatters are responsible for converting test results into different output formats.
+    
+    Attributes:
+        None - This is a protocol class defining an interface
+    """
+    
+    def format_status(self, status: str) -> str:
+        """Format test status with emoji.
+        
+        Args:
+            status: The status string to format (e.g., 'passed', 'failed')
+            
+        Returns:
+            A formatted status string with emoji
+            
+        Example:
+            >>> formatter = MarkdownTestResultFormatter()
+            >>> formatter.format_status('passed')
+            '✅ PASSED'
+        """
+        ...
+    
+    def format_table(self, results: Dict[str, Any]) -> Union[List[str], Table]:
+        """Format test results as a table.
+        
+        Args:
+            results: Dictionary containing test results with the following structure:
+                {
+                    'region_name': {
+                        'status': str,
+                        'test_cases': List[Dict[str, Any]]
+                    }
+                }
+            
+        Returns:
+            Either a list of strings (for markdown) or a Rich Table object
+            
+        Example:
+            >>> formatter = MarkdownTestResultFormatter()
+            >>> results = {'test1': {'status': 'passed', 'test_cases': []}}
+            >>> formatter.format_table(results)
+            ['| Region | Status | Details |', '|--------|--------|---------|', '| test1 | ✅ PASSED |  |']
+        """
+        ...
 
 class MarkdownTestResultFormatter(TestResultFormatter):
     """Formats test results in Markdown format.
@@ -11,6 +75,11 @@ class MarkdownTestResultFormatter(TestResultFormatter):
     This formatter is used for writing test results to files in a human-readable
     Markdown format. It provides methods for formatting both individual status
     indicators and complete result tables.
+    
+    The formatter generates markdown tables with the following columns:
+    - Region: The name of the test region
+    - Status: The test status with emoji
+    - Details: Additional test case information
     """
     
     def format_status(self, status: str) -> str:
@@ -65,6 +134,11 @@ class RichTestResultFormatter(TestResultFormatter):
     This formatter is used for displaying test results in the console using
     Rich's table formatting capabilities. It provides methods for formatting
     both individual status indicators and complete result tables.
+    
+    The formatter creates Rich tables with the following columns:
+    - Region: The name of the test region (dimmed style)
+    - Status: The test status with emoji
+    - Details: Additional test case information
     """
     
     def __init__(self, console: Console):
