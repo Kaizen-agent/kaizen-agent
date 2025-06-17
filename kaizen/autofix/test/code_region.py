@@ -224,106 +224,193 @@ class DependencyResolver:
         except ImportError:
             return None
 
-class ImportResolver:
-    """Resolves and manages Python imports."""
+class ImportManager:
+    """Manages imports for code region execution."""
     
     def __init__(self, workspace_root: Path):
-        """Initialize the import resolver.
-        
-        Args:
-            workspace_root: Root directory of the workspace
-        """
         self.workspace_root = workspace_root
-        self._module_cache: Dict[str, ModuleInfo] = {}
-        self._import_cache: Dict[str, Any] = {}
-        self._setup_import_hooks()
+        self._setup_python_path()
+        self._processed_files: Set[Path] = set()
+        self._original_sys_path = sys.path.copy()
+        self._added_paths: Set[str] = set()
     
-    def _setup_import_hooks(self) -> None:
-        """Set up custom import hooks if needed."""
-        # Add custom import hooks here if needed
-        pass
+    def _setup_python_path(self) -> None:
+        """Set up Python path with workspace root."""
+        if str(self.workspace_root) not in sys.path:
+            sys.path.insert(0, str(self.workspace_root))
+            self._added_paths.add(str(self.workspace_root))
     
-    def resolve_import(self, import_info: ImportInfo) -> Optional[Any]:
-        """Resolve an import to its actual module or object.
-        
-        Args:
-            import_info: Information about the import to resolve
+    def setup_imports(self, region_info: RegionInfo, namespace: Dict) -> None:
+        """Set up all necessary imports in the namespace."""
+        try:
+            # Reset processed files for new execution
+            self._processed_files.clear()
             
-        Returns:
-            The imported module or object if successful, None otherwise
-        """
+            # Validate file existence
+            if region_info.file_path and not region_info.file_path.exists():
+                raise FileNotFoundError(f"File not found: {region_info.file_path}")
+            
+            # Add workspace to Python path
+            if region_info.file_path:
+                self._add_to_python_path(region_info.file_path.parent)
+            
+            # Validate and process dependencies
+            self._validate_dependencies(region_info)
+            self._process_dependencies(region_info, namespace)
+            
+        except Exception as e:
+            self.cleanup()
+            raise ValueError(f"Failed to set up imports: {str(e)}")
+    
+    def _validate_dependencies(self, region_info: RegionInfo) -> None:
+        """Validate that all dependencies exist and are accessible."""
+        for dep in region_info.dependencies:
+            if not dep.is_third_party and not dep.path.exists():
+                raise FileNotFoundError(f"Dependency file not found: {dep.path}")
+    
+    def _process_dependencies(self, region_info: RegionInfo, namespace: Dict) -> None:
+        """Process all dependencies recursively."""
+        if region_info.file_path in self._processed_files:
+            return
+        
+        self._processed_files.add(region_info.file_path)
+        
+        # Add dependencies to Python path
+        for dep in region_info.dependencies:
+            if not dep.is_third_party:
+                self._add_to_python_path(dep.path.parent)
+                # Recursively process dependencies of dependencies
+                if dep.path not in self._processed_files:
+                    try:
+                        self._process_file_dependencies(dep.path, namespace)
+                    except Exception as e:
+                        logger.warning(f"Failed to process dependency {dep.path}: {str(e)}")
+        
+        # Execute imports in the namespace
+        for import_info in region_info.imports:
+            self._execute_import(import_info, namespace)
+    
+    def _process_file_dependencies(self, file_path: Path, namespace: Dict) -> None:
+        """Process dependencies of a single file."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            tree = ast.parse(content)
+            dep_imports = self._extract_imports(tree)
+            
+            # Process imports in order
+            for imp in dep_imports:
+                self._execute_import(imp, namespace)
+                
+        except UnicodeDecodeError:
+            logger.warning(f"Failed to decode file {file_path} with utf-8 encoding")
+            # Try with different encoding
+            try:
+                with open(file_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
+                tree = ast.parse(content)
+                dep_imports = self._extract_imports(tree)
+                for imp in dep_imports:
+                    self._execute_import(imp, namespace)
+            except Exception as e:
+                logger.error(f"Failed to process file {file_path}: {str(e)}")
+    
+    def _add_to_python_path(self, directory: Path) -> None:
+        """Add directory to Python path if not already present."""
+        dir_str = str(directory)
+        if dir_str not in sys.path:
+            sys.path.insert(0, dir_str)
+            self._added_paths.add(dir_str)
+    
+    def _execute_import(self, import_info: ImportInfo, namespace: Dict) -> None:
+        """Execute a single import statement in the namespace."""
         try:
             if import_info.type == ImportType.SIMPLE:
-                return self._resolve_simple_import(import_info)
+                self._execute_simple_import(import_info, namespace)
             elif import_info.type == ImportType.FROM:
-                return self._resolve_from_import(import_info)
+                self._execute_from_import(import_info, namespace)
             elif import_info.type == ImportType.RELATIVE:
-                return self._resolve_relative_import(import_info)
+                self._execute_relative_import(import_info, namespace)
             elif import_info.type == ImportType.ALIAS:
-                return self._resolve_alias_import(import_info)
+                self._execute_alias_import(import_info, namespace)
             elif import_info.type == ImportType.STAR:
-                return self._resolve_star_import(import_info)
+                self._execute_star_import(import_info, namespace)
+        except ImportError as e:
+            logger.warning(f"Failed to import {import_info}: {str(e)}")
+            # Try to find the module in the workspace
+            self._try_find_module_in_workspace(import_info, namespace)
+    
+    def _execute_simple_import(self, import_info: ImportInfo, namespace: Dict) -> None:
+        """Execute a simple import statement."""
+        module = __import__(import_info.module)
+        namespace[import_info.module] = module
+    
+    def _execute_from_import(self, import_info: ImportInfo, namespace: Dict) -> None:
+        """Execute a from import statement."""
+        module = __import__(import_info.module, fromlist=import_info.names)
+        for name in import_info.names:
+            if hasattr(module, name):
+                namespace[name] = getattr(module, name)
+    
+    def _execute_relative_import(self, import_info: ImportInfo, namespace: Dict) -> None:
+        """Execute a relative import statement."""
+        module = __import__(import_info.module.lstrip('.'), fromlist=['*'])
+        namespace[import_info.module] = module
+    
+    def _execute_alias_import(self, import_info: ImportInfo, namespace: Dict) -> None:
+        """Execute an alias import statement."""
+        module = __import__(import_info.module)
+        for orig_name, alias in import_info.aliases.items():
+            if hasattr(module, orig_name):
+                namespace[alias] = getattr(module, orig_name)
+    
+    def _execute_star_import(self, import_info: ImportInfo, namespace: Dict) -> None:
+        """Execute a star import statement."""
+        module = __import__(import_info.module, fromlist=['*'])
+        for name in dir(module):
+            if not name.startswith('_'):
+                namespace[name] = getattr(module, name)
+    
+    def _try_find_module_in_workspace(self, import_info: ImportInfo, namespace: Dict) -> None:
+        """Try to find and import a module from the workspace."""
+        try:
+            module_name = import_info.module
+            # Try to find the module file
+            module_path = self.workspace_root / module_name.replace('.', '/')
+            
+            # Try as a Python file
+            if module_path.with_suffix('.py').exists():
+                self._load_module_from_file(module_name, module_path.with_suffix('.py'), namespace)
+            # Try as a package
+            elif module_path.is_dir() and (module_path / '__init__.py').exists():
+                self._load_module_from_file(module_name, module_path / '__init__.py', namespace)
             else:
-                logger.warning(f"Unsupported import type: {import_info.type}")
-                return None
+                logger.warning(f"Module {module_name} not found in workspace")
+                
         except Exception as e:
-            logger.warning(f"Failed to resolve import {import_info}: {str(e)}")
-            return None
+            logger.warning(f"Failed to find module {import_info.module} in workspace: {str(e)}")
     
-    def _resolve_simple_import(self, import_info: ImportInfo) -> Optional[Any]:
-        """Resolve a simple import (import x)."""
+    def _load_module_from_file(self, module_name: str, file_path: Path, namespace: Dict) -> None:
+        """Load a module from a file."""
         try:
-            module = __import__(import_info.module)
-            return module
-        except ImportError:
-            return None
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            if spec and spec.loader:
+                # Remove module from sys.modules if it exists to force reload
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                namespace[module_name] = module
+        except Exception as e:
+            logger.error(f"Failed to load module {module_name} from {file_path}: {str(e)}")
     
-    def _resolve_from_import(self, import_info: ImportInfo) -> Dict[str, Any]:
-        """Resolve a from import (from x import y)."""
-        result = {}
-        try:
-            module = __import__(import_info.module, fromlist=import_info.names)
-            for name in import_info.names:
-                if hasattr(module, name):
-                    result[name] = getattr(module, name)
-        except ImportError:
-            pass
-        return result
-    
-    def _resolve_relative_import(self, import_info: ImportInfo) -> Optional[Any]:
-        """Resolve a relative import (from . import x)."""
-        try:
-            module_name = import_info.module.lstrip('.')
-            if not module_name:
-                raise ImportError("Invalid relative import path")
-            module = __import__(module_name, fromlist=['*'])
-            return module
-        except ImportError:
-            return None
-    
-    def _resolve_alias_import(self, import_info: ImportInfo) -> Dict[str, Any]:
-        """Resolve an alias import (import x as y)."""
-        result = {}
-        try:
-            module = __import__(import_info.module)
-            for orig_name, alias in import_info.aliases.items():
-                if hasattr(module, orig_name):
-                    result[alias] = getattr(module, orig_name)
-        except ImportError:
-            pass
-        return result
-    
-    def _resolve_star_import(self, import_info: ImportInfo) -> Dict[str, Any]:
-        """Resolve a star import (from x import *)."""
-        result = {}
-        try:
-            module = __import__(import_info.module, fromlist=['*'])
-            for name in dir(module):
-                if not name.startswith('_'):
-                    result[name] = getattr(module, name)
-        except ImportError:
-            pass
-        return result
+    def cleanup(self) -> None:
+        """Clean up any modifications made to the Python environment."""
+        # Restore original sys.path
+        sys.path.clear()
+        sys.path.extend(self._original_sys_path)
+        self._added_paths.clear()
+        self._processed_files.clear()
 
 class CodeRegionExtractor:
     """Extracts and analyzes code regions from files."""
@@ -435,28 +522,15 @@ class CodeRegionExecutor:
     
     def __init__(self, workspace_root: Path):
         self.workspace_root = workspace_root
-        self.import_resolver = ImportResolver(workspace_root)
-        self._setup_python_path()
-    
-    def _setup_python_path(self) -> None:
-        """Set up Python path with workspace root."""
-        if str(self.workspace_root) not in sys.path:
-            sys.path.insert(0, str(self.workspace_root))
+        self.import_manager = ImportManager(workspace_root)
     
     def execute_region(self, region_info: RegionInfo, method_name: Optional[str] = None, 
                       input_data: Any = None) -> Any:
         """Execute a code region and return its result."""
         try:
-            # Add all dependency paths to Python path
-            for dep in region_info.dependencies:
-                if not dep.is_third_party:
-                    dep_dir = str(dep.path.parent)
-                    if dep_dir not in sys.path:
-                        sys.path.insert(0, dep_dir)
-            
             with self._create_execution_context(region_info) as namespace:
                 # Set up imports
-                self._setup_imports(region_info, namespace)
+                self.import_manager.setup_imports(region_info, namespace)
                 
                 if region_info.type == RegionType.CLASS:
                     return self._execute_class_method(namespace, region_info, method_name, input_data)
@@ -467,31 +541,21 @@ class CodeRegionExecutor:
         except Exception as e:
             raise ValueError(f"Failed to execute region '{region_info.name}': {str(e)}")
         finally:
-            # Clean up added paths
-            for dep in region_info.dependencies:
-                if not dep.is_third_party:
-                    dep_dir = str(dep.path.parent)
-                    if dep_dir in sys.path:
-                        sys.path.remove(dep_dir)
+            # Clean up
+            self.import_manager.cleanup()
     
-    def _setup_imports(self, region_info: RegionInfo, namespace: Dict) -> None:
-        """Set up all necessary imports in the namespace."""
-        # Add standard library imports
-        for module_name in ['typing', 'os', 'sys', 'pathlib']:
-            try:
-                module = __import__(module_name)
-                namespace[module_name] = module
-            except ImportError:
-                pass
+    def _cleanup_paths(self, region_info: RegionInfo) -> None:
+        """Clean up any paths added to sys.path."""
+        if region_info.file_path:
+            workspace_dir = str(region_info.file_path.parent)
+            if workspace_dir in sys.path:
+                sys.path.remove(workspace_dir)
         
-        # Add imports from the region
-        for import_info in region_info.imports:
-            result = self.import_resolver.resolve_import(import_info)
-            if result:
-                if isinstance(result, dict):
-                    namespace.update(result)
-                else:
-                    namespace[import_info.module] = result
+        for dep in region_info.dependencies:
+            if not dep.is_third_party:
+                dep_dir = str(dep.path.parent)
+                if dep_dir in sys.path:
+                    sys.path.remove(dep_dir)
     
     @contextmanager
     def _create_execution_context(self, region_info: RegionInfo):
@@ -509,7 +573,29 @@ class CodeRegionExecutor:
     
     def _execute_class_method(self, namespace: Dict, region_info: RegionInfo, 
                             method_name: str, input_data: Any) -> Any:
-        """Execute a method from a class."""
+        """Execute a method from a class.
+        
+        Example:
+            # Given a class like:
+            class MyClass:
+                def process_data(self, data: str) -> str:
+                    return data.upper()
+            
+            # We can run it with:
+            region_info = RegionInfo(
+                type=RegionType.CLASS,
+                name="MyClass",
+                code="class MyClass:\n    def process_data(self, data: str) -> str:\n        return data.upper()",
+                start_line=1,
+                end_line=3,
+                imports=[],
+                dependencies=frozenset(),
+                class_methods=["process_data"],
+                file_path=Path("example.py")
+            )
+            result = executor.execute_region(region_info, "process_data", "hello")
+            # result will be "HELLO"
+        """
         if not method_name:
             raise ValueError(f"Method name required for class region '{region_info.name}'")
         
@@ -536,7 +622,28 @@ class CodeRegionExecutor:
     
     def _execute_function(self, namespace: Dict, region_info: RegionInfo, 
                          input_data: Any) -> Any:
-        """Execute a function."""
+        """Execute a function.
+        
+        Example:
+            # Given a function like:
+            def process_data(data: str) -> str:
+                return data.upper()
+            
+            # We can run it with:
+            region_info = RegionInfo(
+                type=RegionType.FUNCTION,
+                name="process_data",
+                code="def process_data(data: str) -> str:\n    return data.upper()",
+                start_line=1,
+                end_line=2,
+                imports=[],
+                dependencies=frozenset(),
+                class_methods=None,
+                file_path=Path("example.py")
+            )
+            result = executor.execute_region(region_info, None, "hello")
+            # result will be "HELLO"
+        """
         func = namespace[region_info.name]
         
         # Validate input data
@@ -554,7 +661,31 @@ class CodeRegionExecutor:
     
     def _execute_module(self, namespace: Dict, region_info: RegionInfo, 
                        method_name: str, input_data: Any) -> Any:
-        """Execute a module-level function."""
+        """Execute a module-level function.
+        
+        Example:
+            # Given a module with functions:
+            def process_data(data: str) -> str:
+                return data.upper()
+            
+            def validate_data(data: str) -> bool:
+                return len(data) > 0
+            
+            # We can run it with:
+            region_info = RegionInfo(
+                type=RegionType.MODULE,
+                name="module",
+                code="def process_data(data: str) -> str:\n    return data.upper()\n\ndef validate_data(data: str) -> bool:\n    return len(data) > 0",
+                start_line=1,
+                end_line=4,
+                imports=[],
+                dependencies=frozenset(),
+                class_methods=None,
+                file_path=Path("example.py")
+            )
+            result = executor.execute_region(region_info, "process_data", "hello")
+            # result will be "HELLO"
+        """
         if not method_name:
             raise ValueError(f"Method name required for module region '{region_info.name}'")
         
