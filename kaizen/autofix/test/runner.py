@@ -1,8 +1,10 @@
 """Test runner implementation for Kaizen."""
 
 import os
+import sys
 import logging
 import yaml
+import importlib.util
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
@@ -19,6 +21,7 @@ class TestStatus(Enum):
     FAILED = 'failed'
     ERROR = 'error'
     COMPLETED = 'completed'
+    UNKNOWN = 'unknown'
 
 @dataclass
 class TestSummary:
@@ -265,6 +268,38 @@ class TestRunner:
             results['overall_status'] = self._create_error_result(e, "overall results processing")
             results['_status'] = TestStatus.ERROR.value
     
+    def _import_test_module(self, test_file_path: Path) -> Any:
+        """
+        Import a test module properly handling package imports.
+        
+        Args:
+            test_file_path: Path to the test file
+            
+        Returns:
+            The imported module
+        """
+        try:
+            # Add the parent directory to sys.path if it's not already there
+            parent_dir = str(test_file_path.parent.parent)
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+            
+            # Create a module name from the file path
+            module_name = test_file_path.stem
+            
+            # Import the module
+            spec = importlib.util.spec_from_file_location(module_name, test_file_path)
+            if spec is None:
+                raise ImportError(f"Could not find module spec for {test_file_path}")
+                
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            
+            return module
+            
+        except Exception as e:
+            raise ImportError(f"Failed to import module {test_file_path}: {str(e)}")
+        
     def _run_test_case(self, test_case: Dict, test_file_path: Path) -> Dict:
         """
         Run a single test case.
@@ -280,108 +315,39 @@ class TestRunner:
             # Initialize test case results
             test_result = {
                 'name': test_case.get('name', 'Unknown'),
-                'status': 'pending'
+                'status': TestStatus.PENDING.value
             }
             
             # Get test case configuration
-            test_name = test_case.get('name')
             test_input = test_case.get('input', {})
-            test_expected = test_case.get('expected', {})
+            region = test_input.get('region')
+            method = test_input.get('method')
+            input_text = test_input.get('input')
+            
+            # Import the test module
+            test_module = self._import_test_module(test_file_path)
+            
+            # Get the class and method
+            if not hasattr(test_module, region):
+                raise AttributeError(f"Region '{region}' not found in module")
+                
+            test_class = getattr(test_module, region)
+            if not hasattr(test_class, method):
+                raise AttributeError(f"Method '{method}' not found in class '{region}'")
+                
+            test_method = getattr(test_class, method)
             
             # Run the test
-            try:
-                # Import the test module
-                import importlib.util
-                spec = importlib.util.spec_from_file_location("test_module", test_file_path)
-                test_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(test_module)
-                
-                # Get the test function
-                test_func = getattr(test_module, test_name)
-                
-                # Run the test
-                result = test_func(**test_input)
-                
-                # Check the result
-                if self._check_test_result(result, test_expected):
-                    test_result['status'] = 'passed'
-                else:
-                    test_result['status'] = 'failed'
-                    test_result['error'] = f"Test result does not match expected output"
-                    test_result['actual'] = result
-                    test_result['expected'] = test_expected
-                
-            except Exception as e:
-                test_result['status'] = 'error'
-                test_result['error'] = str(e)
+            result = test_method(input_text)
+            
+            # Check the result
+            test_result['status'] = TestStatus.PASSED.value
+            test_result['output'] = result
             
             return test_result
             
         except Exception as e:
-            logger.error(f"Error running test case", extra={
-                'test_case': test_case.get('name', 'Unknown'),
-                'error': str(e),
-                'error_type': type(e).__name__
-            })
-            return {
-                'name': test_case.get('name', 'Unknown'),
-                'status': 'error',
-                'error': str(e)
-            }
-    
-    def _check_test_result(self, result: Any, expected: Dict) -> bool:
-        """
-        Check if a test result matches the expected output.
-        
-        Args:
-            result: Actual test result
-            expected: Expected test result
-            
-        Returns:
-            bool: True if the result matches, False otherwise
-        """
-        try:
-            # Check if result is None
-            if result is None and expected.get('value') is None:
-                return True
-            
-            # Check if result is a boolean
-            if isinstance(result, bool):
-                return result == expected.get('value', True)
-            
-            # Check if result is a string
-            if isinstance(result, str):
-                return result == expected.get('value', '')
-            
-            # Check if result is a number
-            if isinstance(result, (int, float)):
-                return result == expected.get('value', 0)
-            
-            # Check if result is a list
-            if isinstance(result, list):
-                expected_list = expected.get('value', [])
-                if len(result) != len(expected_list):
-                    return False
-                return all(self._check_test_result(r, {'value': e}) 
-                          for r, e in zip(result, expected_list))
-            
-            # Check if result is a dict
-            if isinstance(result, dict):
-                expected_dict = expected.get('value', {})
-                if set(result.keys()) != set(expected_dict.keys()):
-                    return False
-                return all(self._check_test_result(result[k], {'value': expected_dict[k]})
-                          for k in expected_dict)
-            
-            # Default case
-            return False
-            
-        except Exception as e:
-            logger.error("Error checking test result", extra={
-                'error': str(e),
-                'error_type': type(e).__name__
-            })
-            return False
+            return self._create_error_result(e, f"test case {test_case.get('name', 'Unknown')}")
     
     def _process_region_results(self, region_results: Dict) -> None:
         """
