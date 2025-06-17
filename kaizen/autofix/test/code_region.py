@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Set, FrozenSet, Union, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Set, FrozenSet, Union, Type, TypeVar, Generic
 from collections import defaultdict
 import typing
 
@@ -25,10 +25,36 @@ import typing
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Type variables for generic types
+T = TypeVar('T')
+
+# Constants
+STANDARD_MODULES = frozenset({
+    'typing', 'os', 'sys', 'pathlib', 'collections', 'dataclasses', 
+    'enum', 'logging', 'importlib', 'ast', 'contextlib', 'json',
+    'datetime', 'time', 're', 'math', 'random', 'itertools', 'functools'
+})
+
+class CodeRegionError(Exception):
+    """Base exception for code region related errors."""
+    pass
+
+class RegionExtractionError(CodeRegionError):
+    """Exception raised when region extraction fails."""
+    pass
+
+class DependencyResolutionError(CodeRegionError):
+    """Exception raised when dependency resolution fails."""
+    pass
+
+class ImportError(CodeRegionError):
+    """Exception raised when import handling fails."""
+    pass
 
 class RegionType(Enum):
     """Types of code regions that can be tested."""
@@ -54,16 +80,33 @@ class ImportErrorType(Enum):
 
 @dataclass(frozen=True)
 class ImportInfo:
-    """Information about an import statement."""
+    """Information about an import statement.
+    
+    Attributes:
+        type: Type of import statement
+        module: Module being imported
+        names: List of names being imported
+        aliases: Dictionary mapping original names to aliases
+        level: Level of relative import (0 for absolute)
+    """
     type: ImportType
     module: str
     names: List[str]
-    aliases: Dict[str, str]  # Maps original names to aliases
-    level: int = 0  # For relative imports
+    aliases: Dict[str, str]
+    level: int = 0
 
 @dataclass(frozen=True)
 class ModuleInfo:
-    """Information about a Python module."""
+    """Information about a Python module.
+    
+    Attributes:
+        name: Name of the module
+        path: Path to the module file
+        is_package: Whether the module is a package
+        is_third_party: Whether the module is third-party
+        version: Optional version information
+        dependencies: Set of module dependencies
+    """
     name: str
     path: Path
     is_package: bool
@@ -73,7 +116,19 @@ class ModuleInfo:
 
 @dataclass
 class RegionInfo:
-    """Information about a code region."""
+    """Information about a code region.
+    
+    Attributes:
+        type: Type of the region
+        name: Name of the region
+        code: The actual code content
+        start_line: Starting line number
+        end_line: Ending line number
+        imports: List of imports in the region
+        dependencies: Set of module dependencies
+        class_methods: Optional list of class methods
+        file_path: Optional path to the source file
+    """
     type: RegionType
     name: str
     code: str
@@ -81,7 +136,7 @@ class RegionInfo:
     end_line: int
     imports: List[ImportInfo]
     dependencies: FrozenSet[ModuleInfo]
-    class_methods: List[str] = None
+    class_methods: Optional[List[str]] = None
     file_path: Optional[Path] = None
 
 @dataclass
@@ -161,7 +216,7 @@ class ImportManagerConfig:
 class DependencyResolver:
     """Resolves module dependencies and handles import cycles."""
     
-    def __init__(self, workspace_root: Path):
+    def __init__(self, workspace_root: Path) -> None:
         """Initialize the dependency resolver.
         
         Args:
@@ -183,7 +238,8 @@ class DependencyResolver:
             FrozenSet of ModuleInfo objects representing all dependencies
             
         Raises:
-            ValueError: If circular dependencies are detected or if dependencies cannot be resolved
+            DependencyResolutionError: If dependencies cannot be resolved
+            RegionExtractionError: If file cannot be read or parsed
         """
         try:
             with open(file_path, 'r') as f:
@@ -193,46 +249,167 @@ class DependencyResolver:
             imports = self._extract_imports(tree)
             
             # Reset state for new resolution
-            self._visited.clear()
-            self._temp_visited.clear()
-            self._import_graph.clear()
+            self._reset_state()
             
             # Build import graph
-            for imp in imports:
-                self._import_graph[file_path.name].add(imp)
+            self._build_import_graph(file_path.name, imports)
             
             # Check for cycles
             self._check_cycles(file_path.name)
             
             # Resolve all dependencies
-            dependencies = set()
-            for imp in imports:
-                module_info = self._resolve_module(imp)
-                if module_info:
-                    dependencies.add(module_info)
+            dependencies = self._resolve_all_dependencies(imports)
             
             return frozenset(dependencies)
             
         except (IOError, SyntaxError) as e:
-            raise ValueError(f"Failed to read or parse file {file_path}: {str(e)}")
-        except ImportError as e:
-            raise ValueError(f"Failed to import dependencies for {file_path}: {str(e)}")
+            raise RegionExtractionError(f"Failed to read or parse file {file_path}: {str(e)}")
         except Exception as e:
-            raise ValueError(f"Unexpected error resolving dependencies for {file_path}: {str(e)}")
+            raise DependencyResolutionError(f"Failed to resolve dependencies for {file_path}: {str(e)}")
     
-    def _extract_imports(self, tree: ast.AST) -> List[str]:
-        """Extract all imports from the AST."""
-        imports = []
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                if isinstance(node, ast.Import):
-                    for name in node.names:
-                        imports.append(name.name)
-                else:
-                    module = node.module or ''
-                    for name in node.names:
-                        imports.append(f"{module}.{name.name}")
-        return imports
+    def _reset_state(self) -> None:
+        """Reset the internal state for a new resolution."""
+        self._visited.clear()
+        self._temp_visited.clear()
+        self._import_graph.clear()
+    
+    def _build_import_graph(self, file_name: str, imports: List[str]) -> None:
+        """Build the import graph for a file.
+        
+        Args:
+            file_name: Name of the file
+            imports: List of imports to add to the graph
+        """
+        for imp in imports:
+            self._import_graph[file_name].add(imp)
+    
+    def _resolve_all_dependencies(self, imports: List[str]) -> Set[ModuleInfo]:
+        """Resolve all dependencies from a list of imports.
+        
+        Args:
+            imports: List of import statements
+            
+        Returns:
+            Set of resolved ModuleInfo objects
+        """
+        dependencies = set()
+        for imp in imports:
+            module_info = self._resolve_module(imp)
+            if module_info:
+                dependencies.add(module_info)
+        return dependencies
+    
+    def _resolve_module(self, module_name: str) -> Optional[ModuleInfo]:
+        """Resolve a module to its file path and metadata.
+        
+        Args:
+            module_name: Name of the module to resolve
+            
+        Returns:
+            ModuleInfo if module is found, None otherwise
+        """
+        if module_name in self._module_cache:
+            return self._module_cache[module_name]
+        
+        # Handle standard library modules
+        if module_name in STANDARD_MODULES:
+            return self._resolve_standard_module(module_name)
+        
+        try:
+            return self._resolve_third_party_module(module_name)
+        except ModuleNotFoundError:
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to resolve module {module_name}: {str(e)}")
+            return None
+    
+    def _resolve_standard_module(self, module_name: str) -> ModuleInfo:
+        """Resolve a standard library module.
+        
+        Args:
+            module_name: Name of the standard library module
+            
+        Returns:
+            ModuleInfo for the standard library module
+        """
+        return ModuleInfo(
+            name=module_name,
+            path=Path(sys.modules[module_name].__file__) if module_name in sys.modules else Path(module_name),
+            is_package=False,
+            is_third_party=False
+        )
+    
+    def _resolve_third_party_module(self, module_name: str) -> Optional[ModuleInfo]:
+        """Resolve a third-party module.
+        
+        Args:
+            module_name: Name of the third-party module
+            
+        Returns:
+            ModuleInfo if module is found, None otherwise
+        """
+        # Try to import the module
+        spec = importlib.util.find_spec(module_name)
+        if spec and spec.origin:
+            return self._create_module_info(module_name, spec)
+        
+        # Try relative to workspace root
+        return self._resolve_workspace_module(module_name)
+    
+    def _create_module_info(self, module_name: str, spec: importlib.machinery.ModuleSpec) -> ModuleInfo:
+        """Create a ModuleInfo object from a module spec.
+        
+        Args:
+            module_name: Name of the module
+            spec: Module specification
+            
+        Returns:
+            ModuleInfo object
+        """
+        path = Path(spec.origin)
+        is_package = spec.submodule_search_locations is not None
+        is_third_party = not str(path).startswith(str(self.workspace_root))
+        
+        module_info = ModuleInfo(
+            name=module_name,
+            path=path,
+            is_package=is_package,
+            is_third_party=is_third_party
+        )
+        
+        self._module_cache[module_name] = module_info
+        return module_info
+    
+    def _resolve_workspace_module(self, module_name: str) -> Optional[ModuleInfo]:
+        """Resolve a module from the workspace.
+        
+        Args:
+            module_name: Name of the module
+            
+        Returns:
+            ModuleInfo if module is found, None otherwise
+        """
+        module_path = self.workspace_root / module_name.replace('.', '/')
+        
+        # Try as a Python file
+        if module_path.with_suffix('.py').exists():
+            return ModuleInfo(
+                name=module_name,
+                path=module_path.with_suffix('.py'),
+                is_package=False,
+                is_third_party=False
+            )
+        
+        # Try as a package
+        if module_path.is_dir() and (module_path / '__init__.py').exists():
+            return ModuleInfo(
+                name=module_name,
+                path=module_path / '__init__.py',
+                is_package=True,
+                is_third_party=False
+            )
+        
+        return None
     
     def _check_cycles(self, module_name: str) -> None:
         """Check for circular dependencies using DFS.
@@ -241,12 +418,12 @@ class DependencyResolver:
             module_name: Name of the module to check
             
         Raises:
-            ValueError: If a circular dependency is detected
+            DependencyResolutionError: If a circular dependency is detected
         """
         if module_name in self._temp_visited:
             cycle = list(self._temp_visited)
             cycle.append(module_name)
-            raise ValueError(f"Circular dependency detected: {' -> '.join(cycle)}")
+            raise DependencyResolutionError(f"Circular dependency detected: {' -> '.join(cycle)}")
         
         if module_name in self._visited:
             return
@@ -258,67 +435,6 @@ class DependencyResolver:
         
         self._temp_visited.remove(module_name)
         self._visited.add(module_name)
-    
-    def _resolve_module(self, module_name: str) -> Optional[ModuleInfo]:
-        """Resolve a module to its file path and metadata.
-        
-        Args:
-            module_name: Name of the module to resolve
-            
-        Returns:
-            ModuleInfo if module is found, None otherwise
-            
-        Raises:
-            ImportError: If module cannot be imported
-        """
-        if module_name in self._module_cache:
-            return self._module_cache[module_name]
-        
-        try:
-            # Try to import the module
-            spec = importlib.util.find_spec(module_name)
-            if spec and spec.origin:
-                path = Path(spec.origin)
-                is_package = spec.submodule_search_locations is not None
-                is_third_party = not str(path).startswith(str(self.workspace_root))
-                
-                module_info = ModuleInfo(
-                    name=module_name,
-                    path=path,
-                    is_package=is_package,
-                    is_third_party=is_third_party
-                )
-                
-                self._module_cache[module_name] = module_info
-                return module_info
-            
-            # Try relative to workspace root
-            module_path = self.workspace_root / module_name.replace('.', '/')
-            if module_path.with_suffix('.py').exists():
-                path = module_path.with_suffix('.py')
-                module_info = ModuleInfo(
-                    name=module_name,
-                    path=path,
-                    is_package=False,
-                    is_third_party=False
-                )
-                self._module_cache[module_name] = module_info
-                return module_info
-            elif module_path.is_dir() and (module_path / '__init__.py').exists():
-                path = module_path / '__init__.py'
-                module_info = ModuleInfo(
-                    name=module_name,
-                    path=path,
-                    is_package=True,
-                    is_third_party=False
-                )
-                self._module_cache[module_name] = module_info
-                return module_info
-            
-            return None
-            
-        except ImportError:
-            return None
 
 class ImportAnalyzer:
     """Analyzes code to identify all required imports."""
