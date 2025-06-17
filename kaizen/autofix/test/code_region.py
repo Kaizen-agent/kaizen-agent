@@ -994,7 +994,7 @@ class CodeRegionExtractor:
                 raise ValueError(f"End marker for region '{region_name}' not found")
             
             start_idx = content.find('\n', start_idx) + 1
-            code = content[start_idx+ len(start_marker):end_idx].strip()
+            code = content[start_idx:end_idx].strip()
             logger.info(f"Extracted code region: {len(code)} characters")
             
             return self._analyze_region(code, region_name, file_path)
