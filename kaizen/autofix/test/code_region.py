@@ -225,6 +225,49 @@ class DependencyResolver:
         except ImportError:
             return None
 
+class ImportAnalyzer:
+    """Analyzes code to identify all required imports."""
+    
+    def __init__(self):
+        self._standard_libs = {
+            'typing', 'os', 'sys', 'pathlib', 'collections', 'dataclasses', 
+            'enum', 'logging', 'importlib', 'ast', 'contextlib', 'json',
+            'datetime', 'time', 're', 'math', 'random', 'itertools', 'functools'
+        }
+    
+    def analyze_imports(self, code: str) -> Tuple[Set[str], Set[str]]:
+        """Analyze code to identify all required imports.
+        
+        Returns:
+            Tuple[Set[str], Set[str]]: (standard_lib_imports, third_party_imports)
+        """
+        try:
+            tree = ast.parse(code)
+            standard_imports = set()
+            third_party_imports = set()
+            
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    if isinstance(node, ast.Import):
+                        for name in node.names:
+                            module_name = name.name.split('.')[0]
+                            if module_name in self._standard_libs:
+                                standard_imports.add(module_name)
+                            else:
+                                third_party_imports.add(module_name)
+                    else:  # ImportFrom
+                        if node.module:
+                            module_name = node.module.split('.')[0]
+                            if module_name in self._standard_libs:
+                                standard_imports.add(module_name)
+                            else:
+                                third_party_imports.add(module_name)
+            
+            return standard_imports, third_party_imports
+            
+        except SyntaxError as e:
+            raise ValueError(f"Invalid Python code: {str(e)}")
+
 class ImportManager:
     """Manages imports for code region execution."""
     
@@ -234,50 +277,73 @@ class ImportManager:
         self._added_paths: Set[str] = set()
         self._processed_files: Set[Path] = set()
         self._module_cache: Dict[str, Any] = {}
+        self._import_analyzer = ImportAnalyzer()
     
     @contextmanager
     def managed_imports(self, region_info: RegionInfo) -> Dict[str, Any]:
-        """Context manager for managing imports during execution.
-        
-        This ensures proper cleanup of any modifications to the Python environment.
-        """
+        """Context manager for managing imports during execution."""
         try:
-            namespace = self._create_base_namespace()
+            # First analyze all required imports
+            standard_imports, third_party_imports = self._import_analyzer.analyze_imports(region_info.code)
+            
+            # Create namespace with all required imports
+            namespace = self._create_namespace(standard_imports, third_party_imports)
+            
+            # Set up import environment
             self._setup_import_environment(region_info)
+            
+            # Process dependencies
             self._process_dependencies(region_info, namespace)
+            
             yield namespace
+            
         finally:
             self.cleanup()
     
-    def _create_base_namespace(self) -> Dict[str, Any]:
-        """Create a base namespace with essential imports."""
-        return {
+    def _create_namespace(self, standard_imports: Set[str], third_party_imports: Set[str]) -> Dict[str, Any]:
+        """Create namespace with all required imports."""
+        namespace = {
             '__name__': '__main__',
             '__file__': None,
             '__package__': None,
             '__builtins__': __builtins__,
-            'typing': typing,
-            'Optional': Optional,
-            'List': List,
-            'Dict': Dict,
-            'Tuple': Tuple,
-            'Set': Set,
-            'FrozenSet': FrozenSet,
-            'Union': Union,
-            'Any': Any,
-            'Callable': Callable,
-            'TypeVar': TypeVar,
-            'Generic': Generic,
-            'Type': Type,
-            'Path': Path,
-            'Enum': Enum,
-            'dataclass': dataclass,
-            'logging': logging,
-            'ast': ast,
-            'importlib': importlib,
-            'sys': sys,
-            'os': os
         }
+        
+        # Add standard library imports
+        for module_name in standard_imports:
+            try:
+                module = __import__(module_name)
+                namespace[module_name] = module
+                
+                # Special handling for typing module
+                if module_name == 'typing':
+                    self._add_typing_imports(namespace)
+            except ImportError as e:
+                logger.warning(f"Failed to import standard library {module_name}: {str(e)}")
+        
+        # Add third-party imports
+        for module_name in third_party_imports:
+            try:
+                module = __import__(module_name)
+                namespace[module_name] = module
+            except ImportError as e:
+                logger.warning(f"Failed to import third-party module {module_name}: {str(e)}")
+        
+        return namespace
+    
+    def _add_typing_imports(self, namespace: Dict[str, Any]) -> None:
+        """Add all common typing imports to namespace."""
+        typing_imports = {
+            'Optional', 'List', 'Dict', 'Tuple', 'Set', 'FrozenSet', 
+            'Union', 'Any', 'Callable', 'TypeVar', 'Generic', 'Type',
+            'Protocol', 'runtime_checkable', 'overload', 'final',
+            'Literal', 'TypedDict', 'cast', 'get_type_hints'
+        }
+        for name in typing_imports:
+            try:
+                namespace[name] = getattr(typing, name)
+            except AttributeError:
+                logger.warning(f"Type {name} not found in typing module")
     
     def _setup_import_environment(self, region_info: RegionInfo) -> None:
         """Set up the import environment for execution."""
@@ -314,23 +380,31 @@ class ImportManager:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            tree = ast.parse(content)
-            dep_imports = self._extract_imports(tree)
             
-            for imp in dep_imports:
-                self._execute_import(imp, namespace)
+            # Analyze imports in the dependency file
+            standard_imports, third_party_imports = self._import_analyzer.analyze_imports(content)
+            
+            # Add any missing imports to namespace
+            for module_name in standard_imports:
+                if module_name not in namespace:
+                    try:
+                        module = __import__(module_name)
+                        namespace[module_name] = module
+                        if module_name == 'typing':
+                            self._add_typing_imports(namespace)
+                    except ImportError as e:
+                        logger.warning(f"Failed to import {module_name}: {str(e)}")
+            
+            for module_name in third_party_imports:
+                if module_name not in namespace:
+                    try:
+                        module = __import__(module_name)
+                        namespace[module_name] = module
+                    except ImportError as e:
+                        logger.warning(f"Failed to import {module_name}: {str(e)}")
                 
-        except UnicodeDecodeError:
-            logger.warning(f"Failed to decode file {file_path} with utf-8 encoding")
-            try:
-                with open(file_path, 'r', encoding='latin-1') as f:
-                    content = f.read()
-                tree = ast.parse(content)
-                dep_imports = self._extract_imports(tree)
-                for imp in dep_imports:
-                    self._execute_import(imp, namespace)
-            except Exception as e:
-                logger.error(f"Failed to process file {file_path}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Failed to process file {file_path}: {str(e)}")
     
     def _execute_import(self, import_info: ImportInfo, namespace: Dict[str, Any]) -> None:
         """Execute a single import statement in the namespace."""
@@ -341,11 +415,40 @@ class ImportManager:
                 module = self._load_module(import_info)
                 self._module_cache[import_info.module] = module
             
-            self._add_to_namespace(import_info, module, namespace)
+            # Special handling for typing imports
+            if import_info.module == 'typing':
+                self._handle_typing_import(import_info, module, namespace)
+            else:
+                self._add_to_namespace(import_info, module, namespace)
             
         except ImportError as e:
             logger.warning(f"Failed to import {import_info}: {str(e)}")
             self._try_find_module_in_workspace(import_info, namespace)
+    
+    def _handle_typing_import(self, import_info: ImportInfo, module: Any, namespace: Dict[str, Any]) -> None:
+        """Handle typing imports specially to ensure all types are available."""
+        if import_info.type == ImportType.FROM:
+            for name in import_info.names:
+                if name == '*':
+                    # Add all common typing types
+                    typing_imports = {
+                        'Optional', 'List', 'Dict', 'Tuple', 'Set', 'FrozenSet', 
+                        'Union', 'Any', 'Callable', 'TypeVar', 'Generic', 'Type',
+                        'Protocol', 'runtime_checkable', 'overload', 'final',
+                        'Literal', 'TypedDict', 'cast', 'get_type_hints'
+                    }
+                    for type_name in typing_imports:
+                        try:
+                            namespace[type_name] = getattr(module, type_name)
+                        except AttributeError:
+                            logger.warning(f"Type {type_name} not found in typing module")
+                else:
+                    try:
+                        namespace[name] = getattr(module, name)
+                    except AttributeError:
+                        logger.warning(f"Type {name} not found in typing module")
+        else:
+            namespace['typing'] = module
     
     def _load_module(self, import_info: ImportInfo) -> Any:
         """Load a module using Python's import system."""
