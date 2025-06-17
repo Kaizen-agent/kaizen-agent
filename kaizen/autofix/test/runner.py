@@ -279,20 +279,32 @@ class TestRunner:
             The imported module
         """
         try:
-            # Add the parent directory to sys.path if it's not already there
-            parent_dir = str(test_file_path.parent.parent)
+            # Get the absolute path of the test file
+            abs_path = test_file_path.resolve()
+            
+            # Get the package directory (parent of the test file)
+            package_dir = abs_path.parent
+            
+            # Add the package directory to sys.path if it's not already there
+            if str(package_dir) not in sys.path:
+                sys.path.insert(0, str(package_dir))
+            
+            # Add the parent of package directory to sys.path for relative imports
+            parent_dir = str(package_dir.parent)
             if parent_dir not in sys.path:
                 sys.path.insert(0, parent_dir)
             
             # Create a module name from the file path
-            module_name = test_file_path.stem
+            module_name = abs_path.stem
             
             # Import the module
-            spec = importlib.util.spec_from_file_location(module_name, test_file_path)
+            spec = importlib.util.spec_from_file_location(module_name, abs_path)
             if spec is None:
-                raise ImportError(f"Could not find module spec for {test_file_path}")
-                
+                raise ImportError(f"Could not find module spec for {abs_path}")
+            
+            # Create and execute the module
             module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module  # Add to sys.modules to handle relative imports
             spec.loader.exec_module(module)
             
             return module
@@ -320,9 +332,15 @@ class TestRunner:
             
             # Get test case configuration
             test_input = test_case.get('input', {})
+            if not isinstance(test_input, dict):
+                raise ValueError(f"Invalid test input format: {test_input}")
+                
             region = test_input.get('region')
             method = test_input.get('method')
             input_text = test_input.get('input')
+            
+            if not all([region, method]):
+                raise ValueError(f"Missing required test input fields: region={region}, method={method}")
             
             # Import the test module
             test_module = self._import_test_module(test_file_path)
