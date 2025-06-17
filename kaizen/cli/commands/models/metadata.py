@@ -4,25 +4,29 @@ This module contains the TestMetadata class used for storing metadata
 about test configurations.
 """
 
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List, Optional
 
-@dataclass
+@dataclass(frozen=True)
 class TestMetadata:
-    """Metadata for test configuration.
+    """Test configuration metadata.
     
     Attributes:
-        author: Author of the test
+        version: Version number
+        dependencies: Required dependencies
+        environment_variables: Required environment variables
+        author: Author name
         created_at: Creation timestamp
         updated_at: Last update timestamp
-        tags: List of tags
-        version: Version number
+        description: Test description
     """
+    version: str
+    dependencies: List[str] = field(default_factory=list)
+    environment_variables: List[str] = field(default_factory=list)
     author: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
-    tags: Optional[List[str]] = None
-    version: Optional[str] = None
+    description: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TestMetadata':
@@ -35,9 +39,11 @@ class TestMetadata:
             TestMetadata instance
         """
         return cls(
+            version=data.get('version'),
+            dependencies=data.get('dependencies', []),
+            environment_variables=data.get('environment_variables', []),
             author=data.get('author'),
             created_at=data.get('created_at'),
             updated_at=data.get('updated_at'),
-            tags=data.get('tags'),
-            version=data.get('version')
+            description=data.get('description')
         ) 
