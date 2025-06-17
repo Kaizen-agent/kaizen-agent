@@ -1146,23 +1146,69 @@ class CodeRegionExecutor:
                       input_data: Any = None) -> Any:
         """Execute a code region and return its result."""
         logger.info(f"Executing region: {region_info.name}")
+        
+        # Debug: Check exception types before execution
+        import builtins
+        print(f"DEBUG: Before execution - Exception type: {type(Exception)}")
+        print(f"DEBUG: Before execution - builtins.Exception type: {type(builtins.Exception)}")
+        
         try:
             with self.import_manager.managed_imports(region_info) as namespace:
+                # Debug: Check namespace
+                print(f"DEBUG: Namespace has {len(namespace)} keys")
+                if 'Exception' in namespace:
+                    print(f"DEBUG: namespace['Exception'] type: {type(namespace['Exception'])}")
+                    print(f"DEBUG: namespace['Exception'] is builtins.Exception: {namespace['Exception'] is builtins.Exception}")
+                else:
+                    print("DEBUG: Exception NOT in namespace")
+                
+                if '__builtins__' in namespace:
+                    print(f"DEBUG: __builtins__ type: {type(namespace['__builtins__'])}")
+                    if isinstance(namespace['__builtins__'], dict):
+                        if 'Exception' in namespace['__builtins__']:
+                            print(f"DEBUG: __builtins__['Exception'] type: {type(namespace['__builtins__']['Exception'])}")
+                
+                # Debug: Show the actual code being executed
+                print(f"DEBUG: About to exec code of length {len(region_info.code)}")
+                print(f"DEBUG: First 200 chars of code: {region_info.code[:200]}")
+                
                 # Execute the code
-                exec(region_info.code, namespace)
+                try:
+                    exec(region_info.code, namespace)
+                    print("DEBUG: exec() completed successfully")
+                except Exception as e:
+                    print(f"DEBUG: exec() failed with {type(e).__name__}: {str(e)}")
+                    raise
+                
+                # Debug: Check if class was created
+                if region_info.name in namespace:
+                    print(f"DEBUG: {region_info.name} found in namespace, type: {type(namespace[region_info.name])}")
+                else:
+                    print(f"DEBUG: {region_info.name} NOT found in namespace")
+                    print(f"DEBUG: Available names: {list(namespace.keys())[:10]}...")
                 
                 if region_info.type == RegionType.CLASS:
+                    print(f"DEBUG: Calling _execute_class_method with method_name={method_name}")
                     return self._execute_class_method(namespace, region_info, method_name, input_data)
                 elif region_info.type == RegionType.FUNCTION:
                     return self._execute_function(namespace, region_info, input_data)
                 else:
                     return self._execute_module(namespace, region_info, method_name, input_data)
         except Exception as e:
+            print(f"DEBUG: Final exception type: {type(e)}")
+            print(f"DEBUG: Final exception: {str(e)}")
+            import traceback
+            print("DEBUG: Full traceback:")
+            traceback.print_exc()
             raise ValueError(f"Error executing region '{region_info.name}': {str(e)}")
-    
+        
     def _execute_class_method(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                             method_name: str, input_data: Any) -> Any:
         """Execute a method from a class."""
+        import builtins
+        print(f"DEBUG _execute_class_method: Starting with method_name={method_name}")
+        print(f"DEBUG: Exception type at start: {type(Exception)}")
+        
         if not method_name:
             raise ValueError(f"Method name required for class region '{region_info.name}'")
         
@@ -1170,9 +1216,15 @@ class CodeRegionExecutor:
             raise ValueError(f"Method '{method_name}' not found in class '{region_info.name}'")
         
         try:
+            print(f"DEBUG: About to instantiate {region_info.name}")
+            print(f"DEBUG: Type of class: {type(namespace[region_info.name])}")
+            
             # Create instance and get method
             instance = namespace[region_info.name]()
+            print(f"DEBUG: Instance created successfully: {type(instance)}")
+            
             method = getattr(instance, method_name)
+            print(f"DEBUG: Got method {method_name}: {method}")
             
             # Validate input data
             if input_data is None:
@@ -1182,11 +1234,24 @@ class CodeRegionExecutor:
             if isinstance(input_data, str) and not input_data.strip():
                 raise ValueError(f"Input data for method '{method_name}' cannot be empty")
             
+            print(f"DEBUG: About to execute method with input_data: {input_data[:50] if isinstance(input_data, str) else input_data}")
+            
             # Execute the method
-            return method(input_data)
+            result = method(input_data)
+            print(f"DEBUG: Method executed successfully, result type: {type(result)}")
+            return result
+        
         except Exception as e:
+            print(f"DEBUG: Exception caught in _execute_class_method")
+            print(f"DEBUG: Exception type: {type(e)}")
+            print(f"DEBUG: Exception is BaseException: {isinstance(e, BaseException)}")
+            print(f"DEBUG: Exception is builtins.Exception: {isinstance(e, builtins.Exception)}")
+            print(f"DEBUG: str(e): {str(e)}")
+            import traceback
+            print("DEBUG: Traceback:")
+            traceback.print_exc()
             raise ValueError(f"Error executing method '{method_name}': {str(e)}")
-    
+        
     def _execute_function(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                          input_data: Any) -> Any:
         """Execute a function."""
