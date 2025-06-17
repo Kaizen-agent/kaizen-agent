@@ -2,6 +2,7 @@
 
 from typing import Dict, Any, List, Union, Protocol, runtime_checkable
 from rich.table import Table
+from enum import Enum, auto
 
 # Constants
 STATUS_EMOJI = {
@@ -50,4 +51,28 @@ class ValidationError(TestError):
 
 # Constants
 DEFAULT_MAX_RETRIES = 1
-DEFAULT_BASE_BRANCH = 'main' 
+DEFAULT_BASE_BRANCH = 'main'
+
+class PRStrategy(Enum):
+    """Strategy for when to create pull requests."""
+    ALL_PASSING = "ALL_PASSING"
+    ANY_IMPROVEMENT = "ANY_IMPROVEMENT"
+    NONE = "NONE"
+
+    @classmethod
+    def from_str(cls, value: str) -> 'PRStrategy':
+        """Convert string to PRStrategy enum.
+        
+        Args:
+            value: String value to convert
+            
+        Returns:
+            PRStrategy enum value
+            
+        Raises:
+            ValueError: If value is not a valid PR strategy
+        """
+        try:
+            return cls(value)
+        except ValueError:
+            raise ValueError(f"Invalid PR strategy: {value}. Must be one of {[s.value for s in cls]}") 

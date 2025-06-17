@@ -3,6 +3,7 @@
 from typing import Dict, Any, Optional, List, TypeVar, Generic
 from dataclasses import dataclass
 from pathlib import Path
+from .types import PRStrategy
 
 T = TypeVar('T')
 
@@ -36,32 +37,67 @@ class TestMetadata:
         )
 
 @dataclass
-class EvaluationCriteria:
-    """Evaluation criteria for tests.
+class TestEvaluation:
+    """Evaluation criteria for test results.
     
     Attributes:
-        llm_provider: The LLM provider to use for evaluation
-        model: The specific model to use
         criteria: List of evaluation criteria
+        thresholds: Dictionary of threshold values
+        required_score: Minimum required score
     """
-    llm_provider: str
-    model: str
-    criteria: List[Dict[str, Any]]
+    criteria: List[str]
+    thresholds: Dict[str, float]
+    required_score: float
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'EvaluationCriteria':
-        """Create EvaluationCriteria from dictionary.
+    def from_dict(cls, data: Dict[str, Any]) -> 'TestEvaluation':
+        """Create TestEvaluation from dictionary.
         
         Args:
             data: Dictionary containing evaluation criteria
             
         Returns:
-            EvaluationCriteria instance
+            TestEvaluation instance
         """
         return cls(
-            llm_provider=data['llm_provider'],
-            model=data['model'],
-            criteria=data['criteria']
+            criteria=data.get('criteria', []),
+            thresholds=data.get('thresholds', {}),
+            required_score=data.get('required_score', 0.0)
+        )
+
+@dataclass
+class TestSettings:
+    """Settings for test execution.
+    
+    Attributes:
+        auto_fix: Whether to automatically fix failing tests
+        create_pr: Whether to create a pull request with fixes
+        max_retries: Maximum number of retry attempts
+        base_branch: Base branch for pull request
+        pr_strategy: Strategy for when to create PRs
+    """
+    auto_fix: bool = False
+    create_pr: bool = False
+    max_retries: int = 1
+    base_branch: str = 'main'
+    pr_strategy: PRStrategy = PRStrategy.ALL_PASSING
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'TestSettings':
+        """Create TestSettings from dictionary.
+        
+        Args:
+            data: Dictionary containing test settings
+            
+        Returns:
+            TestSettings instance
+        """
+        return cls(
+            auto_fix=data.get('auto_fix', False),
+            create_pr=data.get('create_pr', False),
+            max_retries=data.get('max_retries', 1),
+            base_branch=data.get('base_branch', 'main'),
+            pr_strategy=PRStrategy.from_str(data.get('pr_strategy', 'ALL_PASSING'))
         )
 
 @dataclass
@@ -78,10 +114,7 @@ class TestConfiguration:
         evaluation: Evaluation criteria (optional)
         regions: List of test regions (optional)
         steps: List of test steps (optional)
-        auto_fix: Whether to automatically fix failing tests
-        create_pr: Whether to create a pull request with fixes
-        max_retries: Maximum number of retry attempts
-        base_branch: Base branch for pull request
+        settings: Test execution settings
     """
     name: str
     file_path: Path
@@ -89,13 +122,34 @@ class TestConfiguration:
     agent_type: Optional[str] = None
     description: Optional[str] = None
     metadata: Optional[TestMetadata] = None
-    evaluation: Optional[EvaluationCriteria] = None
+    evaluation: Optional[TestEvaluation] = None
     regions: Optional[List[Dict[str, Any]]] = None
     steps: Optional[List[Dict[str, Any]]] = None
-    auto_fix: bool = False
-    create_pr: bool = False
-    max_retries: int = 1
-    base_branch: str = 'main'
+    settings: TestSettings = TestSettings()
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], config_path: Path) -> 'TestConfiguration':
+        """Create TestConfiguration from dictionary.
+        
+        Args:
+            data: Dictionary containing configuration data
+            config_path: Path to the configuration file
+            
+        Returns:
+            TestConfiguration instance
+        """
+        return cls(
+            name=data['name'],
+            file_path=Path(data['file_path']),
+            config_path=config_path,
+            agent_type=data.get('agent_type'),
+            description=data.get('description'),
+            metadata=TestMetadata.from_dict(data.get('metadata', {})) if 'metadata' in data else None,
+            evaluation=TestEvaluation.from_dict(data.get('evaluation', {})) if 'evaluation' in data else None,
+            regions=data.get('regions'),
+            steps=data.get('steps'),
+            settings=TestSettings.from_dict(data)
+        )
 
 @dataclass
 class TestResult:

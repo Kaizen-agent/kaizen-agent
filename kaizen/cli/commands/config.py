@@ -3,8 +3,8 @@
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
-from .models import TestConfiguration, TestMetadata, EvaluationCriteria, Result
-from .types import ConfigurationError
+from .models import TestConfiguration, TestMetadata, TestEvaluation, TestSettings, Result
+from .types import ConfigurationError, PRStrategy
 
 class ConfigurationManager:
     """Manages test configuration loading and validation."""
@@ -36,31 +36,31 @@ class ConfigurationManager:
             with open(config_path) as f:
                 config_data = yaml.safe_load(f)
             
-            # Validate PR strategy
-            valid_strategies = ['ALL_PASSING', 'ANY_IMPROVEMENT', 'NONE']
-            if pr_strategy not in valid_strategies:
+            # Validate required fields
+            required_fields = ['name', 'file_path']
+            missing_fields = [field for field in required_fields if field not in config_data]
+            if missing_fields:
                 return Result.failure(ConfigurationError(
-                    f"Invalid PR strategy: {pr_strategy}. Must be one of {valid_strategies}"
+                    f"Missing required fields in configuration: {', '.join(missing_fields)}"
                 ))
             
-            # Create configuration
-            config = TestConfiguration(
-                name=config_data.get('name', 'Unnamed Test'),
-                file_path=Path(config_data['file_path']),
-                config_path=config_path,
-                agent_type=config_data.get('agent_type', 'default'),
-                description=config_data.get('description'),
-                metadata=TestMetadata(**config_data.get('metadata', {})),
-                evaluation=EvaluationCriteria(**config_data.get('evaluation', {})),
-                regions=config_data.get('regions', []),
-                steps=config_data.get('steps', []),
-                auto_fix=auto_fix,
-                create_pr=create_pr,
-                max_retries=max_retries,
-                base_branch=base_branch,
-                pr_strategy=pr_strategy
-            )
+            # Validate test structure
+            if 'regions' not in config_data and 'steps' not in config_data:
+                return Result.failure(ConfigurationError(
+                    "Test configuration must contain either 'regions' or 'steps'"
+                ))
             
+            # Add CLI arguments to config data
+            config_data.update({
+                'auto_fix': auto_fix,
+                'create_pr': create_pr,
+                'max_retries': max_retries,
+                'base_branch': base_branch,
+                'pr_strategy': pr_strategy
+            })
+            
+            # Create configuration
+            config = TestConfiguration.from_dict(config_data, config_path)
             return Result.success(config)
             
         except Exception as e:
@@ -124,15 +124,15 @@ class ConfigurationManager:
         return TestMetadata.from_dict(config_data['metadata'])
     
     @staticmethod
-    def _parse_evaluation(config_data: Dict[str, Any]) -> Optional[EvaluationCriteria]:
+    def _parse_evaluation(config_data: Dict[str, Any]) -> Optional[TestEvaluation]:
         """Parse evaluation criteria from configuration.
         
         Args:
             config_data: Dictionary containing configuration data
             
         Returns:
-            EvaluationCriteria instance if evaluation exists, None otherwise
+            TestEvaluation instance if evaluation exists, None otherwise
         """
         if 'evaluation' not in config_data:
             return None
-        return EvaluationCriteria.from_dict(config_data['evaluation']) 
+        return TestEvaluation.from_dict(config_data['evaluation']) 
