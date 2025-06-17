@@ -251,16 +251,13 @@ class DependencyResolver:
     """Resolves module dependencies and handles import cycles."""
     
     def __init__(self, workspace_root: Path) -> None:
-        """Initialize the dependency resolver.
-        
-        Args:
-            workspace_root: Root directory of the workspace
-        """
+        """Initialize the dependency resolver."""
         self.workspace_root = workspace_root
         self._module_cache: Dict[str, ModuleInfo] = {}
         self._import_graph: Dict[str, Set[str]] = defaultdict(set)
         self._visited: Set[str] = set()
         self._temp_visited: Set[str] = set()
+        self._builtin_modules = frozenset(sys.builtin_module_names)
     
     def _extract_imports(self, tree: ast.AST) -> List[str]:
         """Extract all imports from the AST.
@@ -349,20 +346,25 @@ class DependencyResolver:
             
         Returns:
             ModuleInfo if module is found, None otherwise
+            
+        Raises:
+            DependencyResolutionError: If module resolution fails
         """
         if module_name in self._module_cache:
             return self._module_cache[module_name]
         
-        # Handle standard library modules
-        if module_name in STANDARD_MODULES:
-            return self._resolve_standard_module(module_name)
-        
         try:
+            # Handle standard library modules
+            if module_name in STANDARD_MODULES:
+                module_info = self._resolve_standard_module(module_name)
+                self._module_cache[module_name] = module_info
+                return module_info
+            
+            # Handle third-party modules
             return self._resolve_third_party_module(module_name)
-        except ModuleNotFoundError:
-            return None
+            
         except Exception as e:
-            logger.warning(f"Failed to resolve module {module_name}: {str(e)}")
+            logger.error(f"Failed to resolve module {module_name}: {str(e)}")
             return None
     
     def _resolve_standard_module(self, module_name: str) -> ModuleInfo:
@@ -373,13 +375,60 @@ class DependencyResolver:
             
         Returns:
             ModuleInfo for the standard library module
+            
+        Raises:
+            DependencyResolutionError: If module cannot be resolved
         """
-        return ModuleInfo(
-            name=module_name,
-            path=Path(sys.modules[module_name].__file__) if module_name in sys.modules else Path(module_name),
-            is_package=False,
-            is_third_party=False
-        )
+        try:
+            # Handle built-in modules
+            if module_name in self._builtin_modules:
+                return ModuleInfo(
+                    name=module_name,
+                    path=Path(f"<built-in module {module_name}>"),
+                    is_package=False,
+                    is_third_party=False,
+                    version=sys.version
+                )
+            
+            # Handle standard library modules
+            if module_name in sys.modules:
+                module = sys.modules[module_name]
+                try:
+                    path = Path(module.__file__) if hasattr(module, '__file__') else Path(module_name)
+                except (AttributeError, TypeError):
+                    path = Path(module_name)
+                
+                return ModuleInfo(
+                    name=module_name,
+                    path=path,
+                    is_package=hasattr(module, '__path__'),
+                    is_third_party=False,
+                    version=getattr(module, '__version__', None)
+                )
+            
+            # Try importing the module
+            try:
+                module = __import__(module_name)
+                path = Path(module.__file__) if hasattr(module, '__file__') else Path(module_name)
+                return ModuleInfo(
+                    name=module_name,
+                    path=path,
+                    is_package=hasattr(module, '__path__'),
+                    is_third_party=False,
+                    version=getattr(module, '__version__', None)
+                )
+            except ImportError:
+                logger.warning(f"Could not import standard module: {module_name}")
+                return ModuleInfo(
+                    name=module_name,
+                    path=Path(module_name),
+                    is_package=False,
+                    is_third_party=False
+                )
+                
+        except Exception as e:
+            logger.error(f"Failed to resolve standard module {module_name}: {str(e)}")
+            raise DependencyResolutionError(f"Failed to resolve standard module {module_name}: {str(e)}")
     
     def _resolve_third_party_module(self, module_name: str) -> Optional[ModuleInfo]:
         """Resolve a third-party module.
