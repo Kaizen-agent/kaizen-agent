@@ -1145,12 +1145,8 @@ class CodeRegionExecutor:
                     return self._execute_function(namespace, region_info, input_data)
                 else:
                     return self._execute_module(namespace, region_info, method_name, input_data)
-        except (ImportError, ValueError, AttributeError, TypeError) as e:
-            logger.error(f"✗ Execution failed: {region_info.name} - {str(e)}")
-            raise
-        except BaseException as e:
-            logger.error(f"✗ Unexpected error: {region_info.name} - {str(e)}")
-            raise ValueError(f"Unexpected error executing region '{region_info.name}': {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Error executing region '{region_info.name}': {str(e)}")
     
     def _execute_class_method(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                             method_name: str, input_data: Any) -> Any:
@@ -1194,11 +1190,7 @@ class CodeRegionExecutor:
                 raise ValueError(f"Input data for function '{region_info.name}' cannot be empty")
             
             return func(input_data)
-        except (TypeError, ValueError) as e:
-            logger.error(f"✗ Function error: {region_info.name} - {str(e)}")
-            raise
-        except BaseException as e:
-            logger.error(f"✗ Function execution failed: {region_info.name} - {str(e)}")
+        except Exception as e:
             raise ValueError(f"Error executing function '{region_info.name}': {str(e)}")
     
     def _execute_module(self, namespace: Dict[str, Any], region_info: RegionInfo, 
@@ -1222,9 +1214,5 @@ class CodeRegionExecutor:
                 raise ValueError(f"Input data for function '{method_name}' cannot be empty")
             
             return func(input_data)
-        except (TypeError, ValueError) as e:
-            logger.error(f"✗ Module function error: {method_name} - {str(e)}")
-            raise
-        except BaseException as e:
-            logger.error(f"✗ Module function execution failed: {method_name} - {str(e)}")
-            raise ValueError(f"Error executing function '{method_name}': {str(e)}") 
+        except Exception as e:
+            raise ValueError(f"Error executing function '{method_name}': {str(e)}")
