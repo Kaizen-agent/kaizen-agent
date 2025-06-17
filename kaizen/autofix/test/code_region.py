@@ -646,12 +646,24 @@ class ImportManager:
     
     def _create_namespace(self, standard_imports: Set[str], third_party_imports: Set[str]) -> Dict[str, Any]:
         """Create namespace with all required imports."""
+        # Import builtins module to ensure we have proper access to all built-in types
+        import builtins
+        
         namespace = {
             '__name__': '__main__',
             '__file__': None,
             '__package__': None,
-            '__builtins__': __builtins__,
+            # Use the builtins module directly instead of __builtins__
+            '__builtins__': builtins.__dict__,
         }
+        
+        # Also explicitly add the built-in exception types to ensure they're available
+        namespace['Exception'] = builtins.Exception
+        namespace['ValueError'] = builtins.ValueError
+        namespace['TypeError'] = builtins.TypeError
+        namespace['AttributeError'] = builtins.AttributeError
+        namespace['ImportError'] = builtins.ImportError
+        namespace['BaseException'] = builtins.BaseException
         
         # Always add typing module and its common types first
         namespace['typing'] = typing
