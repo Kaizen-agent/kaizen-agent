@@ -177,7 +177,7 @@ class DependencyResolver:
             FrozenSet of ModuleInfo objects representing all dependencies
             
         Raises:
-            ValueError: If circular dependencies are detected
+            ValueError: If circular dependencies are detected or if dependencies cannot be resolved
         """
         try:
             with open(file_path, 'r') as f:
@@ -207,8 +207,12 @@ class DependencyResolver:
             
             return frozenset(dependencies)
             
+        except (IOError, SyntaxError) as e:
+            raise ValueError(f"Failed to read or parse file {file_path}: {str(e)}")
+        except ImportError as e:
+            raise ValueError(f"Failed to import dependencies for {file_path}: {str(e)}")
         except Exception as e:
-            raise ValueError(f"Failed to resolve dependencies for {file_path}: {str(e)}")
+            raise ValueError(f"Unexpected error resolving dependencies for {file_path}: {str(e)}")
     
     def _extract_imports(self, tree: ast.AST) -> List[str]:
         """Extract all imports from the AST."""
@@ -257,6 +261,9 @@ class DependencyResolver:
             
         Returns:
             ModuleInfo if module is found, None otherwise
+            
+        Raises:
+            ImportError: If module cannot be imported
         """
         if module_name in self._module_cache:
             return self._module_cache[module_name]
