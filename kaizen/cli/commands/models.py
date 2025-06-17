@@ -183,6 +183,9 @@ class TestStep:
 class TestConfiguration:
     """Configuration for test execution.
     
+    This class represents the complete configuration for test execution,
+    including test metadata, execution settings, and auto-fix options.
+    
     Attributes:
         name: Name of the test configuration
         file_path: Path to the test file
@@ -194,6 +197,11 @@ class TestConfiguration:
         regions: List of test regions (optional)
         steps: List of test steps (optional)
         settings: Test execution settings
+        auto_fix: Whether to enable auto-fix functionality
+        create_pr: Whether to create pull requests for fixes
+        max_retries: Maximum number of retry attempts for auto-fix (min: 1, max: 10)
+        base_branch: Base branch for pull requests (e.g., 'main', 'master')
+        pr_strategy: Strategy for when to create PRs (ALL_PASSING, ANY_PASSING, ALWAYS)
     """
     name: str
     file_path: Path
@@ -204,7 +212,40 @@ class TestConfiguration:
     evaluation: Optional[TestEvaluation] = None
     regions: Optional[List[Dict[str, Any]]] = None
     steps: Optional[List[Dict[str, Any]]] = None
-    settings: TestSettings = TestSettings()
+    settings: TestSettings = field(default_factory=TestSettings)
+    auto_fix: bool = False
+    create_pr: bool = False
+    max_retries: int = 3
+    base_branch: str = 'main'
+    pr_strategy: PRStrategy = PRStrategy.ALL_PASSING
+
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        self._validate_configuration()
+
+    def _validate_configuration(self) -> None:
+        """Validate configuration values.
+        
+        Raises:
+            ValueError: If any configuration value is invalid
+        """
+        # Validate max_retries
+        if not 1 <= self.max_retries <= 10:
+            raise ValueError(f"max_retries must be between 1 and 10, got {self.max_retries}")
+
+        # Validate base_branch
+        if not self.base_branch or not isinstance(self.base_branch, str):
+            raise ValueError("base_branch must be a non-empty string")
+
+        # Validate pr_strategy
+        if not isinstance(self.pr_strategy, PRStrategy):
+            raise ValueError(f"pr_strategy must be a PRStrategy enum value, got {type(self.pr_strategy)}")
+
+        # Validate file paths
+        if not self.file_path.exists():
+            raise ValueError(f"Test file not found: {self.file_path}")
+        if not self.config_path.exists():
+            raise ValueError(f"Configuration file not found: {self.config_path}")
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], config_path: Path) -> 'TestConfiguration':
@@ -216,7 +257,17 @@ class TestConfiguration:
             
         Returns:
             TestConfiguration instance
+            
+        Raises:
+            ValueError: If any configuration value is invalid
         """
+        # Convert pr_strategy string to enum
+        pr_strategy_str = data.get('pr_strategy', 'ALL_PASSING')
+        try:
+            pr_strategy = PRStrategy.from_str(pr_strategy_str)
+        except ValueError as e:
+            raise ValueError(f"Invalid PR strategy: {pr_strategy_str}") from e
+
         return cls(
             name=data['name'],
             file_path=Path(data['file_path']),
@@ -227,7 +278,12 @@ class TestConfiguration:
             evaluation=TestEvaluation.from_dict(data.get('evaluation', {})) if 'evaluation' in data else None,
             regions=data.get('regions'),
             steps=data.get('steps'),
-            settings=TestSettings.from_dict(data)
+            settings=TestSettings.from_dict(data),
+            auto_fix=data.get('auto_fix', False),
+            create_pr=data.get('create_pr', False),
+            max_retries=data.get('max_retries', 3),
+            base_branch=data.get('base_branch', 'main'),
+            pr_strategy=pr_strategy
         )
 
 @dataclass
