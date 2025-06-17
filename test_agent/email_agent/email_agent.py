@@ -23,4 +23,5 @@ class EmailAgent:
         print("DEBUG: improve_email called")
         # Just return a dummy improved version
         return f"IMPROVED: {draft}"
+
 # kaizen:end:email_agent
