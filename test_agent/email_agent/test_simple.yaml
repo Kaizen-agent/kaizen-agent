@@ -25,17 +25,15 @@ evaluation:
         - if the input is not about improving email, the output should be "I'm sorry, I can't help with that."
       weight: 1
 
-steps:
-  - step_index: 1
-    name: Basic Email Improvement
+tests:
+  - name: Basic Email Improvement
     description: Test basic email improvement functionality with a simple meeting request
     input:
       file_path: email_agent.py
       region: email_agent
       method: improve_email
       input: "Please improve my email draft below: hey, can we meet tomorrow to discuss the project? let me know when you're free."
-  - step_index: 2
-    name: Edge case of random input
+  - name: Edge case of random input
     description: Test random input functionality
     input:
       file_path: email_agent.py
