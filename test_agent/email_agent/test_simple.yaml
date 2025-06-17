@@ -25,7 +25,7 @@ evaluation:
         - if the input is not about improving email, the output should be "I'm sorry, I can't help with that."
       weight: 1
 
-tests:
+steps:
   - name: Basic Email Improvement
     description: Test basic email improvement functionality with a simple meeting request
     input:

@@ -132,7 +132,20 @@ class TestAllCommand(BaseTestCommand):
         if self.config.regions:
             config['regions'] = self.config.regions
         if self.config.steps:
-            config['steps'] = self.config.steps
+            # Transform steps into tests format
+            config['tests'] = [
+                {
+                    'name': step.name,
+                    'description': step.description,
+                    'input': {
+                        'file_path': str(self.config.file_path),
+                        'region': step.command,
+                        'method': step.command,
+                        'input': step.expected_output
+                    }
+                }
+                for step in self.config.steps
+            ]
             
         return config
     
