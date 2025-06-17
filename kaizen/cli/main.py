@@ -207,62 +207,9 @@ def fix_tests(ctx: click.Context, test_files: tuple, project: str, make_pr: bool
         click.echo(f"Unexpected error: {str(e)}", err=True)
         sys.exit(ExitCode.UNKNOWN_ERROR.value)
 
-@cli.command()
-@click.argument('file_path', type=click.Path(exists=True))
-@click.argument('input_text', required=False)
-@click.option('--output', type=click.Path(), help='Output file path')
-@click.pass_context
-def run_block(ctx: click.Context, file_path: str, input_text: Optional[str], output: Optional[str]) -> None:
-    """Run a specific code block."""
-    try:
-        # Update context
-        ctx.obj.config = {
-            'name': 'Run Block',
-            'file_path': file_path,
-            'tests': [{
-                'name': 'Block Test',
-                'input': {
-                    'region': 'block',
-                    'method': 'run',
-                    'input': input_text
-                }
-            }]
-        }
-        
-        # Run test
-        runner = TestRunner(ctx.obj.config)
-        results = runner.run_tests(Path(file_path))
-        
-        # Handle output
-        if output:
-            with open(output, 'w') as f:
-                f.write(str(results))
-        else:
-            click.echo(results)
-            
-        sys.exit(ExitCode.SUCCESS.value)
-        
-    except Exception as e:
-        logger.exception("Unexpected error")
-        click.echo(f"Unexpected error: {str(e)}", err=True)
-        sys.exit(ExitCode.UNKNOWN_ERROR.value)
-
 def main() -> None:
     """Main entry point."""
-    try:
-        cli(obj=CliContext(
-            debug=False,
-            config_path=None,
-            auto_fix=False,
-            create_pr=False,
-            max_retries=1,
-            base_branch='main',
-            config={}
-        ))
-    except Exception as e:
-        logger.exception("Fatal error")
-        click.echo(f"Fatal error: {str(e)}", err=True)
-        sys.exit(ExitCode.UNKNOWN_ERROR.value)
+    cli()
 
 if __name__ == '__main__':
     main() 

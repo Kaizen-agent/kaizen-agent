@@ -98,17 +98,6 @@ Options:
 - `--max-retries`: Maximum number of fix attempts (default: 1)
 - `--base-branch`: Base branch for pull request (default: main)
 
-### Run Individual Test Block
-
-```bash
-kaizen run-block <file_path> [input_text] [--output <output_file>]
-```
-
-Options:
-- `file_path`: Path to the file containing the code block
-- `input_text`: Optional input for the test
-- `--output`: Optional output file path for test results
-
 ## Configuration
 
 The test configuration file (YAML) supports the following structure:
