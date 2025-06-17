@@ -27,10 +27,55 @@ evaluation:
 regions:
   - email_agent
 
-test_suites:
-  - name: basic_email_improvement
+steps:
+  - name: Basic Email Improvement
     description: Test basic email improvement functionality
-    test_file: test_data/basic_email_tests.yaml
-  - name: edge_cases
-    description: Test edge cases and error handling
-    test_file: test_data/edge_case_tests.yaml
+    input:
+      file_path: email_agent.py
+      region: email_agent
+      method: run
+      input: "Can you help me improve this email: Dear John, I want to meet tomorrow to discuss the project. Thanks, Jane"
+    expected_output:
+      type: "string"
+      contains: ["Dear", "meeting", "project"]
+    assertions:
+      - type: "contains"
+        value: "Dear"
+      - type: "contains"
+        value: "meeting"
+      - type: "contains"
+        value: "project"
+    evaluation:
+      type: llm
+
+  - name: Non-Email Input
+    description: Test handling of non-email input
+    input:
+      file_path: email_agent.py
+      region: email_agent
+      method: run
+      input: "What's the weather like today?"
+    expected_output:
+      type: "string"
+      exact: "I'm sorry, I can't help with that."
+    assertions:
+      - type: "equals"
+        value: "I'm sorry, I can't help with that."
+    evaluation:
+      type: llm
+
+  - name: Empty Input
+    description: Test handling of empty input
+    input:
+      file_path: email_agent.py
+      region: email_agent
+      method: run
+      input: ""
+    expected_output:
+      type: "string"
+      exact: "I'm sorry, I can't help with that."
+    assertions:
+      - type: "equals"
+        value: "I'm sorry, I can't help with that."
+    evaluation:
+      type: llm
