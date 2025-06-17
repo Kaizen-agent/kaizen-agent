@@ -12,12 +12,15 @@ from .config import ConfigurationManager
 from .test_commands import TestAllCommand
 from .formatters import MarkdownTestResultFormatter, RichTestResultFormatter
 from .report_writer import TestReportWriter
-from .types import (
+from .errors import (
     TestError,
     ConfigurationError,
     TestExecutionError,
     ReportGenerationError,
     ValidationError,
+    AutoFixError
+)
+from .types import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_BASE_BRANCH,
     PRStrategy
