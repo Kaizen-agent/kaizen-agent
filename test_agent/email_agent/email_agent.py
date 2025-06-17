@@ -22,10 +22,8 @@ class EmailAgent:
             # Test the configuration by generating content
             # This helps catch issues like invalid API keys or network problems early
             self.model.generate_content("Test")
-        except (ValueError, ImportError, AttributeError) as e:
-            raise ValueError(f"Failed to configure Google API: {str(e)}")
         except Exception as e:
-            raise ValueError(f"Unexpected error configuring Google API: {str(e)}")
+            raise ValueError(f"Failed to configure Google API: {str(e)}")
 
     def improve_email(self, draft: str) -> str:
         """
@@ -83,40 +81,8 @@ class EmailAgent:
                 ]
             )
             
-            # Check for safety issues in the prompt feedback
-            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                if hasattr(response.prompt_feedback, 'block_reason'):
-                    raise ValueError(f"Content was blocked due to: {response.prompt_feedback.block_reason}")
-            
-            # Ensure candidates were generated
-            if not hasattr(response, 'candidates') or not response.candidates:
-                raise ValueError("No response candidates were generated from the model.")
-            
-            # Get the first candidate
-            candidate = response.candidates[0]
-            
-            # Check for finish reasons indicating issues
-            if hasattr(candidate, 'finish_reason'):
-                if candidate.finish_reason == "MAX_TOKENS":
-                    raise ValueError("Response was cut off due to token limit. Please try with a shorter email draft or adjust max_output_tokens.")
-                elif candidate.finish_reason == "BLOCKED":
-                    raise ValueError("Content was blocked by safety filters during generation.")
-            
-            # Attempt to extract the text content from the response
-            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
-                if not candidate.content.parts:
-                    raise ValueError("Model response contained no content parts.")
-                # Access the text from the first part
-                return candidate.content.parts[0].text.strip()
-            
-            # If text could not be extracted, raise an error
-            raise ValueError("Could not extract text from the model's response.")
-            
-        except ValueError as e:
-            # Re-raise ValueError as is
-            raise
+            return response.text
         except Exception as e:
-            # Convert all other exceptions to ValueError
             raise ValueError(f"Failed to generate improved email: {str(e)}")
 # kaizen:end:email_agent
 
