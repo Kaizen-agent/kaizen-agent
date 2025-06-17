@@ -121,7 +121,7 @@ def _display_test_summary(console: Console, test_result: TestResult, rich_format
 @click.option('--max-retries', type=int, default=DEFAULT_MAX_RETRIES, help=f'Maximum number of retry attempts for auto-fix (default: {DEFAULT_MAX_RETRIES})')
 @click.option('--base-branch', default=DEFAULT_BASE_BRANCH, help=f'Base branch for pull request (default: {DEFAULT_BASE_BRANCH})')
 @click.option('--pr-strategy', type=click.Choice([s.value for s in PRStrategy]), 
-              default=PRStrategy.ALL_PASSING.value, help='Strategy for when to create PRs (default: ALL_PASSING)')
+              default=PRStrategy.ANY_IMPROVEMENT.value, help='Strategy for when to create PRs (default: ANY_IMPROVEMENT)')
 def test_all(
     config: str,
     auto_fix: bool,
@@ -147,7 +147,7 @@ def test_all(
         ...     create_pr=True,
         ...     max_retries=2,
         ...     base_branch="main",
-        ...     pr_strategy="ALL_PASSING"
+        ...     pr_strategy="ANY_IMPROVEMENT"
         ... )
     """
     console = Console()
