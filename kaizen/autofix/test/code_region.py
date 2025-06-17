@@ -145,6 +145,48 @@ class CodeRegionExecutor:
         if str(self.workspace_root) not in sys.path:
             sys.path.insert(0, str(self.workspace_root))
     
+    def _handle_simple_import(self, module_name: str, namespace: Dict) -> None:
+        """Handle simple imports (e.g., 'import os')."""
+        try:
+            module = __import__(module_name)
+            namespace[module_name] = module
+        except ImportError as e:
+            logger.warning(f"Failed to import {module_name}: {str(e)}")
+    
+    def _handle_absolute_import(self, module_path: str, namespace: Dict) -> None:
+        """Handle absolute imports (e.g., 'from typing import Optional')."""
+        try:
+            parts = module_path.split('.')
+            module_name = parts[0]
+            module = __import__(module_name)
+            
+            # Handle nested imports
+            current = module
+            for part in parts[1:]:
+                if hasattr(current, part):
+                    current = getattr(current, part)
+                else:
+                    raise ImportError(f"Module {module_name} has no attribute {part}")
+            
+            # Add to namespace
+            namespace[parts[-1]] = current
+        except ImportError as e:
+            logger.warning(f"Failed to import {module_path}: {str(e)}")
+    
+    def _handle_relative_import(self, module_path: str, namespace: Dict) -> None:
+        """Handle relative imports (e.g., 'from . import module')."""
+        try:
+            # Remove leading dots and get the module name
+            module_name = module_path.lstrip('.')
+            if not module_name:
+                raise ImportError("Invalid relative import path")
+            
+            # Import the module
+            module = __import__(module_name, fromlist=['*'])
+            namespace[module_name.split('.')[-1]] = module
+        except ImportError as e:
+            logger.warning(f"Failed to import {module_path}: {str(e)}")
+    
     def execute_region(self, region_info: RegionInfo, method_name: Optional[str] = None, 
                       input_data: Any = None) -> Any:
         """
@@ -175,8 +217,14 @@ class CodeRegionExecutor:
     @contextmanager
     def _create_execution_context(self, region_info: RegionInfo):
         """Create a safe execution context with required imports."""
-        namespace = {}
+        namespace = {
+            '__name__': '__main__',
+            '__file__': str(region_info.file_path) if hasattr(region_info, 'file_path') else None,
+            '__package__': None,
+            '__builtins__': __builtins__
+        }
         
+        # Add imports to namespace
         for imp in region_info.imports:
             try:
                 if imp.startswith('.'):
@@ -188,6 +236,7 @@ class CodeRegionExecutor:
             except (ImportError, AttributeError) as e:
                 logger.warning(f"Failed to import {imp}: {str(e)}")
         
+        # Execute the code
         exec(region_info.code, namespace)
         yield namespace
     
@@ -200,15 +249,41 @@ class CodeRegionExecutor:
         if method_name not in region_info.class_methods:
             raise ValueError(f"Method '{method_name}' not found in class '{region_info.name}'")
         
+        # Create instance and get method
         instance = namespace[region_info.name]()
         method = getattr(instance, method_name)
-        return method(input_data)
+        
+        # Validate input data
+        if input_data is None:
+            raise ValueError(f"Input data required for method '{method_name}'")
+        
+        # If input_data is a string, ensure it's not empty
+        if isinstance(input_data, str) and not input_data.strip():
+            raise ValueError(f"Input data for method '{method_name}' cannot be empty")
+        
+        # Execute the method
+        try:
+            return method(input_data)
+        except Exception as e:
+            raise ValueError(f"Error executing method '{method_name}': {str(e)}")
     
     def _execute_function(self, namespace: Dict, region_info: RegionInfo, 
                          input_data: Any) -> Any:
         """Execute a function."""
         func = namespace[region_info.name]
-        return func(input_data)
+        
+        # Validate input data
+        if input_data is None:
+            raise ValueError(f"Input data required for function '{region_info.name}'")
+        
+        # If input_data is a string, ensure it's not empty
+        if isinstance(input_data, str) and not input_data.strip():
+            raise ValueError(f"Input data for function '{region_info.name}' cannot be empty")
+        
+        try:
+            return func(input_data)
+        except Exception as e:
+            raise ValueError(f"Error executing function '{region_info.name}': {str(e)}")
     
     def _execute_module(self, namespace: Dict, region_info: RegionInfo, 
                        method_name: str, input_data: Any) -> Any:
@@ -220,4 +295,16 @@ class CodeRegionExecutor:
             raise ValueError(f"Function '{method_name}' not found in module")
         
         func = namespace[method_name]
-        return func(input_data) 
+        
+        # Validate input data
+        if input_data is None:
+            raise ValueError(f"Input data required for function '{method_name}'")
+        
+        # If input_data is a string, ensure it's not empty
+        if isinstance(input_data, str) and not input_data.strip():
+            raise ValueError(f"Input data for function '{method_name}' cannot be empty")
+        
+        try:
+            return func(input_data)
+        except Exception as e:
+            raise ValueError(f"Error executing function '{method_name}': {str(e)}") 
