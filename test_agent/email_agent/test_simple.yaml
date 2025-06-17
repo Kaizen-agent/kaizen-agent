@@ -34,7 +34,7 @@ steps:
     input:
       file_path: email_agent.py
       region: email_agent
-      method: run
+      method: improve_email
       input: "Can you help me improve this email: Dear John, I want to meet tomorrow to discuss the project. Thanks, Jane"
     expected_output:
       type: "string"
@@ -54,7 +54,7 @@ steps:
     input:
       file_path: email_agent.py
       region: email_agent
-      method: run
+      method: improve_email
       input: "What's the weather like today?"
     expected_output:
       type: "string"
@@ -70,7 +70,7 @@ steps:
     input:
       file_path: email_agent.py
       region: email_agent
-      method: run
+      method: improve_email
       input: ""
     expected_output:
       type: "string"
