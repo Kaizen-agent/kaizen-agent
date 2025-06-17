@@ -151,19 +151,61 @@ class TestAllCommand(TestCommand):
         return config
     
     def _handle_auto_fix(self, failed_tests: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
-        """Handle auto-fix for failed tests."""
+        """
+        Handle auto-fix for failed tests.
+        
+        Args:
+            failed_tests: List of failed tests to fix
+            
+        Returns:
+            Optional[List[Dict[str, Any]]]: List of fix attempts if any were made
+        """
         if not failed_tests:
             return None
             
         self.logger.info(f"Attempting to fix {len(failed_tests)} failing tests (max retries: {self.config.max_retries})")
-        from ...autofix.main import AutoFix
-        return AutoFix(self.config.config_path).fix_code(
-            str(self.config.file_path),
-            failed_tests,
-            max_retries=self.config.max_retries,
-            create_pr=self.config.create_pr,
-            base_branch=self.config.base_branch
-        )
+        from ...autofix.main import AutoFix, FixStatus
+        
+        try:
+            # Create AutoFix instance and run fixes
+            fixer = AutoFix(self.config.config_path)
+            fix_results = fixer.fix_code(
+                str(self.config.file_path),
+                failed_tests,
+                max_retries=self.config.max_retries,
+                create_pr=self.config.create_pr,
+                base_branch=self.config.base_branch
+            )
+            
+            # Process and return attempts
+            attempts = fix_results.get('attempts', [])
+            if not attempts:
+                self.logger.warning("No fix attempts were made")
+                return None
+                
+            # Log results of each attempt
+            for attempt in attempts:
+                status = attempt.get('status', 'unknown')
+                attempt_num = attempt.get('attempt_number', 'unknown')
+                self.logger.info(f"Attempt {attempt_num}: {status}")
+                
+                if status == FixStatus.SUCCESS.name:
+                    self.logger.info("Successfully fixed all failing tests!")
+                    if self.config.create_pr:
+                        pr_data = fix_results.get('pr')
+                        if pr_data:
+                            self.logger.info(f"Created pull request: {pr_data.get('url', 'Unknown URL')}")
+                elif status == FixStatus.FAILED.name:
+                    self.logger.warning("Failed to fix all tests after all attempts")
+                elif status == FixStatus.ERROR.name:
+                    error = attempt.get('error', 'Unknown error')
+                    self.logger.error(f"Error during fix attempt: {error}")
+            
+            return attempts
+            
+        except Exception as e:
+            self.logger.error(f"Error during auto-fix process: {str(e)}")
+            return None
 
 class TestReportWriter:
     """Handles writing test reports to files."""

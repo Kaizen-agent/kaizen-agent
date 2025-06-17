@@ -1,0 +1,26 @@
+name: "Sample Test Case"
+input:
+  region: "test_function"
+  method: "process_data"
+  input: "test input data"
+expected_output:
+  result: "processed test input data"
+  status: "success"
+assertions:
+  - type: "equals"
+    expected: "processed test input data"
+  - type: "contains"
+    expected: "success"
+  - type: "type"
+    expected: "dict"
+llm_evaluation:
+  criteria:
+    - "Output should be properly formatted"
+    - "Result should be meaningful"
+    - "Status should indicate success"
+  required_fields:
+    - "result"
+    - "status"
+  validation_rules:
+    - "result should be a string"
+    - "status should be 'success'" 
