@@ -8,6 +8,7 @@ import sys
 import importlib
 import importlib.util
 import importlib.machinery
+import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -22,6 +23,11 @@ import typing
 # Local application imports
 # (none in this file)
 
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 class RegionType(Enum):
@@ -719,35 +725,22 @@ class CodeRegionExtractor:
     """Extracts and analyzes code regions from files."""
     
     def __init__(self, workspace_root: Optional[Path] = None):
-        """Initialize the code region extractor.
-        
-        Args:
-            workspace_root: Root directory of the workspace
-        """
+        """Initialize the code region extractor."""
         self.workspace_root = workspace_root or Path.cwd()
         self.dependency_resolver = DependencyResolver(self.workspace_root)
+        logger.debug(f"Initialized CodeRegionExtractor with workspace root: {self.workspace_root}")
     
     def extract_region(self, file_path: Path, region_name: str) -> RegionInfo:
-        """Extract a code region from a file.
-        
-        Args:
-            file_path: Path to the file
-            region_name: Name of the region to extract
-            
-        Returns:
-            RegionInfo object containing the extracted code and metadata
-            
-        Raises:
-            ValueError: If region markers are not found or code is invalid
-            IOError: If file cannot be read
-            SyntaxError: If code has syntax errors
-        """
+        """Extract a code region from a file."""
+        logger.info(f"Extracting region '{region_name}' from file: {file_path}")
         try:
             with open(file_path, 'r') as f:
                 content = f.read()
+            logger.debug(f"Successfully read file: {file_path}")
             
             # If region_name is 'main', use the entire file
             if region_name == 'main':
+                logger.debug("Using entire file as region (main)")
                 code = content
                 return self._analyze_region(code, region_name, file_path)
             
@@ -757,52 +750,58 @@ class CodeRegionExtractor:
             
             start_idx = content.find(start_marker)
             if start_idx == -1:
+                logger.error(f"Start marker not found: {start_marker}")
                 raise ValueError(f"Start marker for region '{region_name}' not found")
             
             end_idx = content.find(end_marker)
             if end_idx == -1:
+                logger.error(f"End marker not found: {end_marker}")
                 raise ValueError(f"End marker for region '{region_name}' not found")
             
             start_idx = content.find('\n', start_idx) + 1
             code = content[start_idx:end_idx].strip()
+            logger.debug(f"Extracted code region: {len(code)} characters")
             
             return self._analyze_region(code, region_name, file_path)
             
         except IOError as e:
+            logger.error(f"IOError reading file {file_path}: {str(e)}")
             raise IOError(f"Failed to read file {file_path}: {str(e)}")
         except ValueError as e:
+            logger.error(f"ValueError extracting region '{region_name}': {str(e)}")
             raise ValueError(f"Failed to extract region '{region_name}': {str(e)}")
         except SyntaxError as e:
+            logger.error(f"SyntaxError in region '{region_name}': {str(e)}")
             raise SyntaxError(f"Invalid Python code in region '{region_name}': {str(e)}")
         except Exception as e:
+            logger.error(f"Unexpected error extracting region '{region_name}': {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise ValueError(f"Unexpected error extracting region '{region_name}': {str(e)}")
     
     def _analyze_region(self, code: str, region_name: str, file_path: Path) -> RegionInfo:
-        """Analyze the code region to determine its type, structure, and dependencies.
-        
-        Args:
-            code: The code to analyze
-            region_name: Name of the region
-            file_path: Path to the file containing the region
-            
-        Returns:
-            RegionInfo object containing the analyzed code and metadata
-            
-        Raises:
-            ValueError: If code is invalid or analysis fails
-            SyntaxError: If code has syntax errors
-        """
+        """Analyze the code region to determine its type, structure, and dependencies."""
+        logger.info(f"Analyzing region '{region_name}' from file: {file_path}")
         try:
+            logger.debug("Parsing AST")
             tree = ast.parse(code)
+            
+            logger.debug("Extracting imports")
             imports = self._extract_imports(tree)
+            logger.debug(f"Found {len(imports)} imports")
+            
+            logger.debug("Determining region type")
             region_type, name, methods = self._determine_region_type(tree)
+            logger.debug(f"Region type: {region_type}, name: {name}, methods: {methods}")
             
             try:
+                logger.debug("Resolving dependencies")
                 dependencies = self.dependency_resolver.resolve_dependencies(file_path)
+                logger.debug(f"Found {len(dependencies)} dependencies")
             except ValueError as e:
+                logger.error(f"Failed to resolve dependencies: {str(e)}")
                 raise ValueError(f"Failed to resolve dependencies: {str(e)}")
             
-            return RegionInfo(
+            region_info = RegionInfo(
                 type=region_type,
                 name=name or region_name,
                 code=code,
@@ -813,37 +812,37 @@ class CodeRegionExtractor:
                 class_methods=methods,
                 file_path=file_path
             )
+            logger.info(f"Successfully analyzed region '{region_name}'")
+            return region_info
+            
         except SyntaxError as e:
+            logger.error(f"SyntaxError analyzing region '{region_name}': {str(e)}")
             raise SyntaxError(f"Invalid Python code in region '{region_name}': {str(e)}")
         except ValueError as e:
+            logger.error(f"ValueError analyzing region '{region_name}': {str(e)}")
             raise ValueError(f"Failed to analyze region '{region_name}': {str(e)}")
         except Exception as e:
+            logger.error(f"Unexpected error analyzing region '{region_name}': {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise ValueError(f"Unexpected error analyzing region '{region_name}': {str(e)}")
     
     def _extract_imports(self, tree: ast.AST) -> List[ImportInfo]:
-        """Extract all imports from the AST.
-        
-        Args:
-            tree: AST to analyze
-            
-        Returns:
-            List of ImportInfo objects
-            
-        Raises:
-            ValueError: If imports cannot be extracted
-        """
+        """Extract all imports from the AST."""
+        logger.debug("Starting import extraction")
         try:
             imports = []
             for node in ast.walk(tree):
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
                     if isinstance(node, ast.Import):
                         for name in node.names:
-                            imports.append(ImportInfo(
+                            import_info = ImportInfo(
                                 type=ImportType.SIMPLE,
                                 module=name.name,
                                 names=[name.name],
                                 aliases={name.name: name.asname} if name.asname else {}
-                            ))
+                            )
+                            logger.debug(f"Found simple import: {import_info}")
+                            imports.append(import_info)
                     else:  # ImportFrom
                         module = node.module or ''
                         names = []
@@ -852,40 +851,40 @@ class CodeRegionExtractor:
                             names.append(name.name)
                             if name.asname:
                                 aliases[name.name] = name.asname
-                        imports.append(ImportInfo(
+                        import_info = ImportInfo(
                             type=ImportType.FROM,
                             module=module,
                             names=names,
                             aliases=aliases,
                             level=node.level
-                        ))
+                        )
+                        logger.debug(f"Found from import: {import_info}")
+                        imports.append(import_info)
+            logger.debug(f"Extracted {len(imports)} imports")
             return imports
         except Exception as e:
+            logger.error(f"Error extracting imports: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise ValueError(f"Failed to extract imports: {str(e)}")
     
     def _determine_region_type(self, tree: ast.AST) -> Tuple[RegionType, str, List[str]]:
-        """Determine the type, name, and methods of the region.
-        
-        Args:
-            tree: AST to analyze
-            
-        Returns:
-            Tuple of (region_type, name, methods)
-            
-        Raises:
-            ValueError: If region type cannot be determined
-        """
+        """Determine the type, name, and methods of the region."""
+        logger.debug("Determining region type")
         try:
             methods = []
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
-                    # Get all methods in the class
                     methods = [n.name for n in node.body if isinstance(n, ast.FunctionDef)]
+                    logger.debug(f"Found class: {node.name} with methods: {methods}")
                     return RegionType.CLASS, node.name, methods
                 elif isinstance(node, ast.FunctionDef):
+                    logger.debug(f"Found function: {node.name}")
                     return RegionType.FUNCTION, node.name, []
+            logger.debug("No class or function found, treating as module")
             return RegionType.MODULE, "module", []
         except Exception as e:
+            logger.error(f"Error determining region type: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise ValueError(f"Failed to determine region type: {str(e)}")
 
 class CodeRegionExecutor:
