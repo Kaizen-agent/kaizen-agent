@@ -9,10 +9,10 @@ import importlib
 import importlib.util
 import importlib.machinery
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Set, FrozenSet, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Set, FrozenSet, Union, Type
 from collections import defaultdict
 import typing
 
@@ -37,6 +37,14 @@ class ImportType(Enum):
     RELATIVE = 'relative'  # from . import x
     ALIAS = 'alias'    # import x as y
     STAR = 'star'      # from x import *
+
+class ImportErrorType(Enum):
+    """Types of import errors that can occur."""
+    MODULE_NOT_FOUND = "module_not_found"
+    IMPORT_ERROR = "import_error"
+    ATTRIBUTE_ERROR = "attribute_error"
+    PERMISSION_ERROR = "permission_error"
+    UNKNOWN_ERROR = "unknown_error"
 
 @dataclass(frozen=True)
 class ImportInfo:
@@ -69,6 +77,80 @@ class RegionInfo:
     dependencies: FrozenSet[ModuleInfo]
     class_methods: List[str] = None
     file_path: Optional[Path] = None
+
+@dataclass
+class ImportError:
+    """Detailed information about an import error."""
+    type: ImportErrorType
+    module_name: str
+    message: str
+    original_error: Optional[Exception] = None
+
+@dataclass
+class PackageConfig:
+    """Configuration for package imports."""
+    name: str
+    import_name: str  # The actual name used in import statements
+    required: bool = False
+    fallback_names: List[str] = field(default_factory=list)
+    special_import: Optional[str] = None  # Special import statement if needed
+
+@dataclass
+class ImportManagerConfig:
+    """Configuration for the ImportManager."""
+    common_packages: Dict[str, PackageConfig] = field(default_factory=lambda: {
+        'python-dotenv': PackageConfig(
+            name='python-dotenv',
+            import_name='dotenv',
+            required=True,
+            fallback_names=['dotenv'],
+            special_import='from dotenv import load_dotenv'
+        ),
+        'google-generativeai': PackageConfig(
+            name='google-generativeai',
+            import_name='google.generativeai',
+            required=True,
+            fallback_names=['genai'],
+            special_import='import google.generativeai as genai'
+        ),
+        'openai': PackageConfig(
+            name='openai',
+            import_name='openai',
+            required=True
+        ),
+        'click': PackageConfig(
+            name='click',
+            import_name='click',
+            required=True
+        ),
+        'pyyaml': PackageConfig(
+            name='pyyaml',
+            import_name='yaml',
+            required=True,
+            fallback_names=['yaml']
+        ),
+        'PyGithub': PackageConfig(
+            name='PyGithub',
+            import_name='github',
+            required=False,
+            fallback_names=['github']
+        ),
+        'anthropic': PackageConfig(
+            name='anthropic',
+            import_name='anthropic',
+            required=False
+        ),
+        'typing_extensions': PackageConfig(
+            name='typing_extensions',
+            import_name='typing_extensions',
+            required=False
+        )
+    })
+    standard_libs: Set[str] = field(default_factory=lambda: {
+        'typing', 'os', 'sys', 'pathlib', 'collections', 'dataclasses', 
+        'enum', 'logging', 'importlib', 'ast', 'contextlib', 'json',
+        'datetime', 'time', 're', 'math', 'random', 'itertools', 'functools'
+    })
 
 class DependencyResolver:
     """Resolves module dependencies and handles import cycles."""
@@ -271,13 +353,21 @@ class ImportAnalyzer:
 class ImportManager:
     """Manages imports for code region execution."""
     
-    def __init__(self, workspace_root: Path):
+    def __init__(self, workspace_root: Path, config: Optional[ImportManagerConfig] = None):
+        """Initialize the import manager.
+        
+        Args:
+            workspace_root: Root directory of the workspace
+            config: Optional configuration for the import manager
+        """
         self.workspace_root = workspace_root
+        self.config = config or ImportManagerConfig()
         self._original_sys_path = sys.path.copy()
         self._added_paths: Set[str] = set()
         self._processed_files: Set[Path] = set()
         self._module_cache: Dict[str, Any] = {}
         self._import_analyzer = ImportAnalyzer()
+        self._import_errors: List[ImportError] = []
     
     @contextmanager
     def managed_imports(self, region_info: RegionInfo) -> Dict[str, Any]:
@@ -285,6 +375,9 @@ class ImportManager:
         try:
             # First analyze all required imports
             standard_imports, third_party_imports = self._import_analyzer.analyze_imports(region_info.code)
+            
+            # Add configured third-party packages to imports
+            third_party_imports.update(self.config.common_packages.keys())
             
             # Create namespace with all required imports
             namespace = self._create_namespace(standard_imports, third_party_imports)
@@ -294,6 +387,9 @@ class ImportManager:
             
             # Process dependencies
             self._process_dependencies(region_info, namespace)
+            
+            # Check for required package import errors
+            self._check_required_imports()
             
             yield namespace
             
@@ -319,17 +415,98 @@ class ImportManager:
                 module = __import__(module_name)
                 namespace[module_name] = module
             except ImportError as e:
-                logger.warning(f"Failed to import standard library {module_name}: {str(e)}")
+                self._record_import_error(
+                    ImportErrorType.IMPORT_ERROR,
+                    module_name,
+                    f"Failed to import standard library {module_name}",
+                    e
+                )
         
-        # Add third-party imports
+        # Add third-party imports with better error handling
         for module_name in third_party_imports:
-            try:
-                module = __import__(module_name)
-                namespace[module_name] = module
-            except ImportError as e:
-                logger.warning(f"Failed to import third-party module {module_name}: {str(e)}")
+            self._import_package(module_name, namespace)
         
         return namespace
+    
+    def _import_package(self, package_name: str, namespace: Dict[str, Any]) -> None:
+        """Import a package with proper error handling and fallbacks."""
+        if package_name not in self.config.common_packages:
+            # Handle unknown packages
+            try:
+                module = __import__(package_name)
+                namespace[package_name] = module
+            except ImportError as e:
+                self._record_import_error(
+                    ImportErrorType.IMPORT_ERROR,
+                    package_name,
+                    f"Failed to import unknown package {package_name}",
+                    e
+                )
+            return
+        
+        config = self.config.common_packages[package_name]
+        
+        # Try primary import
+        try:
+            if config.special_import:
+                # Execute special import statement
+                exec(config.special_import, namespace)
+            else:
+                module = __import__(config.import_name)
+                namespace[config.import_name] = module
+            return
+        except ImportError as e:
+            self._record_import_error(
+                ImportErrorType.IMPORT_ERROR,
+                package_name,
+                f"Failed to import {package_name} using primary method",
+                e
+            )
+        
+        # Try fallback imports
+        for fallback_name in config.fallback_names:
+            try:
+                module = __import__(fallback_name)
+                namespace[fallback_name] = module
+                return
+            except ImportError:
+                continue
+        
+        # If we get here, all import attempts failed
+        if config.required:
+            self._record_import_error(
+                ImportErrorType.MODULE_NOT_FOUND,
+                package_name,
+                f"Required package {package_name} could not be imported"
+            )
+    
+    def _record_import_error(self, error_type: ImportErrorType, module_name: str, 
+                           message: str, original_error: Optional[Exception] = None) -> None:
+        """Record an import error for later analysis."""
+        error = ImportError(
+            type=error_type,
+            module_name=module_name,
+            message=message,
+            original_error=original_error
+        )
+        self._import_errors.append(error)
+        logger.warning(f"Import error: {message}")
+        if original_error:
+            logger.debug(f"Original error: {str(original_error)}")
+    
+    def _check_required_imports(self) -> None:
+        """Check if all required imports were successful."""
+        failed_required = [
+            error for error in self._import_errors
+            if error.module_name in self.config.common_packages
+            and self.config.common_packages[error.module_name].required
+        ]
+        
+        if failed_required:
+            error_messages = [f"{error.module_name}: {error.message}" for error in failed_required]
+            raise ImportError(
+                f"Failed to import required packages:\n" + "\n".join(error_messages)
+            )
     
     def _add_typing_imports(self, namespace: Dict[str, Any]) -> None:
         """Add all common typing imports to namespace."""
@@ -529,6 +706,7 @@ class ImportManager:
         self._added_paths.clear()
         self._processed_files.clear()
         self._module_cache.clear()
+        self._import_errors.clear()
 
 class CodeRegionExtractor:
     """Extracts and analyzes code regions from files."""
