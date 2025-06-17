@@ -1176,9 +1176,6 @@ class CodeRegionExecutor:
             
             # Execute the method
             return method(input_data)
-        except (AttributeError, TypeError) as e:
-            logger.error(f"✗ Method error: {method_name} - {str(e)}")
-            raise
         except BaseException as e:
             logger.error(f"✗ Method execution failed: {method_name} - {str(e)}")
             raise ValueError(f"Error executing method '{method_name}': {str(e)}")
