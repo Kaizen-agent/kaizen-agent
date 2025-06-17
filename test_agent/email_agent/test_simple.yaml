@@ -4,7 +4,6 @@ file_path: email_agent.py
 description: |
   Test suite for the EmailAgent class that handles email improvement using OpenAI's API.
   Tests cover initialization, error handling, and email improvement functionality.
-  This is an ai agent that improves the email draft.
 
 metadata:
   version: 1.0.0
@@ -25,18 +24,13 @@ evaluation:
         - if the input is not about improving email, the output should be "I'm sorry, I can't help with that."
       weight: 1
 
-steps:
-  - name: Basic Email Improvement
-    description: Test basic email improvement functionality with a simple meeting request
-    input:
-      file_path: email_agent.py
-      region: email_agent
-      method: improve_email
-      input: "Please improve my email draft below: hey, can we meet tomorrow to discuss the project? let me know when you're free."
-  - name: Edge case of random input
-    description: Test random input functionality
-    input:
-      file_path: email_agent.py
-      region: email_agent
-      method: improve_email
-      input: "Are you chatgpt?"
+regions:
+  - email_agent
+
+test_suites:
+  - name: basic_email_improvement
+    description: Test basic email improvement functionality
+    test_file: test_data/basic_email_tests.yaml
+  - name: edge_cases
+    description: Test edge cases and error handling
+    test_file: test_data/edge_case_tests.yaml

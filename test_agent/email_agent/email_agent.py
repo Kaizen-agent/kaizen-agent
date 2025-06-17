@@ -3,6 +3,7 @@ from typing import Optional
 import google.generativeai as genai
 from dotenv import load_dotenv
 import sys
+import click
 
 # kaizen:start:email_agent
 class EmailAgent:
@@ -122,51 +123,46 @@ class EmailAgent:
 # kaizen:end:email_agent
 
 # kaizen:start:cli_interface
-def main():
+@click.command()
+@click.option('--draft', type=str, help='Email draft to improve')
+@click.option('--file', type=str, help='Path to file containing email draft')
+def main(draft: str, file: str):
     """Main function to run the email agent from command line."""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Email Improvement Agent")
-    parser.add_argument("--draft", type=str, help="Email draft to improve")
-    parser.add_argument("--file", type=str, help="Path to file containing email draft")
-    args = parser.parse_args()
-
     try:
         agent = EmailAgent()
         
-        draft = None
-        if args.draft:
-            draft = args.draft
-        elif args.file:
+        email_draft = None
+        if draft:
+            email_draft = draft
+        elif file:
             try:
-                with open(args.file, 'r') as f:
-                    draft = f.read()
+                with open(file, 'r') as f:
+                    email_draft = f.read()
             except FileNotFoundError:
-                print(f"Error: File not found at '{args.file}'")
+                click.echo(f"Error: File not found at '{file}'", err=True)
                 return
             except Exception as e:
-                print(f"Error reading file '{args.file}': {str(e)}")
+                click.echo(f"Error reading file '{file}': {str(e)}", err=True)
                 return
 
-        if draft is None:
+        if email_draft is None:
             # If no --draft or --file is provided, read from stdin
-            print("Please enter your email draft (press Ctrl+D or Ctrl+Z on Windows when finished):")
-            # Changed to use sys.stdin.read() for more robust input handling
-            draft = sys.stdin.read()
+            click.echo("Please enter your email draft (press Ctrl+D or Ctrl+Z on Windows when finished):")
+            email_draft = sys.stdin.read()
 
-        if not draft.strip():
-            print("No email draft provided.")
+        if not email_draft.strip():
+            click.echo("No email draft provided.", err=True)
             return
 
-        improved_email = agent.improve_email(draft)
-        print("\nImproved Email:")
-        print("-" * 50)
-        print(improved_email)
-        print("-" * 50)
+        improved_email = agent.improve_email(email_draft)
+        click.echo("\nImproved Email:")
+        click.echo("-" * 50)
+        click.echo(improved_email)
+        click.echo("-" * 50)
 
     except Exception as e:
-        print(f"Error: {str(e)}")
+        click.echo(f"Error: {str(e)}", err=True)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
 # kaizen:end:cli_interface
