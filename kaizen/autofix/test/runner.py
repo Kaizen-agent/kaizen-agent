@@ -282,30 +282,32 @@ class TestRunner:
             # Get the absolute path of the test file
             abs_path = test_file_path.resolve()
             
-            # Get the package directory (parent of the test file)
-            package_dir = abs_path.parent
+            # Get the workspace root (assuming test_agent is in the workspace)
+            workspace_root = abs_path
+            while workspace_root.name != 'kaizen-agent' and workspace_root.parent != workspace_root:
+                workspace_root = workspace_root.parent
             
-            # Add the package directory to sys.path if it's not already there
-            if str(package_dir) not in sys.path:
-                sys.path.insert(0, str(package_dir))
+            if workspace_root.name != 'kaizen-agent':
+                raise ImportError("Could not find workspace root directory")
             
-            # Add the parent of package directory to sys.path for relative imports
-            parent_dir = str(package_dir.parent)
-            if parent_dir not in sys.path:
-                sys.path.insert(0, parent_dir)
+            # Add workspace root to Python path
+            if str(workspace_root) not in sys.path:
+                sys.path.insert(0, str(workspace_root))
             
-            # Create a module name from the file path
-            module_name = abs_path.stem
+            # Convert file path to module path
+            # e.g., /path/to/kaizen-agent/test_agent/summarizer_agent/agent.py
+            # becomes test_agent.summarizer_agent.agent
+            rel_path = abs_path.relative_to(workspace_root)
+            module_path = '.'.join(rel_path.with_suffix('').parts)
             
             # Import the module
-            spec = importlib.util.spec_from_file_location(module_name, abs_path)
-            if spec is None:
-                raise ImportError(f"Could not find module spec for {abs_path}")
-            
-            # Create and execute the module
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module  # Add to sys.modules to handle relative imports
-            spec.loader.exec_module(module)
+            try:
+                module = importlib.import_module(module_path)
+            except ImportError:
+                # If direct import fails, try importing the package first
+                package_path = '.'.join(rel_path.parent.parts)
+                importlib.import_module(package_path)
+                module = importlib.import_module(module_path)
             
             return module
             
