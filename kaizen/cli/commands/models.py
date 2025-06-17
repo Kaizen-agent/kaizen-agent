@@ -16,7 +16,7 @@ Example:
     ... )
 """
 
-from typing import Dict, Any, Optional, List, TypeVar, Generic, Union
+from typing import Dict, Any, Optional, List, TypeVar, Generic, Union, Type
 from dataclasses import dataclass, field
 from pathlib import Path
 from enum import Enum
@@ -40,6 +40,35 @@ class InvalidValueError(ConfigurationValidationError):
 class PathResolutionError(ConfigurationError):
     """Error raised when there is a problem resolving file paths."""
     pass
+
+class ValidationResult:
+    """Result of a validation operation.
+    
+    Attributes:
+        is_valid: Whether the validation passed
+        errors: List of validation errors
+    """
+    def __init__(self):
+        self.is_valid = True
+        self.errors: List[str] = []
+
+    def add_error(self, error: str) -> None:
+        """Add a validation error.
+        
+        Args:
+            error: Error message to add
+        """
+        self.is_valid = False
+        self.errors.append(error)
+
+    def raise_if_invalid(self) -> None:
+        """Raise an exception if validation failed.
+        
+        Raises:
+            ConfigurationValidationError: If validation failed
+        """
+        if not self.is_valid:
+            raise ConfigurationValidationError("\n".join(self.errors))
 
 @dataclass
 class PathResolver:
@@ -103,6 +132,7 @@ class ConfigurationValidator:
     """
     def __init__(self, data: Dict[str, Any]):
         self.data = data
+        self.result = ValidationResult()
 
     def validate(self) -> None:
         """Validate all configuration values.
@@ -113,37 +143,38 @@ class ConfigurationValidator:
         self._validate_required_fields()
         self._validate_max_retries()
         self._validate_base_branch()
+        self._validate_optional_fields()
+        self.result.raise_if_invalid()
 
     def _validate_required_fields(self) -> None:
-        """Validate that all required fields are present.
-        
-        Raises:
-            RequiredFieldError: If any required field is missing
-        """
+        """Validate that all required fields are present."""
         required_fields = ['name', 'file_path']
         for field in required_fields:
             if field not in self.data:
-                raise RequiredFieldError(f"Configuration must include '{field}' field")
+                self.result.add_error(f"Configuration must include '{field}' field")
 
     def _validate_max_retries(self) -> None:
-        """Validate max_retries value.
-        
-        Raises:
-            InvalidValueError: If max_retries is invalid
-        """
+        """Validate max_retries value."""
         max_retries = self.data.get('max_retries', 3)
         if not 1 <= max_retries <= 10:
-            raise InvalidValueError(f"max_retries must be between 1 and 10, got {max_retries}")
+            self.result.add_error(f"max_retries must be between 1 and 10, got {max_retries}")
 
     def _validate_base_branch(self) -> None:
-        """Validate base_branch value.
-        
-        Raises:
-            InvalidValueError: If base_branch is invalid
-        """
+        """Validate base_branch value."""
         base_branch = self.data.get('base_branch', 'main')
         if not base_branch or not isinstance(base_branch, str):
-            raise InvalidValueError("base_branch must be a non-empty string")
+            self.result.add_error("base_branch must be a non-empty string")
+
+    def _validate_optional_fields(self) -> None:
+        """Validate optional fields if present."""
+        if 'metadata' in self.data and not isinstance(self.data['metadata'], dict):
+            self.result.add_error("metadata must be a dictionary")
+        if 'evaluation' in self.data and not isinstance(self.data['evaluation'], dict):
+            self.result.add_error("evaluation must be a dictionary")
+        if 'regions' in self.data and not isinstance(self.data['regions'], list):
+            self.result.add_error("regions must be a list")
+        if 'steps' in self.data and not isinstance(self.data['steps'], list):
+            self.result.add_error("steps must be a list")
 
 class PRStrategyParser:
     """Parser for PR strategy values.
@@ -172,17 +203,83 @@ class PRStrategyParser:
         except ValueError as e:
             raise InvalidValueError(f"Invalid PR strategy: {value}") from e
 
-class PRStrategy(str, Enum):
-    """Strategy for when to create pull requests.
+class ConfigurationBuilder:
+    """Builder for TestConfiguration instances.
+    
+    This class handles the creation of TestConfiguration instances
+    with proper validation and error handling.
     
     Attributes:
-        ALL_PASSING: Create PR only when all tests pass
-        ANY_PASSING: Create PR when any test passes
-        ALWAYS: Always create PR regardless of test results
+        data: Configuration data
+        config_path: Path to the configuration file
     """
-    ALL_PASSING = "ALL_PASSING"
-    ANY_PASSING = "ANY_PASSING"
-    ALWAYS = "ALWAYS"
+    def __init__(self, data: Dict[str, Any], config_path: Path):
+        self.data = data
+        self.config_path = config_path
+        self.validator = ConfigurationValidator(data)
+        self.path_resolver = PathResolver(config_path.parent)
+
+    def build(self) -> 'TestConfiguration':
+        """Build a TestConfiguration instance.
+        
+        Returns:
+            TestConfiguration instance
+            
+        Raises:
+            ConfigurationValidationError: If configuration validation fails
+            PathResolutionError: If file path resolution fails
+        """
+        # Validate configuration
+        self.validator.validate()
+        
+        # Parse PR strategy
+        pr_strategy = PRStrategyParser.parse(self.data.get('pr_strategy', 'ALL_PASSING'))
+
+        # Resolve file path
+        try:
+            file_path = self.path_resolver.resolve(self.data['file_path'])
+        except PathResolutionError as e:
+            raise ConfigurationValidationError(f"Invalid file path in configuration: {str(e)}") from e
+
+        # Prepare all fields
+        metadata = self._build_metadata()
+        evaluation = self._build_evaluation()
+        settings = self._build_settings()
+
+        # Create instance
+        return TestConfiguration(
+            name=self.data['name'],
+            file_path=file_path,
+            config_path=self.config_path,
+            agent_type=self.data.get('agent_type'),
+            description=self.data.get('description'),
+            metadata=metadata,
+            evaluation=evaluation,
+            regions=self.data.get('regions'),
+            steps=self.data.get('steps'),
+            settings=settings,
+            auto_fix=self.data.get('auto_fix', False),
+            create_pr=self.data.get('create_pr', False),
+            max_retries=self.data.get('max_retries', 3),
+            base_branch=self.data.get('base_branch', 'main'),
+            pr_strategy=pr_strategy
+        )
+
+    def _build_metadata(self) -> Optional[TestMetadata]:
+        """Build TestMetadata instance if present."""
+        if 'metadata' in self.data:
+            return TestMetadata.from_dict(self.data['metadata'])
+        return None
+
+    def _build_evaluation(self) -> Optional[TestEvaluation]:
+        """Build TestEvaluation instance if present."""
+        if 'evaluation' in self.data:
+            return TestEvaluation.from_dict(self.data['evaluation'])
+        return None
+
+    def _build_settings(self) -> TestSettings:
+        """Build TestSettings instance."""
+        return TestSettings.from_dict(self.data)
 
 @dataclass
 class TestMetadata:
@@ -382,38 +479,8 @@ class TestConfiguration:
             ConfigurationValidationError: If configuration validation fails
             PathResolutionError: If file path resolution fails
         """
-        # Validate configuration values
-        validator = ConfigurationValidator(data)
-        validator.validate()
-        
-        # Parse PR strategy
-        pr_strategy = PRStrategyParser.parse(data.get('pr_strategy', 'ALL_PASSING'))
-
-        # Resolve file path
-        resolver = PathResolver(config_path.parent)
-        try:
-            file_path = resolver.resolve(data['file_path'])
-        except PathResolutionError as e:
-            raise ConfigurationValidationError(f"Invalid file path in configuration: {str(e)}") from e
-
-        # Create instance with validated values
-        return cls(
-            name=data['name'],
-            file_path=file_path,
-            config_path=config_path,
-            agent_type=data.get('agent_type'),
-            description=data.get('description'),
-            metadata=TestMetadata.from_dict(data.get('metadata', {})) if 'metadata' in data else None,
-            evaluation=TestEvaluation.from_dict(data.get('evaluation', {})) if 'evaluation' in data else None,
-            regions=data.get('regions'),
-            steps=data.get('steps'),
-            settings=TestSettings.from_dict(data),
-            auto_fix=data.get('auto_fix', False),
-            create_pr=data.get('create_pr', False),
-            max_retries=data.get('max_retries', 3),
-            base_branch=data.get('base_branch', 'main'),
-            pr_strategy=pr_strategy
-        )
+        builder = ConfigurationBuilder(data, config_path)
+        return builder.build()
 
 @dataclass
 class TestResult:
