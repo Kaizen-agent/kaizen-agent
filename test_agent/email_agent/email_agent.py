@@ -22,9 +22,10 @@ class EmailAgent:
             # Test the configuration by generating content
             # This helps catch issues like invalid API keys or network problems early
             self.model.generate_content("Test")
-            # Removed debug print: print("Debug: EmailAgent: Successfully configured Google API")
-        except Exception as e:
+        except (ValueError, ImportError, AttributeError) as e:
             raise ValueError(f"Failed to configure Google API: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Unexpected error configuring Google API: {str(e)}")
 
     def improve_email(self, draft: str) -> str:
         """
@@ -36,9 +37,6 @@ class EmailAgent:
         Returns:
             str: The improved email draft
         """
-        # Modified to raise a ValueError for empty/whitespace drafts, making the method's
-        # behavior more consistent with typical API functions (raising errors for invalid input).
-        # The CLI interface handles this case before calling this method.
         if not draft or not draft.strip():
             raise ValueError("Email draft cannot be empty or contain only whitespace.")
             
@@ -57,12 +55,11 @@ class EmailAgent:
         Improved version:"""
 
         try:
-            # Removed debug print: print(f"Debug: Prompt: {prompt}")
             response = self.model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.7,
-                    max_output_tokens=2048, # Increased token limit for longer emails
+                    max_output_tokens=2048,
                     top_p=0.8,
                     top_k=40,
                 ),
@@ -85,7 +82,6 @@ class EmailAgent:
                     }
                 ]
             )
-            # Removed debug print: print(f"Debug: Response: {response}")
             
             # Check for safety issues in the prompt feedback
             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
@@ -107,7 +103,6 @@ class EmailAgent:
                     raise ValueError("Content was blocked by safety filters during generation.")
             
             # Attempt to extract the text content from the response
-            # Modified this section for robustness to rely directly on parts[0].text
             if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
                 if not candidate.content.parts:
                     raise ValueError("Model response contained no content parts.")
@@ -117,9 +112,15 @@ class EmailAgent:
             # If text could not be extracted, raise an error
             raise ValueError("Could not extract text from the model's response.")
             
-        except Exception as e:
-            # Catch any other exceptions during content generation and re-raise as ValueError
+        except ValueError as e:
+            # Re-raise ValueError as is
+            raise
+        except (ImportError, AttributeError) as e:
+            # Convert specific exceptions to ValueError
             raise ValueError(f"Failed to generate improved email: {str(e)}")
+        except Exception as e:
+            # Catch any other unexpected exceptions
+            raise ValueError(f"Unexpected error generating improved email: {str(e)}")
 # kaizen:end:email_agent
 
 # kaizen:start:cli_interface
