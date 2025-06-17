@@ -25,6 +25,18 @@ from .errors import ConfigurationError
 
 T = TypeVar('T')
 
+class ConfigurationValidationError(ConfigurationError):
+    """Base class for configuration validation errors."""
+    pass
+
+class RequiredFieldError(ConfigurationValidationError):
+    """Error raised when a required field is missing."""
+    pass
+
+class InvalidValueError(ConfigurationValidationError):
+    """Error raised when a field value is invalid."""
+    pass
+
 class PathResolutionError(ConfigurationError):
     """Error raised when there is a problem resolving file paths."""
     pass
@@ -79,6 +91,86 @@ class PathResolver:
                 f"Path does not exist: {path} (resolved to: {resolved_path})"
             )
         return resolved_path
+
+class ConfigurationValidator:
+    """Validator for test configuration.
+    
+    This class handles validation of configuration values before
+    creating a TestConfiguration instance.
+    
+    Attributes:
+        data: Configuration data to validate
+    """
+    def __init__(self, data: Dict[str, Any]):
+        self.data = data
+
+    def validate(self) -> None:
+        """Validate all configuration values.
+        
+        Raises:
+            ConfigurationValidationError: If any validation fails
+        """
+        self._validate_required_fields()
+        self._validate_max_retries()
+        self._validate_base_branch()
+
+    def _validate_required_fields(self) -> None:
+        """Validate that all required fields are present.
+        
+        Raises:
+            RequiredFieldError: If any required field is missing
+        """
+        required_fields = ['name', 'file_path']
+        for field in required_fields:
+            if field not in self.data:
+                raise RequiredFieldError(f"Configuration must include '{field}' field")
+
+    def _validate_max_retries(self) -> None:
+        """Validate max_retries value.
+        
+        Raises:
+            InvalidValueError: If max_retries is invalid
+        """
+        max_retries = self.data.get('max_retries', 3)
+        if not 1 <= max_retries <= 10:
+            raise InvalidValueError(f"max_retries must be between 1 and 10, got {max_retries}")
+
+    def _validate_base_branch(self) -> None:
+        """Validate base_branch value.
+        
+        Raises:
+            InvalidValueError: If base_branch is invalid
+        """
+        base_branch = self.data.get('base_branch', 'main')
+        if not base_branch or not isinstance(base_branch, str):
+            raise InvalidValueError("base_branch must be a non-empty string")
+
+class PRStrategyParser:
+    """Parser for PR strategy values.
+    
+    This class handles parsing and validation of PR strategy values.
+    """
+    @staticmethod
+    def parse(value: Union[str, PRStrategy]) -> PRStrategy:
+        """Parse PR strategy value.
+        
+        Args:
+            value: PR strategy value (string or enum)
+            
+        Returns:
+            PRStrategy enum value
+            
+        Raises:
+            InvalidValueError: If value is invalid
+        """
+        if isinstance(value, PRStrategy):
+            return value
+        if not isinstance(value, str):
+            raise InvalidValueError(f"PR strategy must be a string or PRStrategy enum, got {type(value)}")
+        try:
+            return PRStrategy.from_str(value)
+        except ValueError as e:
+            raise InvalidValueError(f"Invalid PR strategy: {value}") from e
 
 class PRStrategy(str, Enum):
     """Strategy for when to create pull requests.
@@ -249,7 +341,7 @@ class TestConfiguration:
         agent_type: Type of agent to use (optional)
         description: Description of the test (optional)
         metadata: Test metadata (optional)
-        evaluation: Evaluation criteria (optional)
+        evaluation: Test evaluation criteria (optional)
         regions: List of test regions (optional)
         steps: List of test steps (optional)
         settings: Test execution settings
@@ -275,50 +367,6 @@ class TestConfiguration:
     base_branch: str = 'main'
     pr_strategy: PRStrategy = PRStrategy.ALL_PASSING
 
-    def __post_init__(self):
-        """Validate configuration after initialization."""
-        self._validate_configuration()
-
-    def _validate_configuration(self) -> None:
-        """Validate configuration values.
-        
-        Raises:
-            ValueError: If any configuration value is invalid
-        """
-        self._validate_retries()
-        self._validate_branch()
-        self._validate_paths()
-
-    def _validate_retries(self) -> None:
-        """Validate max_retries value.
-        
-        Raises:
-            ValueError: If max_retries is invalid
-        """
-        if not 1 <= self.max_retries <= 10:
-            raise ValueError(f"max_retries must be between 1 and 10, got {self.max_retries}")
-
-    def _validate_branch(self) -> None:
-        """Validate base_branch value.
-        
-        Raises:
-            ValueError: If base_branch is invalid
-        """
-        if not self.base_branch or not isinstance(self.base_branch, str):
-            raise ValueError("base_branch must be a non-empty string")
-
-    def _validate_paths(self) -> None:
-        """Validate file paths.
-        
-        Raises:
-            PathResolutionError: If any file path is invalid
-        """
-        resolver = PathResolver(self.config_path.parent)
-        try:
-            resolver.validate_exists(self.file_path)
-        except PathResolutionError as e:
-            raise ValueError(str(e)) from e
-
     @classmethod
     def from_dict(cls, data: Dict[str, Any], config_path: Path) -> 'TestConfiguration':
         """Create TestConfiguration from dictionary.
@@ -331,19 +379,24 @@ class TestConfiguration:
             TestConfiguration instance
             
         Raises:
-            ValueError: If any configuration value is invalid
+            ConfigurationValidationError: If configuration validation fails
             PathResolutionError: If file path resolution fails
         """
-        # Validate and convert pr_strategy
-        pr_strategy = cls._parse_pr_strategy(data.get('pr_strategy', 'ALL_PASSING'))
+        # Validate configuration values
+        validator = ConfigurationValidator(data)
+        validator.validate()
+        
+        # Parse PR strategy
+        pr_strategy = PRStrategyParser.parse(data.get('pr_strategy', 'ALL_PASSING'))
 
-        # Resolve file path relative to config
+        # Resolve file path
         resolver = PathResolver(config_path.parent)
         try:
             file_path = resolver.resolve(data['file_path'])
         except PathResolutionError as e:
-            raise ValueError(f"Invalid file path in configuration: {str(e)}") from e
+            raise ConfigurationValidationError(f"Invalid file path in configuration: {str(e)}") from e
 
+        # Create instance with validated values
         return cls(
             name=data['name'],
             file_path=file_path,
@@ -361,28 +414,6 @@ class TestConfiguration:
             base_branch=data.get('base_branch', 'main'),
             pr_strategy=pr_strategy
         )
-
-    @staticmethod
-    def _parse_pr_strategy(value: Union[str, PRStrategy]) -> PRStrategy:
-        """Parse PR strategy value.
-        
-        Args:
-            value: PR strategy value (string or enum)
-            
-        Returns:
-            PRStrategy enum value
-            
-        Raises:
-            ValueError: If value is invalid
-        """
-        if isinstance(value, PRStrategy):
-            return value
-        if not isinstance(value, str):
-            raise ValueError(f"PR strategy must be a string or PRStrategy enum, got {type(value)}")
-        try:
-            return PRStrategy.from_str(value)
-        except ValueError as e:
-            raise ValueError(f"Invalid PR strategy: {value}") from e
 
 @dataclass
 class TestResult:
