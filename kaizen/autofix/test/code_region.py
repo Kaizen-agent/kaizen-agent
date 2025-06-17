@@ -728,8 +728,7 @@ class CodeRegionExtractor:
         self.dependency_resolver = DependencyResolver(self.workspace_root)
     
     def extract_region(self, file_path: Path, region_name: str) -> RegionInfo:
-        """
-        Extract a code region from a file.
+        """Extract a code region from a file.
         
         Args:
             file_path: Path to the file
@@ -741,6 +740,7 @@ class CodeRegionExtractor:
         Raises:
             ValueError: If region markers are not found or code is invalid
             IOError: If file cannot be read
+            SyntaxError: If code has syntax errors
         """
         try:
             with open(file_path, 'r') as f:
@@ -772,6 +772,8 @@ class CodeRegionExtractor:
             raise IOError(f"Failed to read file {file_path}: {str(e)}")
         except ValueError as e:
             raise ValueError(f"Failed to extract region '{region_name}': {str(e)}")
+        except SyntaxError as e:
+            raise SyntaxError(f"Invalid Python code in region '{region_name}': {str(e)}")
         except Exception as e:
             raise ValueError(f"Unexpected error extracting region '{region_name}': {str(e)}")
     
@@ -818,14 +820,14 @@ class CodeRegionExtractor:
         except Exception as e:
             raise ValueError(f"Unexpected error analyzing region '{region_name}': {str(e)}")
     
-    def _extract_imports(self, tree: ast.AST) -> List[str]:
+    def _extract_imports(self, tree: ast.AST) -> List[ImportInfo]:
         """Extract all imports from the AST.
         
         Args:
             tree: AST to analyze
             
         Returns:
-            List of import statements
+            List of ImportInfo objects
             
         Raises:
             ValueError: If imports cannot be extracted
@@ -836,16 +838,32 @@ class CodeRegionExtractor:
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
                     if isinstance(node, ast.Import):
                         for name in node.names:
-                            imports.append(name.name)
-                    else:
+                            imports.append(ImportInfo(
+                                type=ImportType.SIMPLE,
+                                module=name.name,
+                                names=[name.name],
+                                aliases={name.name: name.asname} if name.asname else {}
+                            ))
+                    else:  # ImportFrom
                         module = node.module or ''
+                        names = []
+                        aliases = {}
                         for name in node.names:
-                            imports.append(f"{module}.{name.name}")
+                            names.append(name.name)
+                            if name.asname:
+                                aliases[name.name] = name.asname
+                        imports.append(ImportInfo(
+                            type=ImportType.FROM,
+                            module=module,
+                            names=names,
+                            aliases=aliases,
+                            level=node.level
+                        ))
             return imports
         except Exception as e:
             raise ValueError(f"Failed to extract imports: {str(e)}")
     
-    def _determine_region_type(self, tree: ast.AST) -> tuple[RegionType, str, List[str]]:
+    def _determine_region_type(self, tree: ast.AST) -> Tuple[RegionType, str, List[str]]:
         """Determine the type, name, and methods of the region.
         
         Args:
