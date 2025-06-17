@@ -10,9 +10,7 @@ from typing import Dict, Any, List, Optional
 from enum import Enum
 
 from .types import PRStrategy
-from .models.metadata import TestMetadata
-from .models.evaluation import TestEvaluation
-from .models.settings import TestSettings
+from .models import TestMetadata, TestEvaluation, TestSettings
 from .validation import ConfigurationValidator
 from .errors import ConfigurationError, FileNotFoundError
 
@@ -71,16 +69,13 @@ class TestConfiguration:
             ConfigurationError: If configuration is invalid
             FileNotFoundError: If test file does not exist
         """
-        # Validate configuration
         validator = ConfigurationValidator(data)
         validator.validate()
         
-        # Resolve file paths
         file_path = cls._resolve_path(data['file_path'], config_path)
         if not file_path.exists():
             raise FileNotFoundError(f"Test file not found: {file_path}")
             
-        # Create configuration
         return cls(
             name=data['name'],
             file_path=file_path,
@@ -111,9 +106,7 @@ class TestConfiguration:
             Resolved Path object
         """
         path_obj = Path(path)
-        if path_obj.is_absolute():
-            return path_obj
-        return config_path.parent / path
+        return path_obj if path_obj.is_absolute() else config_path.parent / path
 
     @staticmethod
     def _parse_pr_strategy(strategy: Any) -> PRStrategy:
