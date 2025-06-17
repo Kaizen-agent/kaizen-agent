@@ -58,6 +58,12 @@ class CodeRegionExtractor:
             with open(file_path, 'r') as f:
                 content = f.read()
             
+            # If region_name is 'main', use the entire file
+            if region_name == 'main':
+                code = content
+                return CodeRegionExtractor._analyze_region(code, region_name)
+            
+            # Otherwise look for region markers
             start_marker = f"# kaizen:start:{region_name}"
             end_marker = f"# kaizen:end:{region_name}"
             

@@ -131,15 +131,30 @@ class TestAllCommand(BaseTestCommand):
         
         if self.config.regions:
             config['regions'] = self.config.regions
-        if self.config.steps:
-            # Transform steps into tests format
+            # Create tests for each region
+            config['tests'] = [
+                {
+                    'name': f"{self.config.name}_{region}",
+                    'description': f"Test for region {region}",
+                    'input': {
+                        'file_path': str(self.config.file_path),
+                        'region': region,
+                        'method': step.command if hasattr(step, 'command') else None,
+                        'input': step.expected_output if hasattr(step, 'expected_output') else None
+                    }
+                }
+                for region in self.config.regions
+                for step in self.config.steps
+            ]
+        elif self.config.steps:
+            # If no regions specified, use the entire file
             config['tests'] = [
                 {
                     'name': step.name,
                     'description': step.description,
                     'input': {
                         'file_path': str(self.config.file_path),
-                        'region': step.command,
+                        'region': 'main',
                         'method': step.command,
                         'input': step.expected_output
                     }
