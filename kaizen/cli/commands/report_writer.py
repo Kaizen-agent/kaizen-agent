@@ -1,66 +1,101 @@
-"""Test report writing functionality."""
+"""Test report writer implementation.
 
+This module provides functionality for writing test results to files in various formats.
+It supports both markdown and rich console output formats, with detailed test result
+information including configuration, status, and test case details.
+
+Example:
+    >>> from kaizen.cli.commands.report_writer import TestReportWriter
+    >>> from kaizen.cli.commands.formatters import MarkdownTestResultFormatter
+    >>> writer = TestReportWriter(test_result, MarkdownTestResultFormatter(), logger)
+    >>> writer.write_report("test_results.txt")
+"""
+
+# Standard library imports
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TextIO
 
-from .types import TestResultFormatter, ReportGenerationError
+# Local application imports
+from .formatters import TestResultFormatter
+from .errors import ReportGenerationError
 from .models import TestResult
 
-class TestReportWriter:
-    """Handles writing test reports to files with detailed formatting and error handling."""
+# Configure logging
+logger = logging.getLogger(__name__)
 
+class TestReportWriter:
+    """Writes test results to files in various formats.
+    
+    This class handles writing test results to files, supporting different output
+    formats through the use of formatters. It provides detailed test result
+    information including configuration, status, and test case details.
+    
+    Attributes:
+        result: TestResult object containing the test results
+        formatter: Formatter to use for output formatting
+        logger: Logger instance for logging messages
+    """
+    
     def __init__(self, result: TestResult, formatter: TestResultFormatter, logger: logging.Logger):
         """Initialize the report writer.
         
         Args:
-            result: The test result to write
-            formatter: Formatter for test results
-            logger: Logger instance for reporting
+            result: TestResult object containing the test results
+            formatter: Formatter to use for output formatting
+            logger: Logger instance for logging messages
         """
         self.result = result
         self.formatter = formatter
         self.logger = logger
-
-    def write_report(self, file_path: Path) -> None:
-        """Write test report to file.
+    
+    def write_report(self, output_file: Path) -> None:
+        """Write test results to a file.
         
         Args:
-            file_path: Path where the report should be written
+            output_file: Path to the output file
             
         Raises:
-            ReportGenerationError: If report writing fails
+            ReportGenerationError: If there is an error writing the report
         """
         try:
-            self.logger.info(f"Writing test report to {file_path}")
-            with open(file_path, 'w') as f:
-                self._write_report_header(f)
+            with open(output_file, 'w') as f:
+                self._write_header(f)
                 self._write_configuration_details(f)
                 self._write_overall_status(f)
                 self._write_detailed_results(f)
                 self._write_failed_tests(f)
-                if self.result.test_attempts:
-                    self._write_autofix_attempts(f)
-            self.logger.info("Test report written successfully")
+                self._write_autofix_attempts(f)
         except Exception as e:
-            self.logger.error(f"Failed to write report: {str(e)}")
             raise ReportGenerationError(f"Failed to write report: {str(e)}")
-
-    def _write_report_header(self, f) -> None:
-        """Write the report header section."""
+    
+    def _write_header(self, f: TextIO) -> None:
+        """Write the report header.
+        
+        Args:
+            f: File handle to write to
+        """
         f.write("Test Results Report\n")
         f.write("=" * 50 + "\n\n")
-
-    def _write_configuration_details(self, f) -> None:
-        """Write the test configuration details section."""
+    
+    def _write_configuration_details(self, f: TextIO) -> None:
+        """Write the test configuration details section.
+        
+        Args:
+            f: File handle to write to
+        """
         f.write("Test Configuration:\n")
         f.write(f"- Name: {self.result.name}\n")
         f.write(f"- File: {self.result.file_path}\n")
         f.write(f"- Config: {self.result.config_path}\n\n")
-
-    def _write_overall_status(self, f) -> None:
-        """Write the overall test status section."""
+    
+    def _write_overall_status(self, f: TextIO) -> None:
+        """Write the overall test status section.
+        
+        Args:
+            f: File handle to write to
+        """
         try:
             overall_status = self.result.results.get('overall_status', 'unknown')
             status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
@@ -69,9 +104,13 @@ class TestReportWriter:
         except Exception as e:
             self.logger.warning(f"Error formatting overall status: {str(e)}")
             f.write("Overall Status: ❓ UNKNOWN\n\n")
-
-    def _write_detailed_results(self, f) -> None:
-        """Write the detailed test results section."""
+    
+    def _write_detailed_results(self, f: TextIO) -> None:
+        """Write the detailed test results section.
+        
+        Args:
+            f: File handle to write to
+        """
         f.write("Detailed Test Results:\n")
         f.write("=" * 50 + "\n\n")
         
@@ -85,8 +124,8 @@ class TestReportWriter:
             test_cases = result.get('test_cases', []) if isinstance(result, dict) else []
             for test_case in test_cases:
                 self._write_test_case(f, test_case)
-
-    def _write_test_case(self, f, test_case: Dict[str, Any]) -> None:
+    
+    def _write_test_case(self, f: TextIO, test_case: Dict[str, Any]) -> None:
         """Write a single test case result.
         
         Args:
@@ -107,9 +146,13 @@ class TestReportWriter:
         if test_case.get('evaluation'):
             f.write(f"Evaluation:\n{json.dumps(test_case.get('evaluation'), indent=2)}\n")
         f.write("-" * 30 + "\n")
-
-    def _write_failed_tests(self, f) -> None:
-        """Write the failed tests analysis section."""
+    
+    def _write_failed_tests(self, f: TextIO) -> None:
+        """Write the failed tests analysis section.
+        
+        Args:
+            f: File handle to write to
+        """
         if not self.result.failed_tests:
             return
             
@@ -126,9 +169,13 @@ class TestReportWriter:
             if test.get('output'):
                 f.write(f"Output:\n{test.get('output')}\n")
             f.write("-" * 30 + "\n")
-
-    def _write_autofix_attempts(self, f) -> None:
-        """Write the auto-fix attempts section."""
+    
+    def _write_autofix_attempts(self, f: TextIO) -> None:
+        """Write the auto-fix attempts section.
+        
+        Args:
+            f: File handle to write to
+        """
         f.write("\nAuto-fix Attempts:\n")
         f.write("=" * 50 + "\n\n")
         for attempt in self.result.test_attempts:
@@ -137,8 +184,8 @@ class TestReportWriter:
                 f.write(f"Invalid attempt format: {attempt}\n")
                 continue
             self._write_attempt_details(f, attempt)
-
-    def _write_attempt_details(self, f, attempt: Dict[str, Any]) -> None:
+    
+    def _write_attempt_details(self, f: TextIO, attempt: Dict[str, Any]) -> None:
         """Write details of a single auto-fix attempt.
         
         Args:

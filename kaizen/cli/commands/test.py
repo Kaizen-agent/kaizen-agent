@@ -1,13 +1,35 @@
-"""Test-related CLI commands."""
+"""Test-related CLI commands.
 
-import click
+This module provides CLI commands for running tests and managing test execution.
+It includes functionality for:
+- Running tests with configuration
+- Auto-fixing failing tests
+- Creating pull requests with fixes
+- Generating test reports
+
+Example:
+    >>> from kaizen.cli.commands.test import test_all
+    >>> test_all(
+    ...     config="test_config.yaml",
+    ...     auto_fix=True,
+    ...     create_pr=True,
+    ...     max_retries=2
+    ... )
+"""
+
+# Standard library imports
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
+
+# Third-party imports
+import click
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.traceback import install as install_rich_traceback
 
+# Local application imports
 from .config import ConfigurationManager
 from .test_commands import TestAllCommand
 from .formatters import MarkdownTestResultFormatter, RichTestResultFormatter
@@ -23,7 +45,8 @@ from .errors import (
 from .types import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_BASE_BRANCH,
-    PRStrategy
+    PRStrategy,
+    TestStatus
 )
 
 # Configure rich traceback
@@ -46,8 +69,34 @@ logger = logging.getLogger("kaizen.test")
 @click.option('--base-branch', default=DEFAULT_BASE_BRANCH, help=f'Base branch for pull request (default: {DEFAULT_BASE_BRANCH})')
 @click.option('--pr-strategy', type=click.Choice([s.value for s in PRStrategy]), 
               default=PRStrategy.ALL_PASSING.value, help='Strategy for when to create PRs (default: ALL_PASSING)')
-def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, base_branch: str, pr_strategy: str):
-    """Run all tests specified in the configuration file."""
+def test_all(
+    config: str,
+    auto_fix: bool,
+    create_pr: bool,
+    max_retries: int,
+    base_branch: str,
+    pr_strategy: str
+) -> None:
+    """Run all tests specified in the configuration file.
+    
+    Args:
+        config: Path to the test configuration file
+        auto_fix: Whether to automatically fix failing tests
+        create_pr: Whether to create a pull request with fixes
+        max_retries: Maximum number of retry attempts for auto-fix
+        base_branch: Base branch for pull request
+        pr_strategy: Strategy for when to create PRs
+        
+    Example:
+        >>> test_all(
+        ...     config="test_config.yaml",
+        ...     auto_fix=True,
+        ...     create_pr=True,
+        ...     max_retries=2,
+        ...     base_branch="main",
+        ...     pr_strategy="ALL_PASSING"
+        ... )
+    """
     console = Console()
     
     try:
