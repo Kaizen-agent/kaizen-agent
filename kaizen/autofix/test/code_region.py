@@ -1048,7 +1048,6 @@ class CodeRegionExtractor:
                 file_path=file_path
             )
             logger.info(f"Successfully analyzed region '{region_name}'")
-            logger.info(f"Region info: {region_info}")
             return region_info
             
         except SyntaxError as e:
