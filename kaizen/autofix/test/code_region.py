@@ -309,15 +309,15 @@ class ImportManager:
             '__builtins__': __builtins__,
         }
         
+        # Always add typing module and its common types first
+        namespace['typing'] = typing
+        self._add_typing_imports(namespace)
+        
         # Add standard library imports
         for module_name in standard_imports:
             try:
                 module = __import__(module_name)
                 namespace[module_name] = module
-                
-                # Special handling for typing module
-                if module_name == 'typing':
-                    self._add_typing_imports(namespace)
             except ImportError as e:
                 logger.warning(f"Failed to import standard library {module_name}: {str(e)}")
         
@@ -333,17 +333,25 @@ class ImportManager:
     
     def _add_typing_imports(self, namespace: Dict[str, Any]) -> None:
         """Add all common typing imports to namespace."""
+        # Common typing imports that are frequently used
         typing_imports = {
             'Optional', 'List', 'Dict', 'Tuple', 'Set', 'FrozenSet', 
             'Union', 'Any', 'Callable', 'TypeVar', 'Generic', 'Type',
             'Protocol', 'runtime_checkable', 'overload', 'final',
-            'Literal', 'TypedDict', 'cast', 'get_type_hints'
+            'Literal', 'TypedDict', 'cast', 'get_type_hints',
+            'Sequence', 'Mapping', 'Iterable', 'Iterator', 'AsyncIterator',
+            'Awaitable', 'Coroutine', 'AsyncGenerator', 'AsyncIterable'
         }
+        
+        # Add each typing import to the namespace
         for name in typing_imports:
             try:
                 namespace[name] = getattr(typing, name)
             except AttributeError:
                 logger.warning(f"Type {name} not found in typing module")
+        
+        # Also add typing module itself
+        namespace['typing'] = typing
     
     def _setup_import_environment(self, region_info: RegionInfo) -> None:
         """Set up the import environment for execution."""
