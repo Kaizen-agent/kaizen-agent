@@ -8,8 +8,14 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 
 from .errors import ConfigurationError
-from .models import TestMetadata, TestEvaluation, TestSettings, TestStep, TestConfiguration
-from .operation_result import Result
+from .models import (
+    TestMetadata,
+    TestEvaluation,
+    TestSettings,
+    TestStep,
+    TestConfiguration,
+    Result
+)
 
 @dataclass
 class ParseResult:
