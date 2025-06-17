@@ -10,8 +10,16 @@ metadata:
   dependencies:
     - google-generativeai>=0.1.0
     - python-dotenv>=0.19.0
+    - click>=8.0.0
   environment_variables:
     - GOOGLE_API_KEY
+  imports:
+    - os
+    - typing.Optional
+    - google.generativeai as genai
+    - dotenv.load_dotenv
+    - sys
+    - click
 
 evaluation:
   llm_provider: gemini
