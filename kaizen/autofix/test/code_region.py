@@ -14,6 +14,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Set, FrozenSet, Union
 from collections import defaultdict
+import typing
 
 # Third-party imports
 # (none in this file)
@@ -229,68 +230,86 @@ class ImportManager:
     
     def __init__(self, workspace_root: Path):
         self.workspace_root = workspace_root
-        self._setup_python_path()
-        self._processed_files: Set[Path] = set()
         self._original_sys_path = sys.path.copy()
         self._added_paths: Set[str] = set()
+        self._processed_files: Set[Path] = set()
+        self._module_cache: Dict[str, Any] = {}
     
-    def _setup_python_path(self) -> None:
-        """Set up Python path with workspace root."""
-        if str(self.workspace_root) not in sys.path:
-            sys.path.insert(0, str(self.workspace_root))
-            self._added_paths.add(str(self.workspace_root))
-    
-    def setup_imports(self, region_info: RegionInfo, namespace: Dict) -> None:
-        """Set up all necessary imports in the namespace."""
+    @contextmanager
+    def managed_imports(self, region_info: RegionInfo) -> Dict[str, Any]:
+        """Context manager for managing imports during execution.
+        
+        This ensures proper cleanup of any modifications to the Python environment.
+        """
         try:
-            # Reset processed files for new execution
-            self._processed_files.clear()
-            
-            # Validate file existence
-            if region_info.file_path and not region_info.file_path.exists():
-                raise FileNotFoundError(f"File not found: {region_info.file_path}")
-            
-            # Add workspace to Python path
-            if region_info.file_path:
-                self._add_to_python_path(region_info.file_path.parent)
-            
-            # Validate and process dependencies
-            self._validate_dependencies(region_info)
+            namespace = self._create_base_namespace()
+            self._setup_import_environment(region_info)
             self._process_dependencies(region_info, namespace)
-            
-        except Exception as e:
+            yield namespace
+        finally:
             self.cleanup()
-            raise ValueError(f"Failed to set up imports: {str(e)}")
     
-    def _validate_dependencies(self, region_info: RegionInfo) -> None:
-        """Validate that all dependencies exist and are accessible."""
-        for dep in region_info.dependencies:
-            if not dep.is_third_party and not dep.path.exists():
-                raise FileNotFoundError(f"Dependency file not found: {dep.path}")
+    def _create_base_namespace(self) -> Dict[str, Any]:
+        """Create a base namespace with essential imports."""
+        return {
+            '__name__': '__main__',
+            '__file__': None,
+            '__package__': None,
+            '__builtins__': __builtins__,
+            'typing': typing,
+            'Optional': Optional,
+            'List': List,
+            'Dict': Dict,
+            'Tuple': Tuple,
+            'Set': Set,
+            'FrozenSet': FrozenSet,
+            'Union': Union,
+            'Any': Any,
+            'Callable': Callable,
+            'TypeVar': TypeVar,
+            'Generic': Generic,
+            'Type': Type,
+            'Path': Path,
+            'Enum': Enum,
+            'dataclass': dataclass,
+            'logging': logging,
+            'ast': ast,
+            'importlib': importlib,
+            'sys': sys,
+            'os': os
+        }
     
-    def _process_dependencies(self, region_info: RegionInfo, namespace: Dict) -> None:
+    def _setup_import_environment(self, region_info: RegionInfo) -> None:
+        """Set up the import environment for execution."""
+        if region_info.file_path:
+            self._add_to_python_path(region_info.file_path.parent)
+    
+    def _add_to_python_path(self, directory: Path) -> None:
+        """Add directory to Python path if not already present."""
+        dir_str = str(directory)
+        if dir_str not in sys.path:
+            sys.path.insert(0, dir_str)
+            self._added_paths.add(dir_str)
+    
+    def _process_dependencies(self, region_info: RegionInfo, namespace: Dict[str, Any]) -> None:
         """Process all dependencies recursively."""
         if region_info.file_path in self._processed_files:
             return
         
         self._processed_files.add(region_info.file_path)
         
-        # Add dependencies to Python path
+        # Process dependencies
         for dep in region_info.dependencies:
             if not dep.is_third_party:
                 self._add_to_python_path(dep.path.parent)
-                # Recursively process dependencies of dependencies
                 if dep.path not in self._processed_files:
-                    try:
-                        self._process_file_dependencies(dep.path, namespace)
-                    except Exception as e:
-                        logger.warning(f"Failed to process dependency {dep.path}: {str(e)}")
+                    self._process_file_dependencies(dep.path, namespace)
         
-        # Execute imports in the namespace
+        # Process imports
         for import_info in region_info.imports:
             self._execute_import(import_info, namespace)
     
-    def _process_file_dependencies(self, file_path: Path, namespace: Dict) -> None:
+    def _process_file_dependencies(self, file_path: Path, namespace: Dict[str, Any]) -> None:
         """Process dependencies of a single file."""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -298,13 +317,11 @@ class ImportManager:
             tree = ast.parse(content)
             dep_imports = self._extract_imports(tree)
             
-            # Process imports in order
             for imp in dep_imports:
                 self._execute_import(imp, namespace)
                 
         except UnicodeDecodeError:
             logger.warning(f"Failed to decode file {file_path} with utf-8 encoding")
-            # Try with different encoding
             try:
                 with open(file_path, 'r', encoding='latin-1') as f:
                     content = f.read()
@@ -315,63 +332,52 @@ class ImportManager:
             except Exception as e:
                 logger.error(f"Failed to process file {file_path}: {str(e)}")
     
-    def _add_to_python_path(self, directory: Path) -> None:
-        """Add directory to Python path if not already present."""
-        dir_str = str(directory)
-        if dir_str not in sys.path:
-            sys.path.insert(0, dir_str)
-            self._added_paths.add(dir_str)
-    
-    def _execute_import(self, import_info: ImportInfo, namespace: Dict) -> None:
+    def _execute_import(self, import_info: ImportInfo, namespace: Dict[str, Any]) -> None:
         """Execute a single import statement in the namespace."""
         try:
-            if import_info.type == ImportType.SIMPLE:
-                self._execute_simple_import(import_info, namespace)
-            elif import_info.type == ImportType.FROM:
-                self._execute_from_import(import_info, namespace)
-            elif import_info.type == ImportType.RELATIVE:
-                self._execute_relative_import(import_info, namespace)
-            elif import_info.type == ImportType.ALIAS:
-                self._execute_alias_import(import_info, namespace)
-            elif import_info.type == ImportType.STAR:
-                self._execute_star_import(import_info, namespace)
+            if import_info.module in self._module_cache:
+                module = self._module_cache[import_info.module]
+            else:
+                module = self._load_module(import_info)
+                self._module_cache[import_info.module] = module
+            
+            self._add_to_namespace(import_info, module, namespace)
+            
         except ImportError as e:
             logger.warning(f"Failed to import {import_info}: {str(e)}")
-            # Try to find the module in the workspace
             self._try_find_module_in_workspace(import_info, namespace)
     
-    def _execute_simple_import(self, import_info: ImportInfo, namespace: Dict) -> None:
-        """Execute a simple import statement."""
-        module = __import__(import_info.module)
-        namespace[import_info.module] = module
+    def _load_module(self, import_info: ImportInfo) -> Any:
+        """Load a module using Python's import system."""
+        if import_info.type == ImportType.SIMPLE:
+            return __import__(import_info.module)
+        elif import_info.type in (ImportType.FROM, ImportType.STAR):
+            return __import__(import_info.module, fromlist=['*'])
+        elif import_info.type == ImportType.RELATIVE:
+            return __import__(import_info.module.lstrip('.'), fromlist=['*'])
+        else:
+            return __import__(import_info.module)
     
-    def _execute_from_import(self, import_info: ImportInfo, namespace: Dict) -> None:
-        """Execute a from import statement."""
-        module = __import__(import_info.module, fromlist=import_info.names)
-        for name in import_info.names:
-            if hasattr(module, name):
-                namespace[name] = getattr(module, name)
+    def _add_to_namespace(self, import_info: ImportInfo, module: Any, namespace: Dict[str, Any]) -> None:
+        """Add imported items to the namespace."""
+        if import_info.type == ImportType.SIMPLE:
+            namespace[import_info.module] = module
+        elif import_info.type == ImportType.FROM:
+            for name in import_info.names:
+                if hasattr(module, name):
+                    namespace[name] = getattr(module, name)
+        elif import_info.type == ImportType.RELATIVE:
+            namespace[import_info.module] = module
+        elif import_info.type == ImportType.ALIAS:
+            for orig_name, alias in import_info.aliases.items():
+                if hasattr(module, orig_name):
+                    namespace[alias] = getattr(module, orig_name)
+        elif import_info.type == ImportType.STAR:
+            for name in dir(module):
+                if not name.startswith('_'):
+                    namespace[name] = getattr(module, name)
     
-    def _execute_relative_import(self, import_info: ImportInfo, namespace: Dict) -> None:
-        """Execute a relative import statement."""
-        module = __import__(import_info.module.lstrip('.'), fromlist=['*'])
-        namespace[import_info.module] = module
-    
-    def _execute_alias_import(self, import_info: ImportInfo, namespace: Dict) -> None:
-        """Execute an alias import statement."""
-        module = __import__(import_info.module)
-        for orig_name, alias in import_info.aliases.items():
-            if hasattr(module, orig_name):
-                namespace[alias] = getattr(module, orig_name)
-    
-    def _execute_star_import(self, import_info: ImportInfo, namespace: Dict) -> None:
-        """Execute a star import statement."""
-        module = __import__(import_info.module, fromlist=['*'])
-        for name in dir(module):
-            if not name.startswith('_'):
-                namespace[name] = getattr(module, name)
-    
-    def _try_find_module_in_workspace(self, import_info: ImportInfo, namespace: Dict) -> None:
+    def _try_find_module_in_workspace(self, import_info: ImportInfo, namespace: Dict[str, Any]) -> None:
         """Try to find and import a module from the workspace."""
         try:
             module_name = import_info.module
@@ -390,7 +396,7 @@ class ImportManager:
         except Exception as e:
             logger.warning(f"Failed to find module {import_info.module} in workspace: {str(e)}")
     
-    def _load_module_from_file(self, module_name: str, file_path: Path, namespace: Dict) -> None:
+    def _load_module_from_file(self, module_name: str, file_path: Path, namespace: Dict[str, Any]) -> None:
         """Load a module from a file."""
         try:
             spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -411,6 +417,7 @@ class ImportManager:
         sys.path.extend(self._original_sys_path)
         self._added_paths.clear()
         self._processed_files.clear()
+        self._module_cache.clear()
 
 class CodeRegionExtractor:
     """Extracts and analyzes code regions from files."""
@@ -528,9 +535,9 @@ class CodeRegionExecutor:
                       input_data: Any = None) -> Any:
         """Execute a code region and return its result."""
         try:
-            with self._create_execution_context(region_info) as namespace:
-                # Set up imports
-                self.import_manager.setup_imports(region_info, namespace)
+            with self.import_manager.managed_imports(region_info) as namespace:
+                # Execute the code
+                exec(region_info.code, namespace)
                 
                 if region_info.type == RegionType.CLASS:
                     return self._execute_class_method(namespace, region_info, method_name, input_data)
@@ -540,36 +547,6 @@ class CodeRegionExecutor:
                     return self._execute_module(namespace, region_info, method_name, input_data)
         except Exception as e:
             raise ValueError(f"Failed to execute region '{region_info.name}': {str(e)}")
-        finally:
-            # Clean up
-            self.import_manager.cleanup()
-    
-    def _cleanup_paths(self, region_info: RegionInfo) -> None:
-        """Clean up any paths added to sys.path."""
-        if region_info.file_path:
-            workspace_dir = str(region_info.file_path.parent)
-            if workspace_dir in sys.path:
-                sys.path.remove(workspace_dir)
-        
-        for dep in region_info.dependencies:
-            if not dep.is_third_party:
-                dep_dir = str(dep.path.parent)
-                if dep_dir in sys.path:
-                    sys.path.remove(dep_dir)
-    
-    @contextmanager
-    def _create_execution_context(self, region_info: RegionInfo):
-        """Create a safe execution context."""
-        namespace = {
-            '__name__': '__main__',
-            '__file__': str(region_info.file_path) if region_info.file_path else None,
-            '__package__': None,
-            '__builtins__': __builtins__
-        }
-        
-        # Execute the code
-        exec(region_info.code, namespace)
-        yield namespace
     
     def _execute_class_method(self, namespace: Dict, region_info: RegionInfo, 
                             method_name: str, input_data: Any) -> Any:
