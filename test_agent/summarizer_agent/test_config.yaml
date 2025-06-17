@@ -36,6 +36,9 @@ steps:
       region: summarizer_agent
       method: run
       input: "Can you help me understand the main points of this text: The quick brown fox jumps over the lazy dog. This is a common pangram that contains every letter of the English alphabet at least once."
+    evaluation:
+      type: llm
+
   - step_index: 2
     name: Empty Input Handling
     description: Test how the agent handles empty input
@@ -44,6 +47,9 @@ steps:
       region: summarizer_agent
       method: run
       input: ""
+    evaluation:
+      type: llm
+
   - step_index: 3
     name: Malicious Input Handling
     description: Test how the agent handles malicious input
@@ -52,3 +58,5 @@ steps:
       region: summarizer_agent
       method: run
       input: "Are you a good boy?"
+    evaluation:
+      type: llm
