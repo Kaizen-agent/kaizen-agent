@@ -676,7 +676,255 @@ All fixed tests have been verified to pass in the following environments:
 
     return pr_body
 
-def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True, base_branch: str = 'main') -> None:
+def _collect_referenced_files(file_path: str, processed_files: set = None, base_dir: str = None) -> set:
+    """
+    Recursively collect all Python files referenced by imports in the given file.
+    
+    Args:
+        file_path: Path to the main file
+        processed_files: Set of already processed files to avoid cycles
+        base_dir: Base directory for resolving relative imports
+        
+    Returns:
+        set: Set of all referenced file paths
+    """
+    if processed_files is None:
+        processed_files = set()
+    
+    if file_path in processed_files:
+        return processed_files
+    
+    processed_files.add(file_path)
+    
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+            
+        # Parse the file to find imports
+        tree = ast.parse(content)
+        
+        # Get the directory of the current file
+        file_dir = os.path.dirname(os.path.abspath(file_path))
+        if base_dir is None:
+            base_dir = file_dir
+        
+        # Find all imports
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                if isinstance(node, ast.Import):
+                    for name in node.names:
+                        module_name = name.name.split('.')[0]
+                        # Try different possible locations for the module
+                        possible_paths = [
+                            os.path.join(file_dir, f"{module_name}.py"),  # Same directory
+                            os.path.join(file_dir, module_name, "__init__.py"),  # Package
+                            os.path.join(base_dir, f"{module_name}.py"),  # Base directory
+                            os.path.join(base_dir, module_name, "__init__.py"),  # Package in base
+                        ]
+                        for module_path in possible_paths:
+                            if os.path.exists(module_path):
+                                _collect_referenced_files(module_path, processed_files, base_dir)
+                                break
+                else:  # ImportFrom
+                    if node.module:
+                        # Handle relative imports
+                        if node.level > 0:  # Relative import
+                            current_dir = file_dir
+                            for _ in range(node.level - 1):
+                                current_dir = os.path.dirname(current_dir)
+                            module_name = node.module.split('.')[0]
+                            module_path = os.path.join(current_dir, f"{module_name}.py")
+                            if os.path.exists(module_path):
+                                _collect_referenced_files(module_path, processed_files, base_dir)
+                        else:  # Absolute import
+                            module_name = node.module.split('.')[0]
+                            possible_paths = [
+                                os.path.join(file_dir, f"{module_name}.py"),
+                                os.path.join(file_dir, module_name, "__init__.py"),
+                                os.path.join(base_dir, f"{module_name}.py"),
+                                os.path.join(base_dir, module_name, "__init__.py"),
+                            ]
+                            for module_path in possible_paths:
+                                if os.path.exists(module_path):
+                                    _collect_referenced_files(module_path, processed_files, base_dir)
+                                    break
+    
+    except Exception as e:
+        logger.warning(f"Error processing imports in {file_path}: {str(e)}")
+    
+    return processed_files
+
+def _analyze_failure_dependencies(failure_data: List[Dict], referenced_files: set) -> Dict[str, List[Dict]]:
+    """
+    Analyze test failures to determine which files need to be fixed.
+    
+    Args:
+        failure_data: List of test failures
+        referenced_files: Set of referenced files
+        
+    Returns:
+        Dict mapping file paths to lists of failures that affect them
+    """
+    file_failures = {file_path: [] for file_path in referenced_files}
+    
+    # Create a mapping of module names to file paths
+    module_to_file = {}
+    for file_path in referenced_files:
+        # Get the module name from the file path
+        module_name = os.path.splitext(os.path.basename(file_path))[0]
+        module_to_file[module_name] = file_path
+        
+        # Also map the full path components
+        path_parts = file_path.split(os.sep)
+        for i in range(len(path_parts)):
+            module_name = '.'.join(path_parts[i:])
+            module_to_file[module_name] = file_path
+    
+    for failure in failure_data:
+        # Extract all relevant information from the failure
+        error_message = failure.get('error_message', '')
+        test_name = failure.get('test_name', '')
+        output = failure.get('output', '')
+        region = failure.get('region', '')
+        details = failure.get('details', '')
+        
+        # Create a comprehensive error context
+        error_context = {
+            'error_message': error_message,
+            'test_name': test_name,
+            'output': output,
+            'region': region,
+            'details': details,
+            'raw_failure': failure  # Keep the original failure data for reference
+        }
+        
+        # Skip if we have no useful information at all
+        if not any([error_message, test_name, output, details]):
+            logger.warning(f"Skipping failure with no useful information: {failure}")
+            continue
+            
+        # Analyze error message and context to determine affected files
+        affected_files = set()
+        
+        # Check error message for module references
+        if error_message:
+            # Look for module references in error messages
+            for module_name, file_path in module_to_file.items():
+                if module_name in error_message:
+                    affected_files.add(file_path)
+                    logger.info(f"Found module {module_name} in error message: {error_message}")
+            
+            # Look for file paths in error messages
+            for file_path in referenced_files:
+                file_name = os.path.basename(file_path)
+                if file_name in error_message:
+                    affected_files.add(file_path)
+                    logger.info(f"Found file {file_name} in error message: {error_message}")
+        
+        # Check test name for module references
+        if test_name:
+            # Look for module references in test names
+            for module_name, file_path in module_to_file.items():
+                if module_name in test_name:
+                    affected_files.add(file_path)
+                    logger.info(f"Found module {module_name} in test name: {test_name}")
+            
+            # Look for file paths in test names
+            for file_path in referenced_files:
+                file_name = os.path.basename(file_path)
+                if file_name in test_name:
+                    affected_files.add(file_path)
+                    logger.info(f"Found file {file_name} in test name: {test_name}")
+        
+        # Check output for module references
+        if output:
+            # Look for module references in output
+            for module_name, file_path in module_to_file.items():
+                if module_name in output:
+                    affected_files.add(file_path)
+                    logger.info(f"Found module {module_name} in output: {output}")
+            
+            # Look for file paths in output
+            for file_path in referenced_files:
+                file_name = os.path.basename(file_path)
+                if file_name in output:
+                    affected_files.add(file_path)
+                    logger.info(f"Found file {file_name} in output: {output}")
+        
+        # Check details for module references
+        if details:
+            # Look for module references in details
+            for module_name, file_path in module_to_file.items():
+                if module_name in details:
+                    affected_files.add(file_path)
+                    logger.info(f"Found module {module_name} in details: {details}")
+            
+            # Look for file paths in details
+            for file_path in referenced_files:
+                file_name = os.path.basename(file_path)
+                if file_name in details:
+                    affected_files.add(file_path)
+                    logger.info(f"Found file {file_name} in details: {details}")
+        
+        # Check region information
+        if region:
+            # Look for region matches in file paths
+            for file_path in referenced_files:
+                if region in file_path:
+                    affected_files.add(file_path)
+                    logger.info(f"Found region {region} in file path: {file_path}")
+        
+        # If no files were matched, try to infer from the test name
+        if not affected_files and test_name:
+            # Try to extract module/package names from test name
+            test_parts = test_name.split('.')
+            for i in range(len(test_parts)):
+                module_name = '.'.join(test_parts[:i+1])
+                if module_name in module_to_file:
+                    affected_files.add(module_to_file[module_name])
+                    logger.info(f"Inferred module {module_name} from test name: {test_name}")
+        
+        # If still no files were matched, add to all referenced files
+        if not affected_files:
+            logger.warning(f"No specific files matched for failure, adding to all referenced files")
+            affected_files = referenced_files
+        
+        # Add the failure to all affected files
+        for file_path in affected_files:
+            file_failures[file_path].append({
+                **failure,
+                'error_context': error_context
+            })
+            logger.info(f"Added failure to {os.path.basename(file_path)} with context: {error_context}")
+    
+    # Log summary of file failures
+    for file_path, failures in file_failures.items():
+        if failures:
+            logger.info(f"File {os.path.basename(file_path)} has {len(failures)} failures:")
+            for failure in failures:
+                logger.info(f"  - Test: {failure.get('test_name')}")
+                logger.info(f"    Error: {failure.get('error_message')}")
+                logger.info(f"    Region: {failure.get('region')}")
+    
+    return file_failures
+
+def _reload_modules(file_paths: set) -> None:
+    """
+    Reload all affected modules to ensure changes are properly reflected.
+    
+    Args:
+        file_paths: Set of file paths to reload
+    """
+    for file_path in file_paths:
+        module_name = Path(file_path).stem
+        if module_name in sys.modules:
+            try:
+                importlib.reload(sys.modules[module_name])
+                logger.info(f"Reloaded module: {module_name}")
+            except Exception as e:
+                logger.warning(f"Failed to reload module {module_name}: {str(e)}")
+
+def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_path: str, max_retries: int = 1, create_pr: bool = True, base_branch: str = 'main') -> List[Dict]:
     """
     Automatically fixes code based on test failures and optionally creates a PR.
     
@@ -688,40 +936,198 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         create_pr: Whether to create a pull request with the fixes (default: True)
         base_branch: The base branch to create the PR against (default: 'main')
         
+    Returns:
+        List of dictionaries containing information about each fix attempt
+        
     Raises:
         ValueError: If required environment variables are not set
         subprocess.CalledProcessError: If git commands fail
         GithubException: If GitHub API operations fail
+        FileNotFoundError: If required files cannot be found
     """
     try:
+        # Start with a clear section marker
+        logger.info("=" * 50)
+        logger.info("Starting run_autofix_and_pr")
+        
+        # Validate input paths
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Source file not found: {file_path}")
+        if not os.path.exists(test_config_path):
+            raise FileNotFoundError(f"Test configuration file not found: {test_config_path}")
+        
+        # Log basic information with sanitized data
+        logger.info("Processing request", extra={
+            'file_path': file_path,
+            'test_config_path': test_config_path,
+            'max_retries': max_retries,
+            'create_pr': create_pr,
+            'base_branch': base_branch,
+            'failure_count': len(failure_data)
+        })
+        
+        # Store the original file path to avoid shadowing
+        main_file_path = os.path.abspath(file_path)
+        logger.debug("Resolved main file path", extra={
+            'original_path': file_path,
+            'absolute_path': main_file_path
+        })
+        
         # Store the original branch
         original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
-        logger.info(f"Stored original branch: {original_branch}")
+        logger.info("Retrieved original branch", extra={'branch': original_branch})
         
         # Initialize branch_name with a default value
         branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         
         config = get_config()
-        logger.info(f"Starting auto-fix process for {file_path} with {len(failure_data)} failures")
+        logger.info("Starting auto-fix process", extra={
+            'file_path': main_file_path,
+            'failure_count': len(failure_data)
+        })
         
         # Create a set of failing test names for quick lookup
         failing_test_names = {failure["test_name"] for failure in failure_data}
-        logger.info(f"Tests that were failing: {failing_test_names}")
+        logger.debug("Failing test names", extra={'test_names': list(failing_test_names)})
         
         # Load test configuration
-        with open(test_config_path, 'r') as f:
-            test_config = yaml.safe_load(f)
+        try:
+            with open(test_config_path, 'r') as f:
+                test_config = yaml.safe_load(f)
+                logger.info("Loaded test configuration", extra={
+                    'config_path': test_config_path,
+                    'config_name': test_config.get('name', 'Unnamed'),
+                    'test_count': sum(len(result.get('test_cases', [])) 
+                                    for result in test_config.get('regions', {}).values())
+                })
+                
+                # Validate and resolve file paths in test configuration
+                if 'file_path' in test_config:
+                    config_dir = os.path.dirname(os.path.abspath(test_config_path))
+                    test_file_path = os.path.normpath(os.path.join(config_dir, test_config['file_path']))
+                    if not os.path.exists(test_file_path):
+                        raise FileNotFoundError(f"Test file not found: {test_file_path}")
+                    test_config['file_path'] = test_file_path
+                    logger.info("Resolved test file path in configuration", extra={
+                        'original_path': test_config['file_path'],
+                        'resolved_path': test_file_path
+                    })
+                
+                # Validate and resolve file paths in test steps
+                for step in test_config.get('steps', []):
+                    if 'input' in step and 'file_path' in step['input']:
+                        step_dir = os.path.dirname(os.path.abspath(test_config_path))
+                        step_file_path = os.path.normpath(os.path.join(step_dir, step['input']['file_path']))
+                        if not os.path.exists(step_file_path):
+                            raise FileNotFoundError(f"Step file not found: {step_file_path}")
+                        step['input']['file_path'] = step_file_path
+                        logger.debug("Resolved step file path", extra={
+                            'step': step.get('name', 'Unknown'),
+                            'original_path': step['input']['file_path'],
+                            'resolved_path': step_file_path
+                        })
+                
+        except Exception as e:
+            logger.error("Failed to load test configuration", extra={
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'config_path': test_config_path
+            })
+            raise
         
-        # Load original code
-        with open(file_path, 'r') as f:
-            original_code = f.read()
+        # Collect all referenced files
+        try:
+            referenced_files = _collect_referenced_files(main_file_path)
+            logger.info("Collected referenced files", extra={
+                'file_count': len(referenced_files),
+                'files': list(referenced_files)
+            })
+            
+            # Validate all referenced files exist
+            missing_files = [f for f in referenced_files if not os.path.exists(f)]
+            if missing_files:
+                raise FileNotFoundError(f"Referenced files not found: {missing_files}")
+            
+            # Log details about each referenced file
+            for ref_file in referenced_files:
+                try:
+                    with open(ref_file, 'r') as f:
+                        content = f.read()
+                        logger.debug("File content details", extra={
+                            'file': ref_file,
+                            'content_length': len(content),
+                            'content_preview': content[:100] if len(content) > 100 else content
+                        })
+                except Exception as e:
+                    logger.error("Failed to read file", extra={
+                        'file': ref_file,
+                        'error': str(e),
+                        'error_type': type(e).__name__
+                    })
+                    raise
+        except Exception as e:
+            logger.error("Failed to collect referenced files", extra={
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'file_path': main_file_path
+            })
+            raise
+        
+        # Analyze which files need to be fixed based on failures
+        try:
+            file_failures = _analyze_failure_dependencies(failure_data, referenced_files)
+            logger.info("Analyzed failure dependencies", extra={
+                'file_count': len(file_failures),
+                'files_with_failures': [f for f, fails in file_failures.items() if fails]
+            })
+            
+            # Log detailed failure analysis for each file
+            for file_path, failures in file_failures.items():
+                if failures:
+                    logger.debug("File failure details", extra={
+                        'file': file_path,
+                        'failure_count': len(failures),
+                        'failures': [{
+                            'test_name': f.get('test_name'),
+                            'error_message': f.get('error_message'),
+                            'region': f.get('region')
+                        } for f in failures]
+                    })
+        except Exception as e:
+            logger.error("Failed to analyze failure dependencies", extra={
+                'error': str(e)
+            })
+            raise
+        
+        # Load original code for all files
+        original_codes = {}
+        for ref_file in referenced_files:
+            try:
+                with open(ref_file, 'r') as f:
+                    original_codes[ref_file] = f.read()
+                logger.debug("Loaded original code", extra={
+                    'file': ref_file,
+                    'content_length': len(original_codes[ref_file])
+                })
+            except Exception as e:
+                logger.error("Failed to load original code", extra={
+                    'file': ref_file,
+                    'error': str(e)
+                })
+                raise
         
         # Generate PR info with test configuration
         try:
-            branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], {}, test_config, original_code)
-            logger.info(f"Generated PR info: {branch_name}, {pr_title}, {pr_body}")
+            branch_name, pr_title, pr_body = _generate_pr_info(failure_data, [], {}, test_config, original_codes[main_file_path])
+            logger.info("Generated PR info", extra={
+                'branch_name': branch_name,
+                'pr_title': pr_title,
+                'pr_body_length': len(pr_body)
+            })
         except Exception as e:
-            logger.warning(f"Failed to generate PR info: {str(e)}")
+            logger.warning("Failed to generate PR info", extra={
+                'error': str(e)
+            })
             # Use default values if PR info generation fails
             timestamp = datetime.now().strftime('%Y%m%d')
             branch_name = f"fix-tests-{timestamp}"
@@ -731,35 +1137,383 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
         # Track which previously failing tests are now passing
         fixed_tests = []
         best_fixed_tests = []
-        best_fixed_code = None
+        best_fixed_codes = {}
         
         # Track all test attempts
         all_test_attempts = []
         
         for attempt in range(max_retries):
-            logger.info(f"Auto-fix attempt {attempt + 1}/{max_retries}")
+            logger.info("Starting auto-fix attempt", extra={
+                'attempt': attempt + 1,
+                'max_retries': max_retries
+            })
             
-            # Get the fixed code from Gemini
+            # Get the fixed code from Gemini for each file that needs fixing
             genai.configure(api_key=config.get_api_key("google"))
             model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
-            logger.info("Requesting code fixes from Gemini")
-            response = model.generate_content(pr_body)
-            fixed_code = response.text.strip()
-            logger.info(f"Fixed code: {fixed_code}")
-            # Validate and improve the generated code
-            fixed_code = _validate_and_improve_code(fixed_code, original_code)
-            logger.info(f"Validated and improved generated code: {fixed_code}")
-            logger.info("Validated and improved generated code")
             
-            # Write the fixed code to disk before running tests
-            with open(file_path, 'w') as f:
-                f.write(fixed_code)
-            logger.info(f"Updated file: {file_path}")
+            fixed_codes = {}
+            # Collect all files that need fixing
+            files_to_fix = {path: failures for path, failures in file_failures.items() if failures}
             
-            # Force reload the module to ensure we're using the new code
-            module_name = Path(file_path).stem
-            if module_name in sys.modules:
-                importlib.reload(sys.modules[module_name])
+            if files_to_fix:
+                logger.info("Requesting code fixes", extra={
+                    'file_count': len(files_to_fix),
+                    'files': list(files_to_fix.keys())
+                })
+                
+                # Analyze dependencies between files
+                file_dependencies = {}
+                for path in files_to_fix.keys():
+                    try:
+                        with open(path, 'r') as f:
+                            content = f.read()
+                            tree = ast.parse(content)
+                            imports = []
+                            for node in ast.walk(tree):
+                                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                                    if isinstance(node, ast.Import):
+                                        imports.extend(name.name.split('.')[0] for name in node.names)
+                                    else:
+                                        imports.append(node.module.split('.')[0])
+                            file_dependencies[path] = imports
+                            logger.debug("File dependencies", extra={
+                                'file': path,
+                                'imports': imports
+                            })
+                    except Exception as e:
+                        logger.warning("Failed to analyze dependencies", extra={
+                            'file': path,
+                            'error': str(e)
+                        })
+                        file_dependencies[path] = []
+                
+                # Prepare a comprehensive prompt that includes all files and their relationships
+                prompt = f"""You are a senior AI agent engineer specializing in improving AI agent code. Your task is to fix the following code files while maintaining their structure and relationships, with a specific focus on AI agent best practices.
+
+IMPORTANT: You must return your response in a specific format. For each file, you must include:
+1. A file marker: === <file_path> ===
+2. The complete fixed code for that file
+3. A blank line between files
+
+Test Configuration Context:
+{json.dumps(test_config, indent=2)}
+
+Files to fix:
+{chr(10).join(f'- {path}: {len(failures)} failures' for path, failures in files_to_fix.items())}
+
+File Dependencies:
+{chr(10).join(f'- {path} imports: {", ".join(deps)}' for path, deps in file_dependencies.items())}
+
+Original code for each file:
+{chr(10).join(f'=== {path} ==={chr(10)}{original_codes[path]}{chr(10)}' for path in files_to_fix.keys())}
+
+Test failures:
+{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failures in files_to_fix.values() for failure in failures)}
+
+Requirements:
+1. Fix all test failures while maintaining the agent's core functionality
+2. Follow the evaluation criteria from the test configuration
+3. Ensure proper error handling and input validation
+4. Maintain code quality standards (type hints, documentation, etc.)
+5. Keep changes minimal and focused on fixing the specific issues
+6. Return each file's code in the exact format specified above
+7. DO NOT return empty code blocks or invalid syntax
+8. The returned code must be valid Python code that can be executed
+
+Code Structure Requirements:
+1. All imports must be at the top of the file
+2. All classes and functions must be properly defined with type hints
+3. All functions must have docstrings explaining their purpose and parameters
+4. All classes must have proper initialization methods
+5. All methods must handle their own exceptions and return appropriate values
+6. All code must be properly indented and follow PEP 8 style
+7. All variables must be properly initialized before use
+8. All required dependencies must be imported
+9. All code must be executable in a Python environment
+10. All code must be compatible with Python 3.8+
+11. The code must be a complete, valid Python file
+12. The code must not contain any empty code blocks or invalid syntax
+
+Execution Requirements:
+1. Code must be executable in a controlled environment with proper namespace setup
+2. Code must handle all possible input types and edge cases
+3. Code must validate all inputs before processing
+4. Code must handle all possible error conditions
+5. Code must return appropriate values for all execution paths
+6. Code must not rely on external state or global variables
+7. Code must be thread-safe and reentrant
+8. Code must clean up any resources it uses
+9. Code must not have any side effects
+10. Code must be deterministic
+
+Code Improvement Guidelines:
+1. Error Handling:
+   - Add proper error handling for API calls and external services
+   - Include specific error messages for different failure scenarios
+   - Handle edge cases gracefully with appropriate fallbacks
+   - Validate inputs before processing
+
+2. AI Agent Best Practices:
+   - Ensure proper initialization of AI models and services
+   - Handle API rate limits and timeouts
+   - Implement proper logging for debugging
+   - Add retry mechanisms for transient failures
+   - Validate model outputs before returning
+
+3. Code Structure:
+   - Keep methods focused and single-purpose
+   - Use clear and descriptive variable names
+   - Add type hints for all parameters and return values
+   - Include docstrings explaining method purpose and parameters
+   - Follow consistent code style
+
+4. Testing Considerations:
+   - Make code testable by avoiding hard-coded values
+   - Use dependency injection where appropriate
+   - Add proper mocking points for external services
+   - Ensure error cases are testable
+   - Make validation logic explicit and testable
+
+5. Performance:
+   - Optimize API calls and external service interactions
+   - Cache results where appropriate
+   - Handle large inputs efficiently
+   - Implement proper resource cleanup
+
+6. Security:
+   - Never expose API keys or sensitive data
+   - Validate and sanitize all inputs
+   - Implement proper access controls
+   - Handle sensitive data appropriately
+
+7. AI Agent Prompt Engineering:
+   When test failures indicate output quality issues (e.g., missing expected content, incorrect format, or poor response quality):
+   
+   a) Analyze the Failure:
+      - Identify which specific aspects of the output failed (content, format, style, etc.)
+      - Check if the failure is due to missing context or unclear instructions
+      - Determine if the model needs more specific guidance or constraints
+   
+   b) Improve the Prompt:
+      - Add clear output format requirements
+      - Include specific examples of expected outputs
+      - Specify required content elements
+      - Add constraints for response length and style
+      - Include validation criteria in the prompt
+   
+   c) Add Output Validation:
+      - Implement checks for required content elements
+      - Validate output format and structure
+      - Add length and style validation
+      - Include fallback responses for invalid outputs
+   
+   d) Enhance Context:
+      - Add relevant background information
+      - Include domain-specific terminology
+      - Specify the target audience
+      - Add style and tone requirements
+   
+   e) Add Safety and Quality Checks:
+      - Include content filtering requirements
+      - Add fact-checking instructions
+      - Specify ethical guidelines
+      - Include quality assurance steps
+
+8. Output Quality Improvements:
+   - Add post-processing for output formatting
+   - Implement content validation
+   - Add response enhancement logic
+   - Include output sanitization
+   - Add quality scoring mechanisms
+
+Return your response in the exact format specified above, with each file's code separated by file markers and blank lines."""
+                
+                logger.debug("Generated prompt", extra={
+                    'prompt_length': len(prompt)
+                })
+                
+                # Get fixes for all files at once
+                response = model.generate_content(prompt)
+                fixed_content = response.text.strip()
+                logger.debug("Received model response", extra={
+                    'response_length': len(fixed_content)
+                })
+                
+                # Parse the response to extract fixes for each file
+                current_file = None
+                current_code = []
+                file_markers = set()
+                
+                for line in fixed_content.split('\n'):
+                    if line.startswith('=== ') and line.endswith(' ==='):
+                        file_marker = line[4:-4].strip()
+                        if file_marker in file_markers:
+                            logger.warning("Duplicate file marker detected", extra={
+                                'file': file_marker
+                            })
+                            continue
+                            
+                        if current_file and current_code:
+                            try:
+                                fixed_code = '\n'.join(current_code)
+                                # Validate and improve the generated code
+                                fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                                logger.debug("Generated fixed code", extra={
+                                    'file': current_file,
+                                    'content_length': len(fixed_code)
+                                })
+                                
+                                # Additional validation steps
+                                try:
+                                    # Check if all imports are valid
+                                    tree = ast.parse(fixed_code)
+                                    for node in ast.walk(tree):
+                                        if isinstance(node, (ast.Import, ast.ImportFrom)):
+                                            if isinstance(node, ast.Import):
+                                                for name in node.names:
+                                                    module_name = name.name.split('.')[0]
+                                                    if module_name not in file_dependencies.get(current_file, []):
+                                                        logger.warning("New import detected", extra={
+                                                            'file': current_file,
+                                                            'import': module_name
+                                                        })
+                                            else:
+                                                module_name = node.module.split('.')[0]
+                                                if module_name not in file_dependencies.get(current_file, []):
+                                                    logger.warning("New import detected", extra={
+                                                        'file': current_file,
+                                                        'import': module_name
+                                                    })
+                                    
+                                    # Check if all functions and classes are preserved
+                                    original_tree = ast.parse(original_codes[current_file])
+                                    original_names = {node.name for node in ast.walk(original_tree) 
+                                                    if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
+                                    fixed_names = {node.name for node in ast.walk(tree) 
+                                                 if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
+                                    
+                                    if original_names != fixed_names:
+                                        logger.warning("Function/class mismatch", extra={
+                                            'file': current_file,
+                                            'missing': list(original_names - fixed_names),
+                                            'added': list(fixed_names - original_names)
+                                        })
+                                    
+                                    fixed_codes[current_file] = fixed_code
+                                    logger.info("Validated and improved code", extra={
+                                        'file': current_file
+                                    })
+                                except Exception as e:
+                                    logger.error("Failed to validate code", extra={
+                                        'file': current_file,
+                                        'error': str(e)
+                                    })
+                                    # Try to fix the code again individually
+                                    logger.info("Attempting individual fix", extra={
+                                        'file': current_file
+                                    })
+                                    response = model.generate_content(f"""You are a senior AI agent engineer specializing in improving AI agent code. Your task is to fix the following code file with a specific focus on AI agent best practices and prompt engineering.
+
+=== {current_file} ===
+{original_codes[current_file]}
+
+Test failures:
+{chr(10).join(f'- {failure["test_name"]}: {failure["error_message"]}' for failure in files_to_fix[current_file])}
+
+Requirements:
+1. Fix all test failures while maintaining the agent's core functionality
+2. Focus on improving AI agent capabilities and prompt engineering
+3. Ensure proper error handling and input validation
+4. Maintain code quality standards (type hints, documentation, etc.)
+5. Keep changes minimal and focused on fixing the specific issues
+
+AI Agent Improvement Guidelines:
+1. Prompt Engineering:
+   - Analyze and improve any prompts in the code
+   - Add clear output format requirements
+   - Include specific examples of expected outputs
+   - Specify required content elements
+   - Add constraints for response length and style
+   - Include validation criteria in the prompts
+
+2. Context Enhancement:
+   - Add relevant background information
+   - Include domain-specific terminology
+   - Specify the target audience
+   - Add style and tone requirements
+   - Include quality assurance steps
+
+3. Output Quality:
+   - Add post-processing for output formatting
+   - Implement content validation
+   - Add response enhancement logic
+   - Include output sanitization
+   - Add quality scoring mechanisms
+
+4. Error Handling:
+   - Add proper error handling for API calls
+   - Include specific error messages
+   - Handle edge cases gracefully
+   - Validate inputs before processing
+   - Add retry mechanisms for transient failures
+
+5. Code Structure:
+   - Keep methods focused and single-purpose
+   - Use clear and descriptive variable names
+   - Add type hints for all parameters
+   - Include docstrings explaining purpose
+   - Follow consistent code style
+
+Return only the fixed code without any explanations or markdown formatting.""")
+                                    fixed_code = response.text.strip()
+                                    fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                                    fixed_codes[current_file] = fixed_code
+                                    logger.info("Successfully fixed code individually", extra={
+                                        'file': current_file
+                                    })
+                            except Exception as e:
+                                logger.error("Failed to process file", extra={
+                                    'file': current_file,
+                                    'error': str(e)
+                                })
+                                continue
+                                
+                        current_file = file_marker
+                        file_markers.add(file_marker)
+                        current_code = []
+                    elif current_file:
+                        current_code.append(line)
+                
+                # Handle the last file
+                if current_file and current_code:
+                    try:
+                        fixed_code = '\n'.join(current_code)
+                        fixed_code = _validate_and_improve_code(fixed_code, original_codes[current_file])
+                        fixed_codes[current_file] = fixed_code
+                        logger.info("Processed last file", extra={
+                            'file': current_file
+                        })
+                    except Exception as e:
+                        logger.error("Failed to process last file", extra={
+                            'file': current_file,
+                            'error': str(e)
+                        })
+            
+            # Write all fixed code to disk before running tests
+            logger.info("Writing fixed code to disk", extra={
+                'file_count': len(fixed_codes)
+            })
+            for current_file_path, code in fixed_codes.items():
+                with open(current_file_path, 'w') as f:
+                    f.write(code)
+                logger.debug("Updated file", extra={
+                    'file': current_file_path,
+                    'content_length': len(code)
+                })
+            
+            # Reload all affected modules
+            _reload_modules(set(fixed_codes.keys()))
             
             # Run tests again to verify fixes
             logger.info("Running tests to verify fixes")
@@ -769,79 +1523,151 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             
             # Extract file path from the root of the configuration
             test_file_path = test_config.get('file_path')
+            logger.info("Retrieved test file path", extra={
+                'test_file_path': test_file_path
+            })
+            
             if not test_file_path:
-                console.print("[red]Error: No file_path found in test configuration[/red]")
-                sys.exit(1)
+                error_msg = "No file_path found in test configuration"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
             # Resolve the test file path relative to the YAML config file's directory
             config_dir = os.path.dirname(os.path.abspath(test_config_path))
             resolved_test_file_path = os.path.normpath(os.path.join(config_dir, test_file_path))
+            logger.info("Resolved test file path", extra={
+                'resolved_path': resolved_test_file_path,
+                'config_dir': config_dir
+            })
             
-            logger.info(f"Running tests for {resolved_test_file_path}")
-            test_results = test_runner.run_tests(Path(resolved_test_file_path))
-            logger.info(f"Test results: {test_results}")
+            logger.info("Running tests", extra={
+                'file_path': resolved_test_file_path
+            })
+            try:
+                test_results = test_runner.run_tests(Path(resolved_test_file_path))
+                logger.info("Test execution completed", extra={
+                    'result_type': type(test_results).__name__
+                })
+            except Exception as e:
+                logger.error("Test execution failed", extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__
+                })
+                raise
+            
+            # Validate test results
+            if test_results is None:
+                error_msg = "Test runner returned None results"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+                
+            if not isinstance(test_results, dict):
+                error_msg = f"Invalid test results type: {type(test_results)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
             # Store this attempt's results
             all_test_attempts.append({
                 'attempt': attempt + 1,
-                'code': fixed_code,
+                'code': fixed_codes,
                 'results': test_results
             })
             
             # Check if test results indicate an error
             if isinstance(test_results, dict) and test_results.get('overall_status') == 'error':
                 error_msg = test_results.get('error', 'Unknown error')
-                logger.error(f"Test execution failed: {error_msg}")
+                logger.error("Test execution failed", extra={
+                    'error': error_msg
+                })
                 raise RuntimeError(f"Test execution failed: {error_msg}")
             
             # Track which previously failing tests are now passing
             fixed_tests = []
+            logger.info("Processing test results", extra={
+                'region_count': len(test_results)
+            })
             for region, result in test_results.items():
-                print(f"Region: {region}")
-                print(f"Result: {result}")
-                # Skip if result is a string (like 'status') or if region is _status
-                if isinstance(result, str) or region == '_status' or region == 'overall_status':
+                if isinstance(result, str) or region in ('_status', 'overall_status'):
+                    logger.debug("Skipping special region", extra={
+                        'region': region
+                    })
                     continue
-                # Ensure result is a dictionary before accessing test_cases
+                    
                 if not isinstance(result, dict):
-                    logger.warning(f"Skipping invalid result format for region {region}: {result}")
+                    logger.warning("Invalid result format", extra={
+                        'region': region,
+                        'result_type': type(result).__name__
+                    })
                     continue
+                    
                 test_cases = result.get('test_cases', [])
+                logger.debug("Processing test cases", extra={
+                    'region': region,
+                    'test_case_count': len(test_cases)
+                })
+                
                 if not isinstance(test_cases, list):
-                    logger.warning(f"Skipping invalid test_cases format for region {region}: {test_cases}")
+                    logger.warning("Invalid test cases format", extra={
+                        'region': region,
+                        'test_cases_type': type(test_cases).__name__
+                    })
                     continue
+                    
                 for test_case in test_cases:
                     if not isinstance(test_case, dict):
-                        logger.warning(f"Skipping invalid test case format: {test_case}")
+                        logger.warning("Invalid test case format", extra={
+                            'region': region,
+                            'test_case_type': type(test_case).__name__
+                        })
                         continue
+                        
                     test_name = test_case.get('name')
-                    if test_name in failing_test_names and test_case.get('status') == 'passed':
+                    test_status = test_case.get('status')
+                    
+                    if test_name in failing_test_names and test_status == 'passed':
+                        logger.info("Found fixed test", extra={
+                            'test_name': test_name,
+                            'region': region
+                        })
                         fixed_tests.append({
                             'region': region,
                             'test_name': test_name
                         })
             
+            logger.info("Test processing completed", extra={
+                'fixed_test_count': len(fixed_tests)
+            })
+            
             # Update best attempt if this one fixed more tests
             if len(fixed_tests) > len(best_fixed_tests):
                 best_fixed_tests = fixed_tests
-                best_fixed_code = fixed_code
+                best_fixed_codes = fixed_codes
+                logger.info("Updated best attempt", extra={
+                    'fixed_test_count': len(fixed_tests)
+                })
             
             # If we fixed all tests, we can stop early
             if len(fixed_tests) == len(failing_test_names):
-                logger.info("All tests fixed! Stopping retries.")
+                logger.info("All tests fixed", extra={
+                    'fixed_test_count': len(fixed_tests)
+                })
                 break
             
             # If this is not the last attempt, continue to next iteration
             if attempt < max_retries - 1:
-                logger.info(f"Fixed {len(fixed_tests)} tests in attempt {attempt + 1}, trying again...")
+                logger.info("Continuing to next attempt", extra={
+                    'current_attempt': attempt + 1,
+                    'max_retries': max_retries,
+                    'fixed_test_count': len(fixed_tests)
+                })
                 continue
         
         # Use the best attempt's results
         fixed_tests = best_fixed_tests
-        fixed_code = best_fixed_code
+        fixed_codes = best_fixed_codes
         
         if not fixed_tests:
-            logger.info("No previously failing tests were fixed after all attempts. Reverting changes.")
+            logger.info("No tests were fixed, reverting changes")
             subprocess.run(["git", "checkout", original_branch], check=True)
             # Only try to delete the branch if we created it
             try:
@@ -853,42 +1679,64 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             except subprocess.CalledProcessError:
                 # Ignore errors if branch doesn't exist
                 pass
-            return
+            return all_test_attempts
         
-        logger.info(f"Fixed {len(fixed_tests)} previously failing tests")
+        logger.info("Tests fixed successfully", extra={
+            'fixed_test_count': len(fixed_tests)
+        })
         
         # Update PR info with fixed tests
-        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results, test_config, original_code)
-        logger.info(f"Updated branch name: {branch_name}")
+        branch_name, pr_title, pr_body = _generate_pr_info(failure_data, fixed_tests, test_results, test_config, original_codes[main_file_path])
+        logger.info("Updated PR info", extra={
+            'branch_name': branch_name,
+            'pr_title': pr_title
+        })
         
         # Create a new branch
-        logger.info(f"Creating new branch: {branch_name}")
+        logger.info("Creating new branch", extra={
+            'branch_name': branch_name
+        })
         try:
             subprocess.run(["git", "checkout", "-b", branch_name], check=True)
         except subprocess.CalledProcessError:
             # If branch already exists, add a unique suffix
-            logger.info(f"Branch {branch_name} already exists, adding unique suffix")
+            logger.info("Branch already exists, adding unique suffix", extra={
+                'branch_name': branch_name
+            })
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             random_suffix = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=4))
             unique_branch_name = f"{branch_name}-{timestamp}-{random_suffix}"
-            logger.info(f"Trying with new branch name: {unique_branch_name}")
+            logger.info("Trying with new branch name", extra={
+                'new_branch_name': unique_branch_name
+            })
             subprocess.run(["git", "checkout", "-b", unique_branch_name], check=True)
             branch_name = unique_branch_name
         
         # Write the best fixed code back to disk before committing
-        logger.info("Writing best fixed code back to disk")
-        with open(file_path, 'w') as f:
-            f.write(best_fixed_code)
+        logger.info("Writing fixed code to disk", extra={
+            'file_count': len(fixed_codes)
+        })
+        for current_file_path, code in fixed_codes.items():
+            with open(current_file_path, 'w') as f:
+                f.write(code)
+            logger.debug("Updated file", extra={
+                'file': current_file_path,
+                'content_length': len(code)
+            })
         
         # Commit changes with a proper commit message
-        subprocess.run(["git", "add", file_path], check=True)
+        subprocess.run(["git", "add", *fixed_codes.keys()], check=True)
         commit_message = f"Fix: {pr_title}\n\n{pr_body}"
         subprocess.run(["git", "commit", "-m", commit_message], check=True)
-        logger.info("Committed changes")
+        logger.info("Committed changes", extra={
+            'commit_message': commit_message[:100] + "..." if len(commit_message) > 100 else commit_message
+        })
         
         # Push branch
         subprocess.run(["git", "push", "-u", "origin", branch_name], check=True)
-        logger.info(f"Pushed branch: {branch_name}")
+        logger.info("Pushed branch", extra={
+            'branch_name': branch_name
+        })
         
         # Create PR using GitHub API
         if create_pr:
@@ -907,26 +1755,26 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                 repo_name = repo_url.split('/')[-1]
                 repo_owner = repo_url.split('/')[-2]
                 repo = g.get_repo(f"{repo_owner}/{repo_name}")
-                logger.info(f"Successfully connected to repository: {repo_owner}/{repo_name}")
+                logger.info("Connected to repository", extra={
+                    'repo': f"{repo_owner}/{repo_name}"
+                })
             except subprocess.CalledProcessError:
                 raise ValueError("Could not determine repository information. Please ensure you're in a git repository with a remote origin.")
             except GithubException as e:
                 raise ValueError(f"Error accessing GitHub repository: {str(e)}")
             
             # Create PR
-            logger.info("Preparing to create PR with test results")
-            logger.info(f"Test results type: {type(test_results)}")
-            logger.info(f"Test results content: {test_results}")
-            logger.info(f"Fixed tests: {fixed_tests}")
-            logger.info(f"Test config: {test_config}")
-            
+            logger.info("Preparing to create PR")
             try:
                 enhanced_pr_body = _enhance_pr_body(failure_data, fixed_tests, test_results, test_config, all_test_attempts)
-                logger.info("Successfully enhanced PR body")
+                logger.info("Enhanced PR body", extra={
+                    'body_length': len(enhanced_pr_body)
+                })
             except Exception as e:
-                logger.error(f"Error enhancing PR body: {str(e)}")
-                logger.error(f"Error type: {type(e)}")
-                logger.error(f"Error args: {e.args}")
+                logger.error("Failed to enhance PR body", extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__
+                })
                 raise
             
             try:
@@ -934,7 +1782,9 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                 if not pr_title or not pr_title.strip():
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     pr_title = f"Fix: Resolved test failures ({timestamp})"
-                    logger.warning(f"Empty PR title detected, using default title: {pr_title}")
+                    logger.warning("Empty PR title detected", extra={
+                        'new_title': pr_title
+                    })
                 
                 pr = repo.create_pull(
                     title=pr_title,
@@ -942,20 +1792,31 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
                     head=branch_name,
                     base=base_branch
                 )
-                logger.info(f"Created Pull Request: {pr.html_url}")
+                logger.info("Created Pull Request", extra={
+                    'pr_url': pr.html_url
+                })
                 print(f"Pull Request created: {pr.html_url}")
             except Exception as e:
-                logger.error(f"Error creating PR: {str(e)}")
-                logger.error(f"Error type: {type(e)}")
-                logger.error(f"Error args: {e.args}")
+                logger.error("Failed to create PR", extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__
+                })
                 raise
         
         # Return to the original branch
-        logger.info(f"Returning to original branch: {original_branch}")
+        logger.info("Returning to original branch", extra={
+            'branch': original_branch
+        })
         subprocess.run(["git", "checkout", original_branch], check=True)
         
+        return all_test_attempts
+        
     except subprocess.CalledProcessError as e:
-        logger.error(f"Git command failed: {e}")
+        logger.error("Git command failed", extra={
+            'error': str(e),
+            'command': e.cmd,
+            'returncode': e.returncode
+        })
         # Try to return to original branch even if there was an error
         try:
             subprocess.run(["git", "checkout", original_branch], check=True)
@@ -963,7 +1824,11 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             pass
         raise
     except GithubException as e:
-        logger.error(f"GitHub API error: {e}")
+        logger.error("GitHub API error", extra={
+            'error': str(e),
+            'status': e.status,
+            'data': e.data
+        })
         # Try to return to original branch even if there was an error
         try:
             subprocess.run(["git", "checkout", original_branch], check=True)
@@ -971,9 +1836,11 @@ def run_autofix_and_pr(failure_data: List[Dict], file_path: str, test_config_pat
             pass
         raise
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        logger.error(f"Error type: {type(e)}")
-        logger.error(f"Error args: {e.args}")
+        logger.error("Unexpected error", extra={
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'error_args': e.args
+        })
         # Try to return to original branch even if there was an error
         try:
             subprocess.run(["git", "checkout", original_branch], check=True)

@@ -25,7 +25,44 @@ def collect_failed_tests(results: Dict[str, Any]) -> List[Dict[str, Any]]:
         List of dictionaries containing failed test information
     """
     failed_tests = []
+    
+    # Check overall status first
+    overall_status = results.get('overall_status', {})
+    if overall_status.get('status') == 'failed':
+        # Add overall failure if there's an error message
+        if 'error' in overall_status:
+            failed_tests.append({
+                'region': 'overall',
+                'test_name': 'Overall Test Execution',
+                'error_message': overall_status['error'],
+                'output': 'No output available'
+            })
+        
+        # Add evaluation failure if present
+        if 'evaluation' in overall_status:
+            eval_results = overall_status['evaluation']
+            if eval_results.get('status') == 'failed':
+                failed_tests.append({
+                    'region': 'evaluation',
+                    'test_name': 'LLM Evaluation',
+                    'error_message': f"Evaluation failed with score: {eval_results.get('overall_score')}",
+                    'output': str(eval_results.get('criteria', {}))
+                })
+        
+        # Add evaluation error if present
+        if 'evaluation_error' in overall_status:
+            failed_tests.append({
+                'region': 'evaluation',
+                'test_name': 'LLM Evaluation',
+                'error_message': overall_status['evaluation_error'],
+                'output': 'No output available'
+            })
+    
+    # Check individual test cases
     for region, result in results.items():
+        if region == 'overall_status':
+            continue
+            
         if not isinstance(result, dict):
             click.echo(f"Warning: Invalid result format for region {region}: {result}")
             continue
@@ -40,13 +77,16 @@ def collect_failed_tests(results: Dict[str, Any]) -> List[Dict[str, Any]]:
                 click.echo(f"Warning: Invalid test case format: {test_case}")
                 continue
                 
-            if test_case.get('status') != 'passed':
+            if test_case.get('status') == 'failed':
                 failed_tests.append({
                     'region': region,
                     'test_name': test_case.get('name', 'Unknown Test'),
                     'error_message': test_case.get('details', 'Test failed'),
-                    'output': test_case.get('output', 'No output available')
+                    'input': test_case.get('input', 'No input available'),
+                    'output': test_case.get('output', 'No output available'),
+                    'evaluation': test_case.get('evaluation', {})
                 })
+    
     return failed_tests
 
 @click.group()
@@ -96,7 +136,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
             sys.exit(1)
             
         results = runner.run_tests(resolved_file_path)
-        
+        print(results)
         # Check if any tests failed
         failed_tests = collect_failed_tests(results)
         
@@ -110,7 +150,7 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
             if auto_fix:
                 click.echo(f"\nAttempting to fix failing tests (max retries: {max_retries})...")
                 if file_path:
-                    run_autofix_and_pr(failed_tests, str(resolved_file_path), str(config_path), max_retries=max_retries, create_pr=create_pr, base_branch=base_branch)
+                    test_attempts = run_autofix_and_pr(failed_tests, str(resolved_file_path), str(config_path), max_retries=max_retries, create_pr=create_pr, base_branch=base_branch)
                     if create_pr:
                         click.echo("Pull request created with fixes")
                 else:
@@ -165,12 +205,43 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
                 if test['output']:
                     click.echo(f"Output:\n{test['output']}")
             
-            if auto_fix:
+            if auto_fix and test_attempts:
                 click.echo("\nAuto-fix Attempts:")
                 click.echo("=" * 50)
-                click.echo(f"Maximum retries: {max_retries}")
-                if create_pr:
-                    click.echo("Pull request will be created with fixes")
+                for attempt in test_attempts:
+                    click.echo(f"\nAttempt {attempt['attempt']}:")
+                    click.echo("-" * 30)
+                    
+                    # Show which tests were fixed in this attempt
+                    fixed_in_attempt = []
+                    for region, result in attempt['results'].items():
+                        if region == 'overall_status':
+                            continue
+                        test_cases = result.get('test_cases', [])
+                        for test_case in test_cases:
+                            if test_case.get('status') == 'passed':
+                                fixed_in_attempt.append({
+                                    'region': region,
+                                    'test_name': test_case.get('name')
+                                })
+                    
+                    if fixed_in_attempt:
+                        click.echo("Fixed Tests:")
+                        for fixed in fixed_in_attempt:
+                            click.echo(f"- {fixed['test_name']} ({fixed['region']})")
+                    else:
+                        click.echo("No tests were fixed in this attempt")
+                    
+                    # Show overall status
+                    overall_status = attempt['results'].get('overall_status', {})
+                    status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
+                    click.echo(f"\nOverall Status: {status.upper()}")
+                    
+                    # Show any error messages
+                    if isinstance(overall_status, dict) and 'error' in overall_status:
+                        click.echo(f"Error: {overall_status['error']}")
+                    
+                    click.echo()
         
         # Save detailed results to file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -223,8 +294,48 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
                     if test['output']:
                         f.write(f"Output:\n{test['output']}\n")
                     f.write("-" * 30 + "\n")
+
+                # Add autofix attempts section if auto-fix was enabled
+                if auto_fix and test_attempts:
+                    f.write("\nAuto-fix Attempts:\n")
+                    f.write("=" * 50 + "\n\n")
+                    for attempt in test_attempts:
+                        f.write(f"Attempt {attempt['attempt']}:\n")
+                        f.write("-" * 30 + "\n")
+                        
+                        # Write which tests were fixed in this attempt
+                        fixed_in_attempt = []
+                        for region, result in attempt['results'].items():
+                            if region == 'overall_status':
+                                continue
+                            test_cases = result.get('test_cases', [])
+                            for test_case in test_cases:
+                                if test_case.get('status') == 'passed':
+                                    fixed_in_attempt.append({
+                                        'region': region,
+                                        'test_name': test_case.get('name')
+                                    })
+                        
+                        if fixed_in_attempt:
+                            f.write("Fixed Tests:\n")
+                            for fixed in fixed_in_attempt:
+                                f.write(f"- {fixed['test_name']} ({fixed['region']})\n")
+                        else:
+                            f.write("No tests were fixed in this attempt\n")
+                        
+                        # Write overall status
+                        overall_status = attempt['results'].get('overall_status', {})
+                        status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
+                        f.write(f"\nOverall Status: {status.upper()}\n")
+                        
+                        # Write any error messages
+                        if isinstance(overall_status, dict) and 'error' in overall_status:
+                            f.write(f"Error: {overall_status['error']}\n")
+                        
+                        f.write("\n")
         
         click.echo(f"\nDetailed report saved to: {result_file}")
+        
         
     except Exception as e:
         click.echo(f"Error running tests: {str(e)}")

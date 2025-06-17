@@ -11,6 +11,7 @@ import json
 import datetime
 import types
 import importlib
+import inspect
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Type, TypeVar, Callable, Sequence, Mapping, Set, FrozenSet, Tuple
@@ -204,13 +205,20 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         if not os.path.exists(code_file):
             return f"Error: File not found at {code_file} (resolved from {file_path})"
 
+        # Initialize parent_dir to None
+        parent_dir = None
+
+        # Add the file's directory and parent directories to Python path
+        file_dir = os.path.dirname(os.path.abspath(code_file))
+        parent_dir = os.path.dirname(file_dir)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+            console.print(f"[blue]Debug: Added {parent_dir} to Python path[/blue]")
+
         # Read the full file
         with open(code_file, 'r') as f:
             content = f.read()
             
-        # Create execution namespace with all necessary imports
-        namespace = create_execution_namespace()
-        
         # Extract the block between markers
         if region:
             # Use named region markers
@@ -232,28 +240,77 @@ def run_test_block(file_path: str, test_input: Optional[str] = None, region: Opt
         # Extract the block code
         block_code = content[start_idx + len(start_marker):end_idx].strip()
         
-        # Extract imports from the full file
-        import_lines = []
-        for line in content.split('\n'):
-            line = line.strip()
-            if line.startswith('import ') or line.startswith('from '):
-                import_lines.append(line)
-            elif line and not line.startswith('#'):
-                break
+        # Create a temporary module to execute the code
+        module_name = os.path.splitext(os.path.basename(code_file))[0]
+        package_name = os.path.basename(os.path.dirname(code_file))
         
-        # Add imports to the namespace
-        if import_lines:
-            try:
-                import_block = '\n'.join(import_lines)
-                exec(import_block, namespace)
-            except Exception as e:
-                return f"Error setting up imports: {str(e)}"
+        # Create a new module
+        spec = importlib.util.spec_from_file_location(f"{package_name}.{module_name}", code_file)
+        if spec is None:
+            return f"Error: Could not create module spec for {code_file}"
+            
+        if spec.loader is None:
+            return f"Error: No loader found for module {package_name}.{module_name} at {code_file}"
+            
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         
-        # Execute the block
-        return execute_code_block(block_code, namespace, test_input)
+        # Set up the module's namespace
+        module.__file__ = code_file
+        module.__package__ = package_name
         
+        # Execute the module's code
+        try:
+            spec.loader.exec_module(module)
+        except Exception as e:
+            return f"Error executing module: {str(e)}"
+            
+        # Now execute the specific block
+        try:
+            # Create a new namespace for the block execution
+            block_namespace = {
+                '__name__': f'{package_name}.{module_name}',
+                '__file__': code_file,
+                '__package__': package_name,
+                '__builtins__': __builtins__,
+                # Copy all names from the module
+                **{name: getattr(module, name) for name in dir(module) if not name.startswith('_')}
+            }
+            
+            # Execute the block in the new namespace
+            exec(block_code, block_namespace)
+            
+            # If there's a test input, try to call the main function/class
+            if test_input:
+                # Look for a class with a run method
+                for name, obj in block_namespace.items():
+                    if isinstance(obj, type) and hasattr(obj, 'run'):
+                        # If it's a static method, call it directly
+                        if isinstance(obj.run, staticmethod):
+                            return str(obj.run(test_input))
+                        # Otherwise create an instance and call run
+                        else:
+                            instance = obj()
+                            return str(instance.run(test_input))
+                            
+                # If no class with run method found, look for a main function
+                if 'main' in block_namespace:
+                    main_func = block_namespace['main']
+                    if callable(main_func):
+                        return str(main_func(test_input))
+                        
+            return "Code block executed successfully"
+            
+        except Exception as e:
+            return f"Error executing code block: {str(e)}"
+            
     except Exception as e:
-        return f"Error executing code block: {str(e)}"
+        return f"Error: {str(e)}"
+    finally:
+        # Clean up: remove the added path
+        if parent_dir is not None and parent_dir in sys.path:
+            sys.path.remove(parent_dir)
+            console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
 
 class TestRunner:
     def __init__(self, test_config: Optional[Dict] = None):
@@ -505,7 +562,12 @@ class TestRunner:
             Dict[str, Any]: Test results for each region
         """
         file_path = Path(file_path)
-        results = {}
+        results = {
+            'overall_status': {
+                'test_cases': [],
+                'status': 'failed'
+            }
+        }
         all_steps_passed = True
         
         # Get the agent type from config
@@ -539,126 +601,300 @@ class TestRunner:
                     logger=logger
                 )
             
-            # Run each test step
-            for step in self.test_config.get('steps', []):
-                step_index = step.get('step_index')
-                step_name = step.get('name', f'Step {step_index}')
-                
-                logger.log_step_start(step_index, step.get('input', {}))
-                
-                # Run the step and capture output
-                output = None
-                if 'region' in step.get('input', {}):
-                    console.print(f"[blue]Debug: Running test block for step {step_index}[/blue]")
-                    console.print(f"[blue]Debug: Step input: {step.get('input', {})}[/blue]")
-                    
-                    # Use the main test file path instead of the step's file_path
-                    output = run_test_block(
-                        str(file_path),  # Use the resolved main test file path
-                        step.get('input', {}).get('input'),
-                        step.get('input', {}).get('region'),
-                        self.test_config.get('config_file')
-                    )
-                    
-                    console.print(f"[blue]Debug: Test block output: {output}[/blue]")
-                
-                # Use run_step to properly validate all test criteria
-                passed = self.run_step(step, agent_type, logger)
-                
-                # Store results by region
-                region = step.get('input', {}).get('region', 'default')
-                if region not in results:
-                    results[region] = {
-                        'test_cases': [],
-                        'status': 'passed'  # Initialize status for each region
-                    }
-                
-                # If we have an output and evaluator, evaluate it immediately
-                evaluation_result = None
-                if output and evaluator and 'evaluation' in self.test_config:
+            # Add the file's directory and parent directories to Python path
+            file_dir = os.path.dirname(os.path.abspath(file_path))
+            parent_dir = os.path.dirname(file_dir)
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+                console.print(f"[blue]Debug: Added {parent_dir} to Python path[/blue]")
+            
+            try:
+                # Run each test step
+                for step in self.test_config.get('steps', []):
                     try:
-                        # Create a temporary results structure for evaluation
-                        temp_results = {
-                            region: {
-                                'test_cases': [{
+                        step_index = step.get('step_index')
+                        step_name = step.get('name', f'Step {step_index}')
+                        
+                        logger.log_step_start(step_index, step.get('input', {}))
+                        
+                        # Run the step and capture output
+                        output = None
+                        if 'region' in step.get('input', {}):
+                            console.print(f"[blue]Debug: Running test block for step {step_index}[/blue]")
+                            
+                            # Use the step's file_path if provided, otherwise use the main test file path
+                            step_file_path = step.get('input', {}).get('file_path')
+                            if step_file_path:
+                                # Resolve the step's file path relative to the config file
+                                if self.test_config.get('config_file'):
+                                    config_dir = os.path.dirname(os.path.abspath(self.test_config['config_file']))
+                                    step_file_path = os.path.normpath(os.path.join(config_dir, step_file_path))
+                                console.print(f"[blue]Debug: Using step's file path: {step_file_path}[/blue]")
+                            else:
+                                step_file_path = str(file_path)
+                                console.print(f"[blue]Debug: Using main test file path: {step_file_path}[/blue]")
+                            
+                            try:
+                                # Read the file content
+                                console.print(f"[blue]Debug: Reading file content from {step_file_path}[/blue]")
+                                with open(step_file_path, 'r') as f:
+                                    content = f.read()
+                                
+                                # Extract the code between kaizen markers first
+                                region = step.get('input', {}).get('region')
+                                if region:
+                                    start_marker = f'# kaizen:start:{region}'
+                                    end_marker = f'# kaizen:end:{region}'
+                                else:
+                                    start_marker = '# kaizen:start'
+                                    end_marker = '# kaizen:end'
+                                
+                                console.print(f"[blue]Debug: Looking for markers: start='{start_marker}', end='{end_marker}'[/blue]")
+                                
+                                start_idx = content.find(start_marker)
+                                if start_idx == -1:
+                                    raise ImportError(f"Start marker '{start_marker}' not found in {step_file_path}")
+                                
+                                end_idx = content.find(end_marker, start_idx)
+                                if end_idx == -1:
+                                    raise ImportError(f"End marker '{end_marker}' not found in {step_file_path}")
+                                
+                                # Extract the code between markers
+                                code_block = content[start_idx + len(start_marker):end_idx].strip()
+                                console.print("[blue]Debug: Extracted code block[/blue]")
+                                
+                                # Create execution namespace
+                                namespace = {
+                                    '__name__': '__main__',
+                                    '__file__': step_file_path,
+                                    '__package__': 'test_agent.summarizer_agent',
+                                    '__builtins__': __builtins__,
+                                }
+                                
+                                # Add the parent directory to Python path
+                                parent_dir = os.path.dirname(os.path.dirname(step_file_path))
+                                if parent_dir not in sys.path:
+                                    sys.path.insert(0, parent_dir)
+                                    console.print(f"[blue]Debug: Added {parent_dir} to Python path[/blue]")
+                                
+                                # Import required modules first
+                                try:
+                                    console.print("[blue]Debug: Attempting to import required modules[/blue]")
+                                    from test_agent.summarizer_agent.prompt import get_prompt
+                                    from test_agent.summarizer_agent.utils import call_gemini_llm
+                                    namespace['get_prompt'] = get_prompt
+                                    namespace['call_gemini_llm'] = call_gemini_llm
+                                    console.print("[blue]Debug: Successfully imported modules[/blue]")
+                                except ImportError as e:
+                                    console.print(f"[red]Error importing required functions: {str(e)}[/red]")
+                                    raise
+                                
+                                # Execute the code block
+                                console.print("[blue]Debug: Executing code block[/blue]")
+                                exec(code_block, namespace)
+                                console.print("[blue]Debug: Successfully executed code block[/blue]")
+                                
+                                # Find the class with run method
+                                class_name = None
+                                for name, obj in namespace.items():
+                                    if isinstance(obj, type) and hasattr(obj, 'run'):
+                                        class_name = name
+                                        console.print(f"[blue]Debug: Found class {name}[/blue]")
+                                        break
+                                
+                                if class_name is None:
+                                    raise ImportError("Could not find class with run method in the code block")
+                                
+                                # Create instance and run
+                                cls = namespace[class_name]
+                                input_text = step.get('input', {}).get('input', '')
+                                console.print("[blue]Debug: Running with input[/blue]")
+                                
+                                # Get the run method using inspect.getattr_static to avoid descriptor logic
+                                run_method = inspect.getattr_static(cls, 'run')
+                                if isinstance(run_method, staticmethod):
+                                    output = str(cls.run(input_text))
+                                else:
+                                    instance = cls()
+                                    output = str(instance.run(input_text))
+                                
+                                console.print("[blue]Debug: Run completed[/blue]")
+                                
+                            except Exception as e:
+                                console.print(f"[red]Error during execution: {str(e)}[/red]")
+                                raise
+                            finally:
+                                # Clean up: remove the added path
+                                if parent_dir in sys.path:
+                                    sys.path.remove(parent_dir)
+                                    console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
+                            
+                            # Store the output for validation
+                            if output:
+                                console.print("[blue]Debug: Test block output received[/blue]")
+                                # Get expected values from step
+                                expected_contains = step.get('expected_output_contains', [])
+                                expected_exact = step.get('expected_output_exact')
+                                
+                                # Validate the output directly without running again
+                                passed = True
+                                error_msg = None
+                                if expected_contains:
+                                    for expected in expected_contains:
+                                        if expected not in output:
+                                            passed = False
+                                            error_msg = f"Expected output not found: {expected}"
+                                            logger.log_step_result(step_index, output, False, error_msg)
+                                            break
+
+                                if passed and expected_exact and output != expected_exact:
+                                    passed = False
+                                    error_msg = "Output does not match expected exact output"
+                                    logger.log_step_result(step_index, output, False, error_msg)
+
+                                if passed:
+                                    logger.log_step_result(step_index, output, True)
+                                
+                                # Store results by region
+                                region = step.get('input', {}).get('region', 'default')
+                                if region not in results:
+                                    results[region] = {
+                                        'test_cases': [],
+                                        'status': 'passed'
+                                    }
+                                
+                                # Add test case result
+                                test_case = {
                                     'name': step_name,
                                     'input': step.get('input', {}),
-                                    'output': output,
-                                    'details': logger.get_last_step_details()
-                                }]
-                            }
-                        }
-                        
-                        # print(f"Debug: Temp results: {temp_results}")
-                        
-                        # Run evaluation
-                        evaluation_result = evaluator.evaluate(
-                            results=temp_results,
-                            criteria=self.test_config['evaluation'].get('criteria', [])
-                        )
-                        
-                        # Update passed status based on evaluation
-                        if isinstance(evaluation_result, dict):
-                            if evaluation_result.get('status') == 'failed':
-                                passed = False
-                                all_steps_passed = False
-                                results[region]['status'] = 'failed'  # Update region status
-                        elif isinstance(evaluation_result, str):
-                            # If evaluation_result is a string, treat it as an error
-                            passed = False
-                            all_steps_passed = False
-                            results[region]['status'] = 'failed'  # Update region status
-                            evaluation_result = {
-                                'status': 'error',
-                                'error': evaluation_result
-                            }
+                                    'status': 'passed' if passed else 'failed',
+                                    'output': output if output else 'No output available',
+                                    'details': error_msg if not passed else None
+                                }
+                                
+                                results[region]['test_cases'].append(test_case)
+                                
+                                # Update region status if test case failed
+                                if not passed:
+                                    results[region]['status'] = 'failed'
+                                    all_steps_passed = False
+
+                                # Run LLM evaluation for this step if evaluator is available
+                                if evaluator and 'evaluation' in self.test_config:
+                                    try:
+                                        logger.logger.info(f"Running LLM evaluation for step {step_index}...")
+                                        # Create a temporary results dict with just this step's results
+                                        step_results = {
+                                            region: {
+                                                'test_cases': [test_case],
+                                                'status': 'passed' if passed else 'failed'
+                                            }
+                                        }
+                                        evaluation_results = evaluator.evaluate(
+                                            step_results,
+                                            self.test_config['evaluation'].get('criteria', [])
+                                        )
+                                        
+                                        # Add evaluation results to the test case
+                                        test_case['evaluation'] = evaluation_results
+                                        
+                                        # Update test case status based on evaluation
+                                        if evaluation_results['status'] == 'failed':
+                                            test_case['status'] = 'failed'
+                                            results[region]['status'] = 'failed'
+                                            all_steps_passed = False
+                                            logger.logger.error(f"Step {step_index} failed LLM evaluation with score: {evaluation_results['overall_score']}")
+                                        else:
+                                            logger.logger.info(f"Step {step_index} passed LLM evaluation with score: {evaluation_results['overall_score']}")
+                                    except Exception as e:
+                                        logger.logger.error(f"Error during LLM evaluation for step {step_index}: {str(e)}")
+                                        test_case['evaluation_error'] = str(e)
+                                        test_case['status'] = 'failed'
+                                        results[region]['status'] = 'failed'
+                                        all_steps_passed = False
                             
+                            # Update overall status
+                            results['overall_status']['status'] = 'passed' if all_steps_passed else 'failed'
+                            
+                            if not all_steps_passed:
+                                logger.logger.error("Test failed due to failed steps")
+                            else:
+                                logger.logger.info("All test steps passed")
+                            
+                            # Save test results
+                            logger.save_results()
+                            
+                            # Print final status
+                            if results['overall_status']['status'] == 'passed':
+                                console.print("\nAll tests passed!")
+                            else:
+                                console.print("\n❌ Tests failed!")
+                                # Print evaluation results for each step
+                                for region, region_results in results.items():
+                                    if region != 'overall_status':
+                                        for test_case in region_results['test_cases']:
+                                            if 'evaluation' in test_case:
+                                                eval_results = test_case['evaluation']
+                                                console.print(f"\nStep: {test_case['name']}")
+                                                console.print(f"LLM Evaluation Score: {eval_results['overall_score']}")
+                                                console.print("Evaluation Details:")
+                                                for criterion, result in eval_results['criteria'].items():
+                                                    status = "✅" if result['status'] == 'passed' else "❌"
+                                                    console.print(f"{status} {criterion}: {result['feedback']}")
                     except Exception as e:
-                        logger.logger.error(f"Error during output evaluation: {str(e)}")
-                        evaluation_result = {
-                            'status': 'error',
-                            'error': str(e)
+                        error_msg = f"Error in step {step_index}: {str(e)}"
+                        logger.logger.error(error_msg)
+                        all_steps_passed = False
+                        
+                        # Get the region from the step
+                        region = step.get('input', {}).get('region', 'default')
+                        
+                        # Initialize region if not exists
+                        if region not in results:
+                            results[region] = {
+                                'test_cases': [],
+                                'status': 'failed'
+                            }
+                        
+                        # Get any output that was generated before the error
+                        output = None
+                        if 'output' in locals():
+                            output = str(output)
+                        elif hasattr(logger, 'get_last_output'):
+                            output = logger.get_last_output()
+                        
+                        # Add the failed test case with error details and any available output
+                        test_case = {
+                            'name': step.get('name', f'Step {step_index}'),
+                            'input': step.get('input', {}),
+                            'status': 'failed',
+                            'output': output if output else 'No output available',
+                            'details': error_msg  # This is what collect_failed_tests looks for
                         }
-                        results[region]['status'] = 'failed'  # Update region status
+                        
+                        results[region]['test_cases'].append(test_case)
+                        results[region]['status'] = 'failed'
+                        
+                        # Update overall status
+                        results['overall_status']['status'] = 'failed'
+                        results['overall_status']['error'] = error_msg
+                        continue
                 
-                # Add test case result
-                test_case = {
-                    'name': step_name,
-                    'input': step.get('input', {}),
-                    'status': 'passed' if passed else 'failed',
-                    'output': output,
-                    'details': logger.get_last_step_details()
-                }
-                
-                # Add evaluation result if available
-                if evaluation_result:
-                    test_case['evaluation'] = evaluation_result
-                
-                results[region]['test_cases'].append(test_case)
-                
-                # Update region status if test case failed
-                if not passed:
-                    results[region]['status'] = 'failed'
-            
-            # Set overall status in a separate field with consistent structure
-            results['overall_status'] = {
-                'test_cases': [],
-                'status': 'failed' if not all_steps_passed else 'passed'
-            }
-            
-            if not all_steps_passed:
-                logger.logger.error("Test failed due to failed steps or evaluations")
-            else:
-                logger.logger.info("All tests passed")
-            
-            # Save test results
-            logger.save_results()
-            
-            return results
-            
+                return results
+            except Exception as e:
+                error_msg = f"Error running tests: {str(e)}"
+                logger.logger.error(error_msg)
+                results['overall_status']['status'] = 'failed'
+                results['overall_status']['error'] = error_msg
+                return results
+            finally:
+                # Clean up: remove the added path
+                if parent_dir is not None and parent_dir in sys.path:
+                    sys.path.remove(parent_dir)
+                    console.print(f"[blue]Debug: Removed {parent_dir} from Python path[/blue]")
         except Exception as e:
-            logger.logger.error(f"Error running tests: {str(e)}")
-            return {
-                'status': 'error',
-                'error': str(e)
-            } 
+            error_msg = f"Error running tests: {str(e)}"
+            logger.logger.error(error_msg)
+            results['overall_status']['status'] = 'failed'
+            results['overall_status']['error'] = error_msg
+            return results 
