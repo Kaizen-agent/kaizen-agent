@@ -21,7 +21,7 @@ Example:
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, NoReturn
 
 # Third-party imports
 import click
@@ -48,6 +48,7 @@ from .types import (
     PRStrategy,
     TestStatus
 )
+from .models import TestResult
 
 # Configure rich traceback
 install_rich_traceback(show_locals=True)
@@ -60,6 +61,58 @@ logging.basicConfig(
     handlers=[RichHandler(rich_tracebacks=True)]
 )
 logger = logging.getLogger("kaizen.test")
+
+def _handle_error(error: Exception, message: str) -> NoReturn:
+    """Handle errors in a consistent way.
+    
+    Args:
+        error: The exception that occurred
+        message: Error message to display
+        
+    Raises:
+        click.Abort: Always raises to abort the command
+    """
+    logger.error(f"{message}: {str(error)}")
+    raise click.Abort()
+
+def _generate_report_path(test_result: TestResult) -> Path:
+    """Generate a path for the test report.
+    
+    Args:
+        test_result: The test result to generate a report for
+        
+    Returns:
+        Path object for the report file
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_file = Path("test-results") / f"{test_result.name}_{timestamp}_report.txt"
+    result_file.parent.mkdir(exist_ok=True)
+    return result_file
+
+def _display_test_summary(console: Console, test_result: TestResult, rich_formatter: RichTestResultFormatter) -> None:
+    """Display a summary of the test results.
+    
+    Args:
+        console: Rich console for output
+        test_result: The test result to display
+        rich_formatter: Formatter for rich output
+    """
+    console.print("\nTest Results Summary")
+    console.print("=" * 50)
+    
+    console.print(f"\nTest Configuration:")
+    console.print(f"- Name: {test_result.name}")
+    console.print(f"- File: {test_result.file_path}")
+    console.print(f"- Config: {test_result.config_path}")
+    
+    # Format and display overall status
+    overall_status = test_result.results.get('overall_status', 'unknown')
+    status = rich_formatter.format_status(overall_status)
+    console.print(f"\nOverall Status: {status}")
+    
+    # Display test results table
+    console.print("\nTest Results Table:")
+    console.print(rich_formatter.format_table(test_result.results))
 
 @click.command()
 @click.option('--config', '-c', type=click.Path(exists=True), required=True, help='Test configuration file')
@@ -101,7 +154,8 @@ def test_all(
     
     try:
         # Load configuration
-        config_result = ConfigurationManager.load_configuration(
+        config_manager = ConfigurationManager()
+        config_result = config_manager.load_configuration(
             Path(config),
             auto_fix=auto_fix,
             create_pr=create_pr,
@@ -111,21 +165,17 @@ def test_all(
         )
         
         if not config_result.is_success:
-            logger.error(f"Configuration error: {str(config_result.error)}")
-            raise click.Abort()
+            _handle_error(config_result.error, "Configuration error")
         
         # Execute tests
         command = TestAllCommand(config_result.value, logger)
         test_result = command.execute()
         
         if not test_result.is_success:
-            logger.error(f"Test execution error: {str(test_result.error)}")
-            raise click.Abort()
+            _handle_error(test_result.error, "Test execution error")
         
         # Generate report
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_file = Path("test-results") / f"{test_result.value.name}_{timestamp}_report.txt"
-        result_file.parent.mkdir(exist_ok=True)
+        result_file = _generate_report_path(test_result.value)
         
         # Use Markdown formatter for file output
         markdown_formatter = MarkdownTestResultFormatter()
@@ -133,31 +183,15 @@ def test_all(
         report_result = report_writer.write_report(result_file)
         
         if not report_result.is_success:
-            logger.error(f"Report generation error: {str(report_result.error)}")
-            raise click.Abort()
+            _handle_error(report_result.error, "Report generation error")
         
         # Use Rich formatter for console output
         rich_formatter = RichTestResultFormatter(console)
         
-        console.print("\nTest Results Summary")
-        console.print("=" * 50)
-        
-        console.print(f"\nTest Configuration:")
-        console.print(f"- Name: {test_result.value.name}")
-        console.print(f"- File: {test_result.value.file_path}")
-        console.print(f"- Config: {test_result.value.config_path}")
-        
-        # Format and display overall status
-        overall_status = test_result.value.results.get('overall_status', 'unknown')
-        status = rich_formatter.format_status(overall_status)
-        console.print(f"\nOverall Status: {status}")
-        
-        # Display test results table
-        console.print("\nTest Results Table:")
-        console.print(rich_formatter.format_table(test_result.value.results))
+        # Display test summary
+        _display_test_summary(console, test_result.value, rich_formatter)
         
         console.print(f"\nDetailed report saved to: {result_file}")
         
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        raise click.Abort()
+        _handle_error(e, "Unexpected error")
