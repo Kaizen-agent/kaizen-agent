@@ -5,15 +5,26 @@ import yaml
 import json
 import os
 import sys
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass
 from rich.console import Console
+from rich.logging import RichHandler
 
 from ...autofix.test.runner import TestRunner
 from ...autofix.test.logger import TestLogger
 from ...utils.test_utils import collect_failed_tests
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True)]
+)
+logger = logging.getLogger("kaizen.test")
 
 # Constants
 DEFAULT_MAX_RETRIES = 1
@@ -25,6 +36,65 @@ STATUS_EMOJI = {
     'unknown': '?'
 }
 
+class TestError(Exception):
+    """Base exception for test-related errors."""
+    pass
+
+class ConfigurationError(TestError):
+    """Exception for configuration-related errors."""
+    pass
+
+class TestExecutionError(TestError):
+    """Exception for test execution errors."""
+    pass
+
+@dataclass
+class TestConfiguration:
+    """Configuration for test execution."""
+    name: str
+    file_path: Path
+    config_path: Path
+    auto_fix: bool = False
+    create_pr: bool = False
+    max_retries: int = DEFAULT_MAX_RETRIES
+    base_branch: str = DEFAULT_BASE_BRANCH
+
+    @classmethod
+    def from_file(cls, config_path: Path, auto_fix: bool = False, 
+                 create_pr: bool = False, max_retries: int = DEFAULT_MAX_RETRIES,
+                 base_branch: str = DEFAULT_BASE_BRANCH) -> 'TestConfiguration':
+        """Create configuration from YAML file."""
+        try:
+            with open(config_path, 'r') as f:
+                config_data = yaml.safe_load(f)
+            
+            if not config_data:
+                raise ConfigurationError("Test configuration file is empty")
+            
+            required_fields = ['name', 'file_path']
+            missing_fields = [field for field in required_fields if field not in config_data]
+            if missing_fields:
+                raise ConfigurationError(f"Missing required fields in configuration: {', '.join(missing_fields)}")
+            
+            # Resolve file path relative to config file
+            file_path = (config_path.parent / config_data['file_path']).resolve()
+            if not file_path.exists():
+                raise ConfigurationError(f"File not found: {file_path}")
+            
+            return cls(
+                name=config_data['name'],
+                file_path=file_path,
+                config_path=config_path,
+                auto_fix=auto_fix,
+                create_pr=create_pr,
+                max_retries=max_retries,
+                base_branch=base_branch
+            )
+        except yaml.YAMLError as e:
+            raise ConfigurationError(f"Invalid YAML configuration: {str(e)}")
+        except Exception as e:
+            raise ConfigurationError(f"Error loading configuration: {str(e)}")
+
 @dataclass
 class TestResult:
     """Data class to hold test results."""
@@ -35,24 +105,63 @@ class TestResult:
     failed_tests: List[Dict[str, Any]]
     test_attempts: Optional[List[Dict[str, Any]]] = None
 
-class TestConfigValidator:
-    """Validates test configuration."""
+class TestExecutor:
+    """Handles test execution and result processing."""
     
-    @staticmethod
-    def validate(config: Dict[str, Any], config_path: Path) -> None:
-        """Validate test configuration."""
-        if not config:
-            raise ValueError("Test configuration file is empty")
+    def __init__(self, config: TestConfiguration):
+        self.config = config
+        self.console = Console()
+        self.logger = TestLogger(config.name)
+    
+    def execute(self) -> TestResult:
+        """Execute tests and return results."""
+        try:
+            self.logger.info(f"Running test: {self.config.name}")
+            self.console.print("=" * 50)
             
-        required_fields = ['name', 'file_path']
-        missing_fields = [field for field in required_fields if field not in config]
-        if missing_fields:
-            raise ValueError(f"Missing required fields in configuration: {', '.join(missing_fields)}")
+            # Run tests
+            runner = TestRunner(self._create_runner_config())
+            results = runner.run_tests(self.config.file_path)
+            failed_tests = collect_failed_tests(results)
             
-        # Resolve and validate file path
-        file_path = (config_path.parent / config['file_path']).resolve()
-        if not file_path.exists():
-            raise ValueError(f"File not found: {file_path}")
+            # Handle auto-fix if enabled
+            test_attempts = self._handle_auto_fix(failed_tests) if self.config.auto_fix else None
+            
+            return TestResult(
+                name=self.config.name,
+                file_path=self.config.file_path,
+                config_path=self.config.config_path,
+                results=results,
+                failed_tests=failed_tests,
+                test_attempts=test_attempts
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error executing tests: {str(e)}")
+            raise TestExecutionError(f"Failed to execute tests: {str(e)}")
+    
+    def _create_runner_config(self) -> Dict[str, Any]:
+        """Create configuration for test runner."""
+        return {
+            'name': self.config.name,
+            'file_path': str(self.config.file_path),
+            'config_file': str(self.config.config_path)
+        }
+    
+    def _handle_auto_fix(self, failed_tests: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """Handle auto-fix for failed tests."""
+        if not failed_tests:
+            return None
+            
+        self.logger.info(f"Attempting to fix {len(failed_tests)} failing tests (max retries: {self.config.max_retries})")
+        from ...autofix.main import AutoFix
+        return AutoFix(self.config.config_path).fix_code(
+            str(self.config.file_path),
+            failed_tests,
+            max_retries=self.config.max_retries,
+            create_pr=self.config.create_pr,
+            base_branch=self.config.base_branch
+        )
 
 class TestResultFormatter:
     """Formats test results for display and file output."""
@@ -224,64 +333,17 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
     
     try:
         # Load and validate configuration
-        config_path = Path(config)
-        console.print(f"[blue]Loading test configuration from: {config_path}[/blue]")
-        
-        with open(config_path, 'r') as f:
-            test_config = yaml.safe_load(f)
-        
-        TestConfigValidator.validate(test_config, config_path)
-        
-        # Debug print the loaded configuration
-        console.print("[blue]Loaded test configuration:[/blue]")
-        console.print(json.dumps(test_config, indent=2))
-        
-        # Add config file path to test configuration
-        test_config['config_file'] = str(config_path)
-        
-        # Create test runner and run tests
-        runner = TestRunner(test_config)
-        logger = TestLogger(test_config.get('name', 'Unnamed Test'))
-        
-        console.print(f"Running test: {test_config.get('name', 'Unnamed Test')}")
-        console.print("=" * 50)
-        
-        # Resolve and validate file path
-        file_path = (config_path.parent / test_config['file_path']).resolve()
-        console.print(f"[blue]Debug: Resolved file path: {file_path}[/blue]")
-        
-        if not file_path.exists():
-            console.print(f"[red]Error: File not found: {file_path}[/red]")
-            sys.exit(1)
-        
-        # Run tests and collect results
-        results = runner.run_tests(file_path)
-        failed_tests = collect_failed_tests(results)
-        
-        # Handle failed tests if auto-fix is enabled
-        test_attempts = None
-        if failed_tests and auto_fix:
-            console.print(f"\nAttempting to fix failing tests (max retries: {max_retries})...")
-            from ...autofix.main import AutoFix
-            test_attempts = AutoFix(config_path).fix_code(
-                str(file_path),
-                failed_tests,
-                max_retries=max_retries,
-                create_pr=create_pr,
-                base_branch=base_branch
-            )
-            if create_pr:
-                console.print("Pull request created with fixes")
-        
-        # Create test result object
-        test_result = TestResult(
-            name=test_config.get('name', 'Unnamed Test'),
-            file_path=file_path,
-            config_path=config_path,
-            results=results,
-            failed_tests=failed_tests,
-            test_attempts=test_attempts
+        test_config = TestConfiguration.from_file(
+            Path(config),
+            auto_fix=auto_fix,
+            create_pr=create_pr,
+            max_retries=max_retries,
+            base_branch=base_branch
         )
+        
+        # Execute tests
+        executor = TestExecutor(test_config)
+        test_result = executor.execute()
         
         # Generate and display report
         report_generator = TestReportGenerator(test_result)
@@ -298,18 +360,24 @@ def test_all(config: str, auto_fix: bool, create_pr: bool, max_retries: int, bas
         console.print(f"- Config: {test_result.config_path}")
         
         # Print overall status
-        status, status_emoji = TestResultFormatter.format_overall_status(results)
+        status, status_emoji = TestResultFormatter.format_overall_status(test_result.results)
         console.print(f"\nOverall Status: {status_emoji} {status.upper()}")
         
         # Print test results table
         console.print("\nTest Results Table:")
-        for line in TestResultFormatter.format_test_results_table(results):
+        for line in TestResultFormatter.format_test_results_table(test_result.results):
             console.print(line)
         
         console.print(f"\nDetailed report saved to: {result_file}")
         
+    except ConfigurationError as e:
+        logger.error(f"Configuration error: {str(e)}")
+        raise click.Abort()
+    except TestExecutionError as e:
+        logger.error(f"Test execution error: {str(e)}")
+        raise click.Abort()
     except Exception as e:
-        console.print(f"[red]Error running tests: {str(e)}[/red]")
+        logger.error(f"Unexpected error: {str(e)}")
         raise click.Abort()
 
 @click.command()
@@ -325,14 +393,14 @@ def run_block(file_path: str, input_text: str = None, output: str = None):
         if output:
             with open(output, 'w') as f:
                 f.write(result)
-            click.echo(f"Output saved to: {output}")
+            logger.info(f"Output saved to: {output}")
         else:
-            click.echo("\nExecution Result:")
-            click.echo("=" * 50)
-            click.echo(result)
+            logger.info("\nExecution Result:")
+            logger.info("=" * 50)
+            logger.info(result)
             
     except Exception as e:
-        click.echo(f"Error: {str(e)}", err=True)
+        logger.error(f"Error: {str(e)}")
         raise click.Abort()
 
 @click.command()
@@ -340,24 +408,19 @@ def run_block(file_path: str, input_text: str = None, output: str = None):
 def run_test(test_file: str):
     """Run a test file and display results."""
     try:
-        with open(test_file, 'r') as f:
-            test_config = yaml.safe_load(f)
+        # Load configuration
+        test_config = TestConfiguration.from_file(Path(test_file))
         
-        # Create test runner
-        runner = TestRunner()
-        logger = TestLogger(test_config.get('name', 'Unnamed Test'))
+        # Execute tests
+        executor = TestExecutor(test_config)
+        test_result = executor.execute()
         
-        click.echo(f"Running test: {test_config.get('name', 'Unnamed Test')}")
-        click.echo("=" * 50)
-        
-        # Run tests (use run_test, not run_tests)
-        passed = runner.run_test(test_file)
-        
-        if passed:
-            click.echo("\nAll steps passed! See test-results/ for details.")
+        # Display results
+        if not test_result.failed_tests:
+            logger.info("\nAll steps passed! See test-results/ for details.")
         else:
-            click.echo("\nSome steps failed. See test-results/ for details.")
+            logger.info("\nSome steps failed. See test-results/ for details.")
         
     except Exception as e:
-        click.echo(f"Error running test: {str(e)}")
+        logger.error(f"Error running test: {str(e)}")
         raise click.Abort() 
