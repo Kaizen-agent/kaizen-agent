@@ -11,6 +11,7 @@ configurations.
 """
 
 # Standard library imports
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -26,6 +27,9 @@ from kaizen.cli.commands.models import (
 )
 from kaizen.cli.commands.result import Result
 from kaizen.cli.commands.types import PRStrategy
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 class ConfigurationManager:
     """Manages test configuration loading and validation.
@@ -69,13 +73,14 @@ class ConfigurationManager:
                 return load_result
             
             config_data = load_result.value
+            logger.info(f"Loaded configuration data: {config_data}")
             
             # Parse configuration data
             parse_result = self.parser.parse_configuration(config_data)
             if not parse_result.is_success:
                 return parse_result
             
-            # Create configuration object
+            # Create configuration object with all fields at once
             config = TestConfiguration(
                 name=config_data['name'],
                 file_path=Path(config_data['file_path']),
@@ -84,28 +89,20 @@ class ConfigurationManager:
                 create_pr=create_pr,
                 max_retries=max_retries,
                 base_branch=base_branch,
-                pr_strategy=PRStrategy.from_str(pr_strategy)
+                pr_strategy=PRStrategy.from_str(pr_strategy),
+                description=config_data.get('description'),
+                agent_type=config_data.get('agent_type'),
+                regions=config_data.get('regions', []),
+                steps=parse_result.value.steps if parse_result.value else [],
+                metadata=parse_result.value.metadata if parse_result.value else None,
+                evaluation=parse_result.value.evaluation if parse_result.value else None
             )
             
-            # Add optional fields if present
-            if 'description' in config_data:
-                config.description = config_data['description']
-            if 'agent_type' in config_data:
-                config.agent_type = config_data['agent_type']
-            if 'regions' in config_data:
-                config.regions = config_data['regions']
-            if 'steps' in config_data:
-                config.steps = config_data['steps']
-            
-            # Add parsed objects
-            if parse_result.value.metadata:
-                config.metadata = parse_result.value.metadata
-            if parse_result.value.evaluation:
-                config.evaluation = parse_result.value.evaluation
-            
+            logger.info(f"Created configuration object: {config}")
             return Result.success(config)
             
         except Exception as e:
+            logger.error(f"Error loading configuration: {str(e)}", exc_info=True)
             return Result.failure(
                 ConfigurationError(
                     f"Unexpected error loading configuration: {str(e)}",
