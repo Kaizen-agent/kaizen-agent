@@ -5,11 +5,11 @@ appropriate model objects, with validation and type safety.
 """
 
 from typing import Dict, Any, Optional, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .errors import ConfigurationError
-from .result import Result
-from .models import TestMetadata, TestEvaluation, TestSettings, TestStep
+from .models import TestMetadata, TestEvaluation, TestSettings, TestStep, TestConfiguration
+from .operation_result import Result
 
 @dataclass
 class ParseResult:
@@ -23,8 +23,8 @@ class ParseResult:
     """
     metadata: Optional[TestMetadata] = None
     evaluation: Optional[TestEvaluation] = None
-    steps: List[TestStep] = None
-    errors: list[str] = None
+    steps: List[TestStep] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
 
     def __post_init__(self):
         """Initialize errors list if None."""
@@ -49,7 +49,7 @@ class ConfigurationParser:
     model objects, with validation and type safety.
     """
     
-    def parse_configuration(self, config_data: Dict[str, Any]) -> Result[ParseResult]:
+    def parse_configuration(self, config_data: Dict[str, Any]) -> Result[TestConfiguration]:
         """Parse configuration data into model objects.
         
         Args:
@@ -59,49 +59,60 @@ class ConfigurationParser:
             Result containing parsed objects or errors
         """
         try:
-            result = ParseResult()
+            # Validate required fields
+            required_fields = ['name', 'file_path']
+            missing_fields = [f for f in required_fields if f not in config_data]
+            if missing_fields:
+                return Result.failure(
+                    f"Missing required fields: {', '.join(missing_fields)}"
+                )
             
             # Parse metadata if present
+            metadata = None
             if 'metadata' in config_data:
                 metadata_result = self._parse_metadata(config_data['metadata'])
-                if metadata_result.is_success:
-                    result.metadata = metadata_result.value
-                else:
-                    result.errors.append(str(metadata_result.error))
+                if not metadata_result.is_success:
+                    return Result.failure(str(metadata_result.error))
+                metadata = metadata_result.value
             
             # Parse evaluation if present
+            evaluation = None
             if 'evaluation' in config_data:
                 evaluation_result = self._parse_evaluation(config_data['evaluation'])
-                if evaluation_result.is_success:
-                    result.evaluation = evaluation_result.value
-                else:
-                    result.errors.append(str(evaluation_result.error))
+                if not evaluation_result.is_success:
+                    return Result.failure(str(evaluation_result.error))
+                evaluation = evaluation_result.value
             
             # Parse steps if present
+            steps = []
             if 'steps' in config_data:
                 steps_result = self._parse_steps(config_data['steps'])
-                if steps_result.is_success:
-                    result.steps = steps_result.value
-                else:
-                    result.errors.append(str(steps_result.error))
+                if not steps_result.is_success:
+                    return Result.failure(str(steps_result.error))
+                steps = steps_result.value
             
-            if result.has_errors:
-                return Result.failure(
-                    ConfigurationError(
-                        "Failed to parse configuration",
-                        {"errors": result.errors}
-                    )
-                )
+            # Create configuration
+            config = TestConfiguration(
+                name=config_data['name'],
+                file_path=config_data['file_path'],
+                config_path=config_data.get('config_path'),
+                auto_fix=config_data.get('auto_fix', False),
+                create_pr=config_data.get('create_pr', False),
+                max_retries=config_data.get('max_retries', 3),
+                base_branch=config_data.get('base_branch', 'main'),
+                pr_strategy=config_data.get('pr_strategy', 'ALL_PASSING'),
+                description=config_data.get('description'),
+                agent_type=config_data.get('agent_type'),
+                regions=config_data.get('regions', []),
+                steps=steps,
+                metadata=metadata,
+                evaluation=evaluation
+            )
             
-            return Result.success(result)
+            return Result.success(config)
             
         except Exception as e:
-            return Result.failure(
-                ConfigurationError(
-                    f"Unexpected error parsing configuration: {str(e)}",
-                    {"error": str(e)}
-                )
-            )
+            return Result.failure(f"Unexpected error parsing configuration: {str(e)}")
     
     def _parse_metadata(self, metadata_data: Dict[str, Any]) -> Result[TestMetadata]:
         """Parse metadata from configuration data.
@@ -114,29 +125,10 @@ class ConfigurationParser:
         """
         try:
             if not isinstance(metadata_data, dict):
-                return Result.failure(
-                    ConfigurationError(
-                        "Invalid metadata format: expected a dictionary",
-                        {"data": metadata_data}
-                    )
-                )
-            
-            # Validate required fields
-            required_fields = ['version']
-            missing_fields = [
-                field for field in required_fields
-                if field not in metadata_data
-            ]
-            if missing_fields:
-                return Result.failure(
-                    ConfigurationError(
-                        f"Missing required metadata fields: {', '.join(missing_fields)}",
-                        {"missing_fields": missing_fields}
-                    )
-                )
+                return Result.failure("Invalid metadata format: expected a dictionary")
             
             metadata = TestMetadata(
-                version=metadata_data['version'],
+                version=metadata_data.get('version', '1.0.0'),
                 dependencies=metadata_data.get('dependencies', []),
                 environment_variables=metadata_data.get('environment_variables', []),
                 author=metadata_data.get('author'),
@@ -148,12 +140,7 @@ class ConfigurationParser:
             return Result.success(metadata)
             
         except Exception as e:
-            return Result.failure(
-                ConfigurationError(
-                    f"Failed to parse metadata: {str(e)}",
-                    {"error": str(e)}
-                )
-            )
+            return Result.failure(f"Failed to parse metadata: {str(e)}")
     
     def _parse_evaluation(self, evaluation_data: Dict[str, Any]) -> Result[TestEvaluation]:
         """Parse evaluation criteria from configuration data.
@@ -166,51 +153,24 @@ class ConfigurationParser:
         """
         try:
             if not isinstance(evaluation_data, dict):
-                return Result.failure(
-                    ConfigurationError(
-                        "Invalid evaluation format: expected a dictionary",
-                        {"data": evaluation_data}
-                    )
-                )
+                return Result.failure("Invalid evaluation format: expected a dictionary")
             
-            # Validate required fields
-            required_fields = ['criteria', 'llm_provider', 'model']
-            missing_fields = [
-                field for field in required_fields
-                if field not in evaluation_data
-            ]
-            if missing_fields:
-                return Result.failure(
-                    ConfigurationError(
-                        f"Missing required evaluation fields: {', '.join(missing_fields)}",
-                        {"missing_fields": missing_fields}
-                    )
-                )
-            
-            # Parse settings
-            settings_data = evaluation_data.get('settings', {})
             settings = TestSettings(
-                timeout=settings_data.get('timeout'),
-                retries=settings_data.get('retries')
+                timeout=evaluation_data.get('settings', {}).get('timeout'),
+                retries=evaluation_data.get('settings', {}).get('retries')
             )
             
             evaluation = TestEvaluation(
-                criteria=evaluation_data['criteria'],
-                llm_provider=evaluation_data['llm_provider'],
-                model=evaluation_data['model'],
-                thresholds=evaluation_data.get('thresholds', {}),
+                criteria=evaluation_data.get('criteria', []),
+                llm_provider=evaluation_data.get('llm_provider'),
+                model=evaluation_data.get('model'),
                 settings=settings
             )
             
             return Result.success(evaluation)
             
         except Exception as e:
-            return Result.failure(
-                ConfigurationError(
-                    f"Failed to parse evaluation: {str(e)}",
-                    {"error": str(e)}
-                )
-            )
+            return Result.failure(f"Failed to parse evaluation: {str(e)}")
 
     def _parse_steps(self, steps_data: List[Dict[str, Any]]) -> Result[List[TestStep]]:
         """Parse test steps from configuration data.
@@ -223,43 +183,23 @@ class ConfigurationParser:
         """
         try:
             if not isinstance(steps_data, list):
-                return Result.failure(
-                    ConfigurationError(
-                        "Invalid steps format: expected a list",
-                        {"data": steps_data}
-                    )
-                )
+                return Result.failure("Invalid steps format: expected a list")
             
             steps = []
             for step_data in steps_data:
-                # Validate required fields
-                required_fields = ['step_index', 'name', 'input']
-                missing_fields = [
-                    field for field in required_fields
-                    if field not in step_data
-                ]
-                if missing_fields:
-                    return Result.failure(
-                        ConfigurationError(
-                            f"Missing required step fields: {', '.join(missing_fields)}",
-                            {"missing_fields": missing_fields}
-                        )
-                    )
-                
                 step = TestStep(
-                    step_index=step_data['step_index'],
-                    name=step_data['name'],
+                    name=step_data.get('name', ''),
+                    command=step_data.get('input', {}).get('method', ''),
+                    expected_output=step_data.get('expected_output', ''),
                     description=step_data.get('description'),
-                    input=step_data['input']
+                    timeout=step_data.get('timeout'),
+                    retries=step_data.get('retries'),
+                    environment=step_data.get('environment'),
+                    dependencies=step_data.get('dependencies')
                 )
                 steps.append(step)
             
             return Result.success(steps)
             
         except Exception as e:
-            return Result.failure(
-                ConfigurationError(
-                    f"Failed to parse steps: {str(e)}",
-                    {"error": str(e)}
-                )
-            ) 
+            return Result.failure(f"Failed to parse steps: {str(e)}") 
