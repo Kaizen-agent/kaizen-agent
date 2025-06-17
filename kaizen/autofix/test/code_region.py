@@ -1176,8 +1176,7 @@ class CodeRegionExecutor:
             
             # Execute the method
             return method(input_data)
-        except BaseException as e:
-            logger.error(f"✗ Method execution failed: {method_name} - {str(e)}")
+        except Exception as e:
             raise ValueError(f"Error executing method '{method_name}': {str(e)}")
     
     def _execute_function(self, namespace: Dict[str, Any], region_info: RegionInfo, 
