@@ -44,6 +44,7 @@ class TestRunner:
         self.test_config = test_config
         self._validate_config()
         self.workspace_root = self._find_workspace_root()
+        self.config_file_path = Path(test_config.get('config_file', ''))
         self.code_region_extractor = CodeRegionExtractor()
         self.code_region_executor = CodeRegionExecutor(self.workspace_root)
         self.llm_evaluator = LLMEvaluator()
@@ -155,8 +156,12 @@ class TestRunner:
         summary = TestSummary()
         
         try:
-            # Resolve the file path relative to workspace root
-            resolved_path = self.workspace_root / test_file_path
+            # Resolve the file path relative to config file location
+            if self.config_file_path:
+                resolved_path = self.config_file_path.parent / test_file_path
+            else:
+                resolved_path = test_file_path
+                
             if not resolved_path.exists():
                 raise FileNotFoundError(f"Test file not found: {resolved_path}")
             
