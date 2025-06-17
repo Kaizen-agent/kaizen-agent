@@ -4,11 +4,13 @@ import os
 import sys
 import logging
 import yaml
+import ast
 import importlib.util
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, Callable
 from dataclasses import dataclass
 from enum import Enum
+from contextlib import contextmanager
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -39,6 +41,22 @@ class TestSummary:
             'failed_regions': self.failed_regions,
             'error_regions': self.error_regions
         }
+
+class RegionType(Enum):
+    """Types of code regions that can be tested."""
+    CLASS = 'class'
+    FUNCTION = 'function'
+    MODULE = 'module'
+
+@dataclass
+class RegionInfo:
+    """Information about a code region."""
+    type: RegionType
+    name: str
+    code: str
+    start_line: int
+    end_line: int
+    imports: List[str]
 
 class TestRunner:
     """A class for running tests and processing results."""
@@ -268,79 +286,175 @@ class TestRunner:
             results['overall_status'] = self._create_error_result(e, "overall results processing")
             results['_status'] = TestStatus.ERROR.value
     
-    def _import_test_module(self, test_file_path: Path) -> Any:
+    def _parse_region_code(self, code: str) -> RegionInfo:
         """
-        Import a test module properly handling package imports.
+        Parse region code to determine its type and structure.
         
         Args:
-            test_file_path: Path to the test file
+            code: The code to parse
             
         Returns:
-            The imported module
-        """
-        try:
-            # Get the absolute path of the test file
-            abs_path = test_file_path.resolve()
-            
-            # Get the workspace root (assuming test_agent is in the workspace)
-            workspace_root = abs_path
-            while workspace_root.name != 'kaizen-agent' and workspace_root.parent != workspace_root:
-                workspace_root = workspace_root.parent
-            
-            if workspace_root.name != 'kaizen-agent':
-                raise ImportError("Could not find workspace root directory")
-            
-            # Add workspace root to Python path
-            if str(workspace_root) not in sys.path:
-                sys.path.insert(0, str(workspace_root))
-            
-            # Convert file path to module path
-            # e.g., /path/to/kaizen-agent/test_agent/summarizer_agent/agent.py
-            # becomes test_agent.summarizer_agent.agent
-            rel_path = abs_path.relative_to(workspace_root)
-            module_path = '.'.join(rel_path.with_suffix('').parts)
-            
-            # Import the module
-            try:
-                module = importlib.import_module(module_path)
-            except ImportError:
-                # If direct import fails, try importing the package first
-                package_path = '.'.join(rel_path.parent.parts)
-                importlib.import_module(package_path)
-                module = importlib.import_module(module_path)
-            
-            return module
-            
-        except Exception as e:
-            raise ImportError(f"Failed to import module {test_file_path}: {str(e)}")
-        
-    def _find_class_in_module(self, module: Any, class_name: str) -> Any:
-        """
-        Find a class in a module, case-insensitive.
-        
-        Args:
-            module: The module to search in
-            class_name: Name of the class to find
-            
-        Returns:
-            The found class
+            RegionInfo object containing parsed information
             
         Raises:
-            AttributeError: If class is not found
+            ValueError: If code cannot be parsed or is invalid
         """
-        # First try exact match
-        if hasattr(module, class_name):
-            return getattr(module, class_name)
+        try:
+            # Parse the code into an AST
+            tree = ast.parse(code)
             
-        # Try case-insensitive match
-        class_name_lower = class_name.lower()
-        for attr_name in dir(module):
-            if attr_name.lower() == class_name_lower:
-                attr = getattr(module, attr_name)
-                if isinstance(attr, type):  # Check if it's a class
-                    return attr
+            # Find all imports
+            imports = []
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    if isinstance(node, ast.Import):
+                        for name in node.names:
+                            imports.append(name.name)
+                    else:
+                        module = node.module or ''
+                        for name in node.names:
+                            imports.append(f"{module}.{name.name}")
+            
+            # Determine region type
+            region_type = None
+            region_name = None
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    region_type = RegionType.CLASS
+                    region_name = node.name
+                    break
+                elif isinstance(node, ast.FunctionDef):
+                    region_type = RegionType.FUNCTION
+                    region_name = node.name
+                    break
+            
+            if not region_type:
+                region_type = RegionType.MODULE
+                region_name = "module"
+            
+            return RegionInfo(
+                type=region_type,
+                name=region_name,
+                code=code,
+                start_line=tree.body[0].lineno if tree.body else 1,
+                end_line=tree.body[-1].end_lineno if tree.body else 1,
+                imports=imports
+            )
+            
+        except SyntaxError as e:
+            raise ValueError(f"Invalid Python code in region: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Failed to parse region code: {str(e)}")
+
+    def _extract_region_code(self, file_path: Path, region_name: str) -> RegionInfo:
+        """
+        Extract code for a specific region from a file.
+        
+        Args:
+            file_path: Path to the file
+            region_name: Name of the region to extract
+            
+        Returns:
+            RegionInfo object containing the extracted code and metadata
+            
+        Raises:
+            ValueError: If region markers are not found or code is invalid
+        """
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read()
+                
+            start_marker = f"# kaizen:start:{region_name}"
+            end_marker = f"# kaizen:end:{region_name}"
+            
+            start_idx = content.find(start_marker)
+            if start_idx == -1:
+                raise ValueError(f"Start marker for region '{region_name}' not found")
+                
+            end_idx = content.find(end_marker)
+            if end_idx == -1:
+                raise ValueError(f"End marker for region '{region_name}' not found")
+                
+            # Extract code between markers (excluding the markers themselves)
+            start_idx = content.find('\n', start_idx) + 1
+            code = content[start_idx:end_idx].strip()
+            
+            # Parse the region code
+            return self._parse_region_code(code)
+            
+        except Exception as e:
+            raise ValueError(f"Failed to extract region '{region_name}': {str(e)}")
+
+    @contextmanager
+    def _create_safe_namespace(self, imports: List[str]) -> Dict:
+        """
+        Create a safe namespace for code execution.
+        
+        Args:
+            imports: List of imports to include
+            
+        Yields:
+            Dict containing the safe namespace
+        """
+        # Create a new namespace
+        namespace = {}
+        
+        # Add allowed imports
+        for imp in imports:
+            try:
+                if '.' in imp:
+                    module_name, attr_name = imp.rsplit('.', 1)
+                    module = importlib.import_module(module_name)
+                    namespace[attr_name] = getattr(module, attr_name)
+                else:
+                    namespace[imp] = importlib.import_module(imp)
+            except (ImportError, AttributeError) as e:
+                logger.warning(f"Failed to import {imp}: {str(e)}")
+        
+        yield namespace
+
+    def _create_region_function(self, region_info: RegionInfo, method_name: str) -> Callable:
+        """
+        Create a function from region code.
+        
+        Args:
+            region_info: Information about the region
+            method_name: Name of the method to call
+            
+        Returns:
+            callable: The created function
+            
+        Raises:
+            ValueError: If function creation fails
+        """
+        try:
+            with self._create_safe_namespace(region_info.imports) as namespace:
+                # Execute the code in the safe namespace
+                exec(region_info.code, namespace)
+                
+                if region_info.type == RegionType.CLASS:
+                    # Get the class and create an instance
+                    test_class = namespace[region_info.name]
+                    if not hasattr(test_class, method_name):
+                        raise ValueError(f"Method '{method_name}' not found in class '{region_info.name}'")
+                    instance = test_class()
+                    return getattr(instance, method_name)
                     
-        raise AttributeError(f"Class '{class_name}' not found in module")
+                elif region_info.type == RegionType.FUNCTION:
+                    # Get the function directly
+                    if region_info.name != method_name:
+                        raise ValueError(f"Function name '{region_info.name}' does not match requested method '{method_name}'")
+                    return namespace[region_info.name]
+                    
+                else:  # MODULE
+                    # Get the function from the module
+                    if not hasattr(namespace, method_name):
+                        raise ValueError(f"Function '{method_name}' not found in module")
+                    return getattr(namespace, method_name)
+                
+        except Exception as e:
+            raise ValueError(f"Failed to create function from region '{region_info.name}': {str(e)}")
             
     def _run_test_case(self, test_case: Dict, test_file_path: Path) -> Dict:
         """
@@ -372,31 +486,12 @@ class TestRunner:
             if not all([region, method]):
                 raise ValueError(f"Missing required test input fields: region={region}, method={method}")
             
-            # Import the test module
-            test_module = self._import_test_module(test_file_path)
-            
-            # Get the class and method
-            try:
-                test_class = self._find_class_in_module(test_module, region)
-            except AttributeError as e:
-                # Try to get the class from the module's __all__ if available
-                if hasattr(test_module, '__all__'):
-                    for name in test_module.__all__:
-                        if name.lower() == region.lower():
-                            test_class = getattr(test_module, name)
-                            break
-                    else:
-                        raise e
-                else:
-                    raise e
-                    
-            if not hasattr(test_class, method):
-                raise AttributeError(f"Method '{method}' not found in class '{region}'")
-                
-            test_method = getattr(test_class, method)
+            # Extract and create the test function
+            region_info = self._extract_region_code(test_file_path, region)
+            test_function = self._create_region_function(region_info, method)
             
             # Run the test
-            result = test_method(input_text)
+            result = test_function(input_text)
             
             # Check the result
             test_result['status'] = TestStatus.PASSED.value
