@@ -22,6 +22,7 @@ class ImportError:
 def resolve_file_path(file_path: Union[str, Path], base_dir: Optional[Union[str, Path]] = None) -> tuple[Path, Path]:
     """
     Resolve a file path relative to a base directory if provided, otherwise resolve to absolute path.
+    Handles both relative and absolute paths, ensuring proper resolution in all cases.
     
     Args:
         file_path: Path to resolve, can be relative or absolute
@@ -34,26 +35,78 @@ def resolve_file_path(file_path: Union[str, Path], base_dir: Optional[Union[str,
         FileNotFoundError: If the file doesn't exist after resolution
         ValueError: If the path is invalid
     """
+    logger.info(f"Starting path resolution for file_path: {file_path}, base_dir: {base_dir}")
+    logger.info(f"Current working directory: {Path.cwd()}")
+    
     try:
+        # Convert inputs to Path objects
+        file_path = Path(file_path)
+        logger.debug(f"Converted file_path to Path object: {file_path}")
+        
         if base_dir:
             base_dir = Path(base_dir).resolve()
-            # Try relative path first if base_dir is provided
-            relative_path = base_dir / file_path
-            if relative_path.exists():
-                return relative_path, base_dir
-            # Fall back to absolute path
-            file_path = Path(file_path).resolve()
+            logger.info(f"Using provided base directory: {base_dir}")
         else:
-            file_path = Path(file_path).resolve()
-            base_dir = file_path.parent
+            # If no base_dir provided, use current working directory
+            base_dir = Path.cwd().resolve()
+            logger.info(f"No base directory provided, using current working directory: {base_dir}")
 
-        if not file_path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
-            
-        return file_path, base_dir
+        # Handle absolute paths
+        if file_path.is_absolute():
+            logger.info(f"Detected absolute path: {file_path}")
+            resolved_path = file_path.resolve()
+            logger.debug(f"Resolved absolute path: {resolved_path}")
+            if resolved_path.exists():
+                logger.info(f"Found existing file at absolute path: {resolved_path}")
+                return resolved_path, resolved_path.parent
+            else:
+                logger.warning(f"Absolute path exists but file not found: {resolved_path}")
+
+        # Try different path resolution strategies
+        resolution_attempts = [
+            # Try relative to base_dir
+            base_dir / file_path,
+            # Try relative to current working directory
+            Path.cwd() / file_path,
+            # Try as absolute path
+            file_path.resolve(),
+            # Try relative to base_dir's parent
+            base_dir.parent / file_path,
+        ]
+
+        logger.info("Starting path resolution attempts:")
+        # Try each resolution strategy
+        for i, resolved_path in enumerate(resolution_attempts, 1):
+            try:
+                logger.debug(f"Attempt {i}: Trying to resolve path: {resolved_path}")
+                resolved_path = resolved_path.resolve()
+                logger.debug(f"Attempt {i}: Resolved to: {resolved_path}")
+                
+                if resolved_path.exists():
+                    logger.info(f"Attempt {i}: Successfully found file at: {resolved_path}")
+                    return resolved_path, resolved_path.parent
+                else:
+                    logger.debug(f"Attempt {i}: Path exists but file not found: {resolved_path}")
+            except Exception as e:
+                logger.debug(f"Attempt {i}: Failed with error: {str(e)}")
+                continue
+
+        # If we get here, none of the resolution attempts worked
+        error_msg = (
+            f"Could not resolve file path: {file_path}\n"
+            f"Base directory: {base_dir}\n"
+            f"Current working directory: {Path.cwd()}\n"
+            f"Resolution attempts:\n" + 
+            "\n".join(f"  {i+1}. {path}" for i, path in enumerate(resolution_attempts))
+        )
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+
     except Exception as e:
         if isinstance(e, FileNotFoundError):
+            logger.error(f"FileNotFoundError: {str(e)}")
             raise
+        logger.error(f"Unexpected error during path resolution: {str(e)}", exc_info=True)
         raise ValueError(f"Invalid path: {str(e)}")
 
 def collect_referenced_files(
@@ -84,17 +137,24 @@ def collect_referenced_files(
         PermissionError: If there are permission issues accessing files
         ValueError: If the file path is invalid
     """
-    logger.info(f"Collecting referenced files for {file_path}")
+    logger.info(f"Starting file collection for: {file_path}")
+    logger.info(f"Base directory: {base_dir}")
+    logger.info(f"Current working directory: {Path.cwd()}")
+    
     # Initialize sets if None
     processed_files = processed_files or set()
     llm_checked_files = llm_checked_files or set()
-    logger.info(f"Processed files: {processed_files}")
-    logger.info(f"LLM checked files: {llm_checked_files}")
+    logger.info(f"Number of processed files: {len(processed_files)}")
+    logger.info(f"Number of LLM checked files: {len(llm_checked_files)}")
+    if processed_files:
+        logger.debug(f"Processed files: {[str(p) for p in processed_files]}")
+    if llm_checked_files:
+        logger.debug(f"LLM checked files: {[str(p) for p in llm_checked_files]}")
 
     # Resolve file path and base directory
     file_path, base_dir = resolve_file_path(file_path, base_dir)
-    logger.info(f"Base directory: {base_dir}")
-    logger.info(f"File path: {file_path}")
+    logger.info(f"Resolved file path: {file_path}")
+    logger.info(f"Resolved base directory: {base_dir}")
     
     if file_path in processed_files:
         logger.info(f"File {file_path} already processed")
