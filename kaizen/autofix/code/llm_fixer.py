@@ -476,13 +476,13 @@ class LLMCodeFixer:
             prompt = self.prompt_builder.build_fix_prompt(
                 content, file_path, failure_data, config, context_files
             )
-            logger.info(f"Prompt: {prompt}")
+            # logger.info(f"Prompt: {prompt}")
             # Get fix from LLM
             response = self._get_llm_response(prompt)
-            logger.info(f"Response: {response}")
+            # logger.info(f"Response: {response}")
             # Process the response
             fixed_code = self.response_processor.clean_markdown_notations(response)
-            
+            logger.info(f"Markdown clean success")
             return FixResult(
                 status=FixStatus.SUCCESS,
                 fixed_code=fixed_code,
