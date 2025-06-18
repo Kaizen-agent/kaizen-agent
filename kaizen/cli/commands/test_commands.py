@@ -131,21 +131,24 @@ class TestAllCommand(BaseTestCommand):
         
         if self.config.regions:
             config['regions'] = self.config.regions
+            
             # Create tests for each region
-            config['tests'] = [
-                {
-                    'name': f"{self.config.name}_{region}",
-                    'description': f"Test for region {region}",
-                    'input': {
-                        'file_path': str(self.config.file_path),
-                        'region': region,
-                        'method': step.command if hasattr(step, 'command') else None,
-                        'input': step.input
+            config_tests_temp = []
+            for region in self.config.regions:
+                config_tests_temp.append([
+                    {
+                        'name': step.name,
+                        'description': step.description,
+                        'input': {
+                            'file_path': str(self.config.file_path),
+                            'region': region,
+                            'method': step.command if hasattr(step, 'command') else None,
+                            'input': step.input
+                        }
                     }
-                }
-                for region in self.config.regions
-                for step in self.config.steps
-            ]
+                    for step in self.config.steps
+                ])
+            config['tests'] = [item for sublist in config_tests_temp for item in sublist]
             
         return config
     
