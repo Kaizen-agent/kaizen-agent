@@ -57,8 +57,8 @@ class PathResolver:
         yield PathResolutionStrategy.ABSOLUTE, file_path.resolve()
         yield PathResolutionStrategy.PARENT_DIR, self.base_dir.parent / file_path
 
-        # Subdirectory strategies
-        if file_path.is_relative():
+        # Subdirectory strategies - only for relative paths
+        if not file_path.is_absolute():
             for subdir in self._find_relevant_subdirectories():
                 yield PathResolutionStrategy.SUBDIRECTORIES, subdir / file_path
 
