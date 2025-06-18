@@ -1093,11 +1093,11 @@ class AutoFix:
 
             # Format the fixed code
             formatter = CodeFormatter()
-            fix_result.fixed_code = formatter.format_code(fix_result.fixed_code)
+            fixed_code = formatter.format_code(fix_result.fixed_code)
 
             
             if fix_result.status == FixStatus.SUCCESS:
-                return self._handle_successful_fix(current_file_path, fix_result)
+                return self._handle_successful_fix(current_file_path, fixed_code)
             return self._handle_failed_fix(current_file_path, file_content)
             
         except ValueError as e:
@@ -1121,7 +1121,7 @@ class AutoFix:
                 error=f"Unexpected error: {str(e)}"
             )
 
-    def _handle_successful_fix(self, current_file_path: str, fix_result: FixResultDict) -> FixResult:
+    def _handle_successful_fix(self, current_file_path: str, fixed_code: str) -> FixResult:
         """Handle successful LLM fix.
         
         Args:
@@ -1136,15 +1136,15 @@ class AutoFix:
             IOError: If there are issues writing to the file
         """
         try:
-            ast.parse(fix_result.fixed_code)
+            ast.parse(fixed_code)
             logger.info(f"Successfully parsed fixed code with ast")
-            self._apply_code_changes(current_file_path, fix_result.fixed_code)
-            return self._create_success_result(fix_result)
+            self._apply_code_changes(current_file_path, fixed_code)
+            return self._create_success_result(fixed_code)
         except (ValueError, IOError) as e:
             logger.error(f"Failed to apply successful fix to {current_file_path}", extra={
                 'error': str(e),
                 'error_type': type(e).__name__,
-                'fix_result': fix_result
+                'fix_result': fixed_code
             })
             raise
 
