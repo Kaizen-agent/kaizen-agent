@@ -88,6 +88,7 @@ class TestRunner:
             Dict containing test case results
         """
         try:
+            logger.info(f"Running test case: {test_case.get('name', 'Unknown')}")
             # Convert test case dict to TestCase object
             test_case_obj = TestCase.from_dict(test_case)
             

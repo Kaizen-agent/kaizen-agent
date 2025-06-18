@@ -77,37 +77,59 @@ class PromptBuilder:
     
     @staticmethod
     def build_evaluation_prompt(test_case: TestCase, actual_output: Any) -> str:
-        """Create a structured evaluation prompt."""
+        """Create a structured evaluation prompt.
+        
+        If expected_output is None, the evaluation will be based solely on the criteria
+        and rules provided in the test case configuration.
+        """
         criteria = test_case.llm_evaluation.get('criteria', {})
         evaluation_rules = criteria.get('rules', [])
         
-        return f"""
-        You are an expert test evaluator. Please evaluate the following test result:
+        prompt_parts = [
+            "You are an expert test evaluator. Please evaluate the following test result:",
+            f"\nTest Case: {test_case.name}",
+            f"\nActual Output: {json.dumps(actual_output, indent=2)}"
+        ]
         
-        Test Case: {test_case.name}
-        Expected Output: {json.dumps(test_case.expected_output, indent=2)}
-        Actual Output: {json.dumps(actual_output, indent=2)}
+        if test_case.expected_output is not None:
+            prompt_parts.append(f"\nExpected Output: {json.dumps(test_case.expected_output, indent=2)}")
         
-        Evaluation Criteria:
-        {json.dumps(criteria, indent=2)}
+        prompt_parts.extend([
+            f"\nEvaluation Criteria:",
+            f"{json.dumps(criteria, indent=2)}",
+            f"\nEvaluation Rules:",
+            f"{json.dumps(evaluation_rules, indent=2)}",
+            "\nPlease provide your evaluation in the following JSON format:",
+            """{
+                "status": "passed" or "failed",
+                "evaluation": "detailed evaluation of the output",
+                "reasoning": "explanation of your decision",
+                "confidence": <float between 0 and 1>
+            }"""
+        ])
         
-        Evaluation Rules:
-        {json.dumps(evaluation_rules, indent=2)}
+        focus_points = [
+            "1. If the output meets all specified criteria"
+        ]
         
-        Please provide your evaluation in the following JSON format:
-        {{
-            "status": "passed" or "failed",
-            "evaluation": "detailed evaluation of the output",
-            "reasoning": "explanation of your decision",
-            "confidence": <float between 0 and 1>
-        }}
+        if test_case.expected_output is not None:
+            focus_points.insert(0, "1. Whether the actual output matches the expected output")
+            # Adjust numbering for remaining points
+            focus_points[1] = "2. If the output meets all specified criteria"
+            focus_points.extend([
+                "3. Any potential issues or improvements",
+                "4. Your confidence level in the evaluation"
+            ])
+        else:
+            focus_points.extend([
+                "2. Any potential issues or improvements",
+                "3. Your confidence level in the evaluation"
+            ])
         
-        Focus on:
-        1. Whether the actual output matches the expected output
-        2. If the output meets all specified criteria
-        3. Any potential issues or improvements
-        4. Your confidence level in the evaluation
-        """
+        prompt_parts.append("\nFocus on:")
+        prompt_parts.extend(focus_points)
+        
+        return "\n".join(prompt_parts)
 
 class LLMEvaluator:
     """Evaluates test results using LLM."""
