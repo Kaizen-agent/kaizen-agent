@@ -171,7 +171,7 @@ class TestAllCommand(BaseTestCommand):
         
         try:
             # Create AutoFix instance and run fixes
-            fixer = AutoFix(self.config.config_path)
+            fixer = AutoFix(self.config)
             fix_results = fixer.fix_code(
                 str(self.config.file_path),
                 failed_tests,

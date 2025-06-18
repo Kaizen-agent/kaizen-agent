@@ -9,6 +9,8 @@ from enum import Enum, auto
 import shutil
 import tempfile
 
+from kaizen.cli.commands.models import TestConfiguration
+
 from .file.dependency import collect_referenced_files, analyze_failure_dependencies
 from .code.fixer import fix_common_syntax_issues, fix_aggressive_syntax_issues, apply_code_changes
 from .code.llm_fixer import LLMCodeFixer
@@ -355,11 +357,6 @@ class PRCreationError(AutoFixError):
     pass
 
 @dataclass
-class TestConfig:
-    """Configuration for test settings."""
-    enabled: bool = False
-
-@dataclass
 class FixConfig:
     """Configuration for code fixing."""
     max_retries: int = 1
@@ -367,19 +364,16 @@ class FixConfig:
     pr_strategy: PRStrategy = PRStrategy.ALL_PASSING
     base_branch: str = 'main'
     auto_fix: bool = True
-    test: TestConfig = TestConfig()
     
     @classmethod
     def from_dict(cls, config: Dict) -> 'FixConfig':
         """Create FixConfig from dictionary."""
-        test_config = config.get('test', {})
         return cls(
             max_retries=config.get('max_retries', 1),
             create_pr=config.get('create_pr', False),
             pr_strategy=PRStrategy[config.get('pr_strategy', 'ALL_PASSING')],
             base_branch=config.get('base_branch', 'main'),
-            auto_fix=config.get('auto_fix', True),
-            test=TestConfig(enabled=test_config.get('enabled', False))
+            auto_fix=config.get('auto_fix', True)
         )
 
 class AutoFix:
@@ -569,7 +563,7 @@ class AutoFix:
     
     def _run_tests_and_update_status(self, results: Dict, path: Path) -> None:
         """Run tests and update results status."""
-        if hasattr(self.config, 'test') and getattr(self.config.test, 'enabled', False):
+        if self.config.get('test', {}).get('enabled', False):
             test_results = self.test_runner.run_tests(path)
             results['test_results'] = test_results
             results['status'] = 'success' if test_results.get('overall_status') == 'passed' else 'failed'
