@@ -345,6 +345,10 @@ class FixAttemptTracker:
                 return attempt
         
         return None
+    
+    def get_last_attempt(self) -> Optional[FixAttempt]:
+        """Get the last attempt."""
+        return self.attempts[-1]
 
 class PRStrategy(Enum):
     """Strategy for when to create pull requests."""
@@ -1394,7 +1398,7 @@ class AutoFix:
                 if self.config.create_pr:
                     logger.info(f"start creating pr")
                     try:
-                        best_attempt = self._get_attempt_for_pr(attempt_tracker)
+                        best_attempt = attempt_tracker.get_last_attempt()  ## FIX LATER
                         logger.info(f"best attempt: {best_attempt}")
                         if best_attempt:
                             improvement_summary = TestResultAnalyzer.get_improvement_summary(best_attempt.test_results)
