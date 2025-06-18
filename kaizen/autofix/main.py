@@ -1136,6 +1136,8 @@ class AutoFix:
             IOError: If there are issues writing to the file
         """
         try:
+            ast.parse(fix_result.fixed_code)
+            logger.info(f"Successfully parsed fixed code with ast")
             self._apply_code_changes(current_file_path, fix_result.fixed_code)
             return self._create_success_result(fix_result)
         except (ValueError, IOError) as e:
