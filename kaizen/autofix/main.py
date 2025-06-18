@@ -1274,9 +1274,13 @@ class AutoFix:
         logger.info(f"Running tests for {path}")
         test_results = self.test_runner.run_tests(path)
         results['test_results'] = test_results
-        results['status'] = 'success'
-        logger.info(f"test results: {test_results}")
+        total_tests = len(test_results['overall_status']["summary"]["total_regions"])
+        passed_tests = len(test_results['overall_status']["summary"]["passed_regions"])
+        failed_tests = len(test_results['overall_status']["summary"]["failed_regions"])
+        error_tests = len(test_results['overall_status']["summary"]["error_regions"])
+        results['status'] = 'success' if passed_tests == total_tests else 'failed'  
     
+        return results
     
     def _create_pr_if_needed(self, results: Dict) -> None:
         """Create PR if changes were made."""
