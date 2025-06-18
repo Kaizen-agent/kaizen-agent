@@ -487,7 +487,7 @@ class AutoFix:
                 config=config,
                 context_files=context_files
             )
-            
+            logger.info(f"fix_result: {fix_result}")
             if fix_result['status'] == 'success':
                 logger.info(f"Starting markdown cleanup for {current_file}")
                 try:
