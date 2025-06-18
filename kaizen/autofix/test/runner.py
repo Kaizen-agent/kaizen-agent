@@ -50,12 +50,7 @@ class TestRunner:
         self.llm_evaluator = LLMEvaluator()
         self.assertion_runner = AssertionRunner()
         
-        # Add imports from metadata to each test case
-        if 'metadata' in test_config and 'imports' in test_config['metadata']:
-            for test in test_config.get('tests', []):
-                if 'input' not in test:
-                    test['input'] = {}
-                test['input']['imports'] = test_config['metadata']['imports']
+    
     
     def _validate_config(self) -> None:
         """Validate the test configuration structure."""
