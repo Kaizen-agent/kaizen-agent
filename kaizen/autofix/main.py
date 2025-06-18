@@ -626,8 +626,11 @@ class AutoFix:
                 return {'status': 'error', 'error': 'No files to fix provided'}
             
             # Initialize components
+            
             state_manager = CodeStateManager(set(files_to_fix))
+            logger.info(f"State manager: {state_manager}")
             attempt_tracker = FixAttemptTracker(self.config.max_retries)
+            logger.info(f"Attempt tracker: {attempt_tracker}")
             results = {'status': 'pending', 'changes': {}, 'processed_files': []}
             
             try:

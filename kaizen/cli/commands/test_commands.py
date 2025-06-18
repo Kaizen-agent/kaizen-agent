@@ -173,6 +173,7 @@ class TestAllCommand(BaseTestCommand):
             # Create AutoFix instance and run fixes
             fixer = AutoFix(self.config)
             files_to_fix = self.config.files_to_fix
+            self.logger.info(f"Files to fix: {files_to_fix}")
             if files_to_fix:
                 fix_results = fixer.fix_code(
                     file_path=str(self.config.file_path),
