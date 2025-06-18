@@ -690,9 +690,6 @@ class ImportManager:
     
     def _import_package(self, package_name: str, namespace: Dict[str, Any]) -> None:
         """Import a package with proper error handling and fallbacks."""
-        # Import builtins to ensure we have the real exception classes
-        import builtins
-        _ImportError = builtins.ImportError
         if package_name not in self.config.common_packages:
             # Handle unknown packages
             try:
