@@ -378,9 +378,15 @@ class FixConfig:
 class AutoFix:
     """Handles automatic code fixing."""
     
-    def __init__(self, config: Dict):
-        """Initialize AutoFix with configuration."""
+    def __init__(self, config: Union[Dict, 'TestConfiguration']):
+        """Initialize AutoFix with configuration.
+        
+        Args:
+            config: Either a dictionary or TestConfiguration object containing configuration
+        """
         try:
+            if not isinstance(config, dict):
+                config = self._convert_test_config_to_dict(config)
             self.config = FixConfig.from_dict(config)
             self.test_runner = TestRunner(config)
             self.pr_manager = PRManager(config)
@@ -389,6 +395,23 @@ class AutoFix:
             })
         except Exception as e:
             raise ConfigurationError(f"Failed to initialize AutoFix: {str(e)}")
+    
+    def _convert_test_config_to_dict(self, config: 'TestConfiguration') -> Dict:
+        """Convert TestConfiguration object to dictionary.
+        
+        Args:
+            config: TestConfiguration object to convert
+            
+        Returns:
+            Dictionary containing configuration
+        """
+        return {
+            'max_retries': config.max_retries,
+            'create_pr': config.create_pr,
+            'pr_strategy': config.pr_strategy.name,
+            'base_branch': config.base_branch,
+            'auto_fix': config.auto_fix
+        }
     
     def _load_config(self, config_path: str) -> Dict:
         """Load configuration from file."""
