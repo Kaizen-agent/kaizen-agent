@@ -368,11 +368,11 @@ class FixConfig:
     def from_dict(cls, config: Dict) -> 'FixConfig':
         """Create FixConfig from dictionary."""
         return cls(
-            max_retries=config.get('max_retries', 1),
-            create_pr=config.get('create_pr', False),
-            pr_strategy=PRStrategy[config.get('pr_strategy', 'ALL_PASSING')],
-            base_branch=config.get('base_branch', 'main'),
-            auto_fix=config.get('auto_fix', True)
+            max_retries=config['max_retries'],
+            create_pr=config['create_pr'],
+            pr_strategy=PRStrategy[config['pr_strategy']],
+            base_branch=config['base_branch'],
+            auto_fix=config['auto_fix']
         )
 
 class AutoFix:
