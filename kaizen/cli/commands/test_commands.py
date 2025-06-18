@@ -90,7 +90,7 @@ class TestAllCommand(BaseTestCommand):
             
             # Handle auto-fix if enabled
             test_attempts = None
-            if self.config.settings.auto_fix and failed_tests:
+            if self.config.auto_fix and failed_tests:
                 self.logger.info(f"Found {len(failed_tests)} failed tests")
                 test_attempts = self._handle_auto_fix(failed_tests)
             
