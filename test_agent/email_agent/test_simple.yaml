@@ -37,7 +37,7 @@ steps:
     input:
       file_path: email_agent.py
       method: improve_email
-      input: "Are you a boy?"
+      input: "Hello, how are you?"
     evaluation:
       type: llm
 
