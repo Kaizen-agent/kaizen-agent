@@ -470,7 +470,7 @@ class AutoFix:
             'suggested_files': set()
         }
     
-    def _process_file_with_llm(self, current_file: str, file_content: str, 
+    def _process_file_with_llm(self, current_file_path: str, file_content: str, 
                              context_files: Dict[str, str], failure_data: Optional[Dict],
                              config: Optional['TestConfiguration']) -> FixResult:
         """
@@ -482,29 +482,29 @@ class AutoFix:
         try:
             fix_result = self.llm_fixer.fix_code(
                 file_content,
-                current_file,
+                current_file_path,
                 failure_data=failure_data,
                 config=config,
                 context_files=context_files
             )
             logger.info(f"fix_result: {fix_result}")
             if fix_result.status == FixStatus.SUCCESS:
-                logger.info(f"Starting markdown cleanup for {current_file}")
+                logger.info(f"Starting markdown cleanup for {current_file_path}")
                 try:
                     fixed_code = self.llm_fixer._clean_markdown_notations(fix_result['fixed_code'])
-                    logger.info(f"Successfully cleaned markdown notations for {current_file}")
+                    logger.info(f"Successfully cleaned markdown notations for {current_file_path}")
                 except Exception as e:
-                    logger.error(f"Failed to clean markdown notations for {current_file}", extra={
+                    logger.error(f"Failed to clean markdown notations for {current_file_path}", extra={
                         'error': str(e),
                         'error_type': type(e).__name__,
                         'fix_result': fix_result
                     })
                     raise
 
-                logger.info(f"Applying changes to {current_file}")
+                logger.info(f"Applying changes to {current_file_path}")
                 try:
-                    apply_code_changes(current_file, fixed_code)
-                    logger.info(f"Successfully applied changes to {current_file}")
+                    apply_code_changes(current_file_path, fixed_code)
+                    logger.info(f"Successfully applied changes to {current_file_path}")
                     return FixResult(
                         status=FixStatus.SUCCESS,
                         changes=fix_result.changes,
@@ -512,7 +512,7 @@ class AutoFix:
                         confidence=fix_result.confidence
                     )
                 except Exception as e:
-                    logger.error(f"Failed to apply changes to {current_file}", extra={
+                    logger.error(f"Failed to apply changes to {current_file_path}", extra={
                         'error': str(e),
                         'error_type': type(e).__name__,
                         'fixed_code_length': len(fixed_code) if fixed_code else 0
@@ -520,28 +520,28 @@ class AutoFix:
                     raise
             else:
                 # Try common fixes
-                logger.info(f"Attempting common fixes for {current_file}")
+                logger.info(f"Attempting common fixes for {current_file_path}")
                 try:
                     fixed_content = fix_common_syntax_issues(file_content)
                     if fixed_content == file_content:
-                        logger.info(f"Common fixes had no effect, trying aggressive fixes for {current_file}")
+                        logger.info(f"Common fixes had no effect, trying aggressive fixes for {current_file_path}")
                         fixed_content = fix_aggressive_syntax_issues(file_content)
                     
                     if fixed_content != file_content:
-                        logger.info(f"Applying syntax fixes to {current_file}")
-                        apply_code_changes(current_file, fixed_content)
+                        logger.info(f"Applying syntax fixes to {current_file_path}")
+                        apply_code_changes(current_file_path, fixed_content)
                         return FixResult(
                             status=FixStatus.SUCCESS,
                             changes={'type': 'common_fixes'}
                         )
                 except Exception as e:
-                    logger.error(f"Failed to apply common fixes to {current_file}", extra={
+                    logger.error(f"Failed to apply common fixes to {current_file_path}", extra={
                         'error': str(e),
                         'error_type': type(e).__name__
                     })
                     raise
                 
-                logger.error(f"All fix attempts failed for {current_file}")
+                logger.error(f"All fix attempts failed for {current_file_path}")
                 return FixResult(
                     status=FixStatus.ERROR,
                     changes={},
@@ -549,7 +549,7 @@ class AutoFix:
                 )
                 
         except Exception as e:
-            logger.error(f"Error processing file {current_file}", extra={
+            logger.error(f"Error processing file {current_file_path}", extra={
                 'error': str(e),
                 'error_type': type(e).__name__,
                 'traceback': traceback.format_exc()

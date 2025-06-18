@@ -427,55 +427,40 @@ def reload_modules(file_paths: set) -> None:
                     if hasattr(attr, '_instances'):
                         delattr(attr, '_instances')
 
-def apply_code_changes(fixed_codes: Dict[str, str], original_codes: Dict[str, str]) -> None:
+def apply_code_changes(current_file_path: str, fixed_codes: str) -> None:
     """
-    Apply code changes and ensure they are properly reflected in the running system.
+    Apply code changes to a single file and ensure they are properly reflected in the running system.
     
     Args:
-        fixed_codes: Dictionary mapping file paths to fixed code
-        original_codes: Dictionary mapping file paths to original code
+        current_file_path (str): Path to the file to be modified
+        fixed_codes (str): The fixed code content to write to the file
     """
     try:
-        # First, write all changes to disk
-        for file_path, code in fixed_codes.items():
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(code)
-                logger.info(f"Written changes to {file_path}")
-            except Exception as e:
-                logger.error(f"Failed to write changes to {file_path}: {str(e)}")
-                # Restore original code
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(original_codes[file_path])
-                raise
+        # First, write changes to disk
+        try:
+            with open(current_file_path, 'w', encoding='utf-8') as f:
+                f.write(fixed_codes)
+            logger.info(f"Written changes to {current_file_path}")
+        except Exception as e:
+            logger.error(f"Failed to write changes to {current_file_path}: {str(e)}")
+            raise
         
-        # Reload all affected modules
-        reload_modules(set(fixed_codes.keys()))
+        # Reload the affected module
+        reload_modules({current_file_path})
         
         # Verify changes were applied
-        for file_path, code in fixed_codes.items():
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    current_code = f.read()
-                if current_code != code:
-                    logger.error(f"Changes not properly applied to {file_path}")
-                    # Restore original code
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(original_codes[file_path])
-                    raise ValueError(f"Changes not properly applied to {file_path}")
-            except Exception as e:
-                logger.error(f"Failed to verify changes in {file_path}: {str(e)}")
-                raise
+        try:
+            with open(current_file_path, 'r', encoding='utf-8') as f:
+                current_code = f.read()
+            if current_code != fixed_codes:
+                logger.error(f"Changes not properly applied to {current_file_path}")
+                raise ValueError(f"Changes not properly applied to {current_file_path}")
+        except Exception as e:
+            logger.error(f"Failed to verify changes in {current_file_path}: {str(e)}")
+            raise
         
-        logger.info("All code changes successfully applied and verified")
+        logger.info("Code changes successfully applied and verified")
         
     except Exception as e:
         logger.error(f"Failed to apply code changes: {str(e)}")
-        # Restore all original code
-        for file_path, code in original_codes.items():
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(code)
-            except Exception as restore_error:
-                logger.error(f"Failed to restore original code in {file_path}: {str(restore_error)}")
         raise 
