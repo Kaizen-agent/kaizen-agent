@@ -104,5 +104,5 @@ STATUS_EMOJI: Final[Dict[str, str]] = {
 }
 
 # Default values for test configuration
-DEFAULT_MAX_RETRIES: Final[int] = 3
+DEFAULT_MAX_RETRIES: Final[int] = 2
 DEFAULT_BASE_BRANCH: Final[str] = 'main' 

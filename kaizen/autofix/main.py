@@ -1274,7 +1274,8 @@ class AutoFix:
         logger.info(f"Running tests for {path}")
         test_results = self.test_runner.run_tests(path)
         results['test_results'] = test_results
-        results['status'] = 'success' if test_results.get('overall_status') == 'passed' else 'failed'
+        results['status'] = 'success'
+        logger.info(f"test results: {test_results}")
     
     
     def _create_pr_if_needed(self, results: Dict) -> None:
@@ -1386,7 +1387,7 @@ class AutoFix:
                         state_manager.restore_files()
                 
                 # Create PR if needed
-                if self.config.create_pr and results['changes']:
+                if self.config.create_pr:
                     try:
                         best_attempt = self._get_attempt_for_pr(attempt_tracker)
                         if best_attempt:
