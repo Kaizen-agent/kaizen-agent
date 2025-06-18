@@ -200,39 +200,27 @@ class PromptBuilder:
                         config: Optional['TestConfiguration'], context_files: Optional[Dict[str, str]]) -> str:
         """Build prompt for code fixing in AI agent development context."""
         prompt_parts = [
-            """You are an expert AI agent developer. Your task is to improve the code following these guidelines:
+            """You are an expert code fixer focused on minimal, targeted improvements. Your task is to fix the code following these principles:
 
-1. Code Structure:
-   - Break down large functions into smaller, focused ones
-   - Extract repeated patterns into reusable functions
-   - Use proper separation of concerns
-   - Implement clean architecture patterns
+1. Minimal Changes:
+   - Make only necessary changes to fix the issue
+   - Preserve existing functionality
+   - Avoid unnecessary refactoring
+   - Focus on critical fixes first
 
-2. Error Handling:
-   - Add proper error handling with specific error types
-   - Implement retry mechanisms with exponential backoff
-   - Use proper cleanup in finally blocks
-   - Add input validation and sanitization
+2. Essential Fixes:
+   - Fix critical bugs and errors
+   - Add essential error handling
+   - Ensure type safety
+   - Fix security vulnerabilities
 
-3. Resource Management:
-   - Use context managers for resource management
-   - Implement proper cleanup
-   - Handle API rate limits
-   - Manage memory efficiently
+3. Best Practices (Only When Relevant):
+   - Add proper error handling for critical paths
+   - Ensure proper resource cleanup
+   - Add essential input validation
+   - Fix critical performance issues
 
-4. Code Quality:
-   - Add proper type hints and docstrings
-   - Use dataclasses or Pydantic models for structured data
-   - Add logging for better observability
-   - Follow Python best practices
-
-5. AI Agent Specific:
-   - Proper LLM prompt engineering
-   - Efficient token usage
-   - Robust state management
-   - Clear agent transitions
-
-6. Prompt Engineering:
+4. Prompt Engineering (Critical):
    - Structure prompts with clear sections and hierarchy
    - Use explicit instructions and constraints
    - Include examples where helpful
@@ -251,14 +239,14 @@ class PromptBuilder:
 
 IMPORTANT: Return ONLY the fixed code, properly formatted in a Python code block. Do not include any analysis or explanation in the response.
 
-The code should:
-- Include all necessary imports
-- Have proper type hints and docstrings
-- Include error handling
+The fixed code should:
+- Include only necessary changes
+- Maintain existing functionality
 - Follow Python best practices
 - Be properly formatted
-- Include all necessary changes
-- Include proper prompt engineering patterns
+- Include essential error handling
+- Fix critical issues only
+- Follow prompt engineering best practices
 
 Format your response as:
 ```python
@@ -286,68 +274,50 @@ Format your response as:
                             user_goal: Optional[str], context_files: Optional[Dict[str, str]]) -> str:
         """Build prompt for code analysis."""
         prompt_parts = [
-            """You are an expert AI agent developer and code reviewer. Analyze the code and provide a detailed review focusing on:
+            """You are an expert code reviewer focused on minimal, targeted improvements. Analyze the code and provide a focused review following these principles:
 
-1. Architecture and Design:
-   - Component separation
-   - State management
-   - Error handling
-   - Resource utilization
+1. Minimal Changes:
+   - Make only necessary changes
+   - Preserve existing functionality
+   - Avoid unnecessary refactoring
+   - Focus on critical issues first
 
-2. AI Integration:
-   - LLM usage patterns
-   - Token efficiency
-   - Error handling
-   - Rate limiting
+2. Code Quality (Essential):
+   - Type safety and validation
+   - Error handling for critical paths
+   - Clear documentation for public APIs
+   - Consistent code style
 
-3. Testing and Validation:
-   - Test coverage
-   - Edge cases
-   - Performance
-   - Integration points
-
-4. Security and Reliability:
-   - Input validation
+3. Performance & Security:
+   - Critical performance bottlenecks
+   - Security vulnerabilities
+   - Resource leaks
    - API key handling
-   - Rate limiting
-   - Error logging
 
-5. Code Quality:
-   - Maintainability
-   - Documentation
-   - Type safety
-   - Error handling
+4. Testing & Reliability:
+   - Critical test coverage gaps
+   - Edge case handling
+   - Integration points
+   - Error recovery
 
-6. Prompt Engineering:
-   - Prompt structure and organization
-   - Instruction clarity
-   - Example usage
-   - Response validation
-   - Context management
-   - Error handling
-   - Token optimization
-   - Safety measures
-   - Version control
-   - Documentation
+Provide your analysis in this format:
 
-Provide your analysis in the following format:
+1. Critical Issues (Must Fix):
+   - List only critical problems
+   - Impact on functionality
+   - Security implications
 
-1. Summary of Issues:
-   - List of identified problems
-   - Priority of fixes
-   - Impact assessment
+2. Minimal Changes Required:
+   - Specific, targeted improvements
+   - Focus on critical paths
+   - Avoid unnecessary refactoring
 
-2. Proposed Changes:
-   - Specific improvements
-   - Architecture enhancements
-   - Testing additions
-   - Documentation updates
+3. Implementation Priority:
+   - High: Security, crashes, data loss
+   - Medium: Performance, reliability
+   - Low: Style, documentation
 
-3. Implementation Notes:
-   - Step-by-step guide
-   - Risks and mitigations
-   - Testing strategy
-   - Performance considerations""",
+Remember: Focus on minimal, necessary changes that follow best practices. Avoid unnecessary refactoring or style changes unless they impact functionality.""",
             f"\nFile: {file_path}",
             f"Content:\n{content}"
         ]
@@ -590,7 +560,7 @@ class LLMCodeFixer:
                 prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.1,  # Low temperature for more focused results
-                    max_output_tokens=10000,
+                    max_output_tokens=20000,
                     top_p=0.8,
                     top_k=40,
                 )
