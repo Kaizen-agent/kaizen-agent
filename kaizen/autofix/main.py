@@ -1270,13 +1270,12 @@ class AutoFix:
     
     def _run_tests_and_update_status(self, results: Dict, path: Path) -> None:
         """Run tests and update results status."""
-        if self.config.get('test', {}).get('enabled', False):
-            logger.info(f"Running tests for {path}")
-            test_results = self.test_runner.run_tests(path)
-            results['test_results'] = test_results
-            results['status'] = 'success' if test_results.get('overall_status') == 'passed' else 'failed'
-        else:
-            results['status'] = 'success'
+        
+        logger.info(f"Running tests for {path}")
+        test_results = self.test_runner.run_tests(path)
+        results['test_results'] = test_results
+        results['status'] = 'success' if test_results.get('overall_status') == 'passed' else 'failed'
+    
     
     def _create_pr_if_needed(self, results: Dict) -> None:
         """Create PR if changes were made."""
@@ -1344,6 +1343,7 @@ class AutoFix:
                                 )
                                 logger.info(f"fix result: {fix_result}")
                                 if fix_result.status == FixStatus.SUCCESS:
+                                    logger.info(f"fix result success")
                                     results['changes'][current_file] = fix_result.changes
                                     results['processed_files'].append({
                                         'file_path': current_file,
@@ -1365,6 +1365,7 @@ class AutoFix:
                                 })
                         
                         # Run tests
+                        logger.info(f"start running tests with fixed code")
                         test_results = self._run_tests_and_update_status(results, Path(file_path))
                         
                         # Update attempt status
