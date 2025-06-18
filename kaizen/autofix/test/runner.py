@@ -179,6 +179,7 @@ class TestRunner:
             for test_case in self.test_config.get('tests', []):
                 test_name = test_case.get('name', 'Unknown')
                 test_result = self._run_test_case(test_case, resolved_path)
+                logger.info(f"Test result: {test_result}")
                 results[test_name] = self._create_test_result(test_result)
                 
                 summary.total_regions += 1
