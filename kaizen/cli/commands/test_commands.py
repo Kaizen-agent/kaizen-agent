@@ -167,7 +167,7 @@ class TestAllCommand(BaseTestCommand):
         if not failed_tests:
             return None
             
-        self.logger.info(f"Attempting to fix {len(failed_tests)} failing tests (max retries: {self.config.settings.get('retry_count', 3)})")
+        self.logger.info(f"Attempting to fix {len(failed_tests)} failing tests (max retries: {self.config.max_retries})")
         
         try:
             # Create AutoFix instance and run fixes
@@ -175,9 +175,9 @@ class TestAllCommand(BaseTestCommand):
             fix_results = fixer.fix_code(
                 str(self.config.file_path),
                 failed_tests,
-                max_retries=self.config.settings.max_retries,
-                create_pr=self.config.settings.create_pr,
-                base_branch=self.config.settings.base_branch
+                max_retries=self.config.max_retries,
+                create_pr=self.config.create_pr,
+                base_branch=self.config.base_branch
             )
             
             # Process and return attempts
