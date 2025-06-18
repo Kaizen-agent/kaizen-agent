@@ -140,25 +140,10 @@ class TestAllCommand(BaseTestCommand):
                         'file_path': str(self.config.file_path),
                         'region': region,
                         'method': step.command if hasattr(step, 'command') else None,
-                        'input': step.expected_output if hasattr(step, 'expected_output') else None
+                        'input': step.input
                     }
                 }
                 for region in self.config.regions
-                for step in self.config.steps
-            ]
-        elif self.config.steps:
-            # If no regions specified, use the entire file
-            config['tests'] = [
-                {
-                    'name': step.name,
-                    'description': step.description,
-                    'input': {
-                        'file_path': str(self.config.file_path),
-                        'region': 'main',
-                        'method': step.command,
-                        'input': step.expected_output
-                    }
-                }
                 for step in self.config.steps
             ]
             

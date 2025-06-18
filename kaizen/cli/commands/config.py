@@ -25,6 +25,7 @@ from kaizen.cli.commands.models import (
     TestEvaluation,
     TestMetadata,
 )
+from kaizen.cli.commands.models.settings import TestSettings
 from kaizen.cli.commands.result import Result
 from kaizen.cli.commands.types import PRStrategy
 

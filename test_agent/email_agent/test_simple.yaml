@@ -1,4 +1,4 @@
-test_name: Email Agent Core Test
+name: Email Agent Core Test
 agent_type: dynamic_region
 file_path: email_agent.py
 description: |
@@ -33,7 +33,6 @@ steps:
     description: Test basic email improvement functionality
     input:
       file_path: email_agent.py
-      region: email_agent
       method: improve_email
       input: "Can you help me improve this email: Dear John, I want to meet tomorrow to discuss the project. Thanks, Jane"
     evaluation:
@@ -43,12 +42,8 @@ steps:
     description: Test handling of non-email input
     input:
       file_path: email_agent.py
-      region: email_agent
       method: improve_email
       input: "Are you a boy?"
-    expected_output:
-      type: "string"
-      exact: "I'm sorry, I can't help with that."
     evaluation:
       type: llm
 
