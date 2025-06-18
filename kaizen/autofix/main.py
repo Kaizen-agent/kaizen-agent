@@ -1098,7 +1098,7 @@ class AutoFix:
             
             if fix_result.status == FixStatus.SUCCESS:
                 return self._handle_successful_fix(current_file_path, fixed_code)
-            return self._handle_failed_fix(current_file_path, file_content)
+            return self._handle_failed_fix(current_file_path, fixed_code)
             
         except ValueError as e:
             logger.error(f"Error formatting fixed code for {current_file_path}", extra={
@@ -1202,6 +1202,8 @@ class AutoFix:
         try:
             fixed_content = self._attempt_common_fixes(current_file_path, file_content)
             if fixed_content != file_content:
+                ast.parse(fixed_content)
+                logger.info(f"Successfully parsed fixed code with ast")
                 self._apply_code_changes(current_file_path, fixed_content)
                 return FixResult(
                     status=FixStatus.SUCCESS,
