@@ -61,8 +61,10 @@ def collect_referenced_files(
         raise FileNotFoundError(f"File not found: {file_path}")
     
     if file_path in processed_files:
+        logger.info(f"File {file_path} already processed")
         return processed_files
     
+    logger.info(f"Adding {file_path} to processed files")
     processed_files.add(file_path)
     logger.info(f"Processed files: {processed_files}")
     try:
