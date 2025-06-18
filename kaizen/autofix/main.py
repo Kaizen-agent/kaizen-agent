@@ -11,6 +11,7 @@ from enum import Enum, auto
 import shutil
 import tempfile
 import traceback
+import google.generativeai as genai
 
 if TYPE_CHECKING:
     from kaizen.cli.commands.models import TestConfiguration
@@ -436,10 +437,32 @@ Code to format:
 {code}"""
             
             # Call LLM for formatting
-            response = self.llm_fixer.llm.complete(prompt)
-            
-            # Extract just the code from the response
-            formatted_code = response.strip()
+            try:
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1,  # Low temperature for more focused results
+                        max_output_tokens=20000,
+                        top_p=0.8,
+                        top_k=40,
+                    )
+                )
+                
+                # Check if response is None
+                if response is None:
+                    self.logger.warning("Empty response from LLM, using original code")
+                    return code
+                
+                # Check if response has text
+                if not hasattr(response, 'text') or not response.text:
+                    self.logger.warning("No text content in LLM response, using original code")
+                    return code
+                    
+                formatted_code = response.text.strip()
+                
+            except Exception as e:
+                self.logger.warning(f"LLM formatting failed: {str(e)}")
+                return code
             
             # Remove any markdown code blocks if present
             formatted_code = re.sub(r'^```python\s*', '', formatted_code)
