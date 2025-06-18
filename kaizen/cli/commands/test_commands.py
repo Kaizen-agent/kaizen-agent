@@ -167,7 +167,7 @@ class TestAllCommand(BaseTestCommand):
         if not failed_tests:
             return None
             
-        self.logger.info(f"Attempting to fix {len(failed_tests)} failing tests (max retries: {self.config.settings.retry_count})")
+        self.logger.info(f"Attempting to fix {len(failed_tests)} failing tests (max retries: {self.config.settings.get('retry_count', 3)})")
         
         try:
             # Create AutoFix instance and run fixes
