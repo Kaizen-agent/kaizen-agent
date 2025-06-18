@@ -15,8 +15,6 @@ metadata:
     - GOOGLE_API_KEY
 
 evaluation:
-  llm_provider: gemini
-  model: gemini-2.5-flash-preview-05-20
   criteria:
     - name: email quality
       description: |

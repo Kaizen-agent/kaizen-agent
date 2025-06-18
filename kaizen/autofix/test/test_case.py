@@ -41,7 +41,7 @@ class TestCase:
             input=data['input'],
             expected_output=data.get('expected_output'),
             assertions=data.get('assertions', []),
-            llm_evaluation=data.get('llm_evaluation', {})
+            llm_evaluation=data.get('evaluation', {})
         )
 
 class EvaluationResponse(BaseModel):

@@ -126,7 +126,6 @@ class TestAllCommand(BaseTestCommand):
             'agent_type': self.config.agent_type,
             'description': self.config.description,
             'metadata': self.config.metadata.__dict__ if self.config.metadata else None,
-            'evaluation': self.config.evaluation.__dict__ if self.config.evaluation else None
         }
         
         if self.config.regions:
@@ -144,7 +143,8 @@ class TestAllCommand(BaseTestCommand):
                             'region': region,
                             'method': step.command if hasattr(step, 'command') else None,
                             'input': step.input
-                        }
+                        },
+                        'evaluation': self.config.evaluation.__dict__ if self.config.evaluation else None
                     }
                     for step in self.config.steps
                 ])
