@@ -9,6 +9,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from enum import Enum, auto
+import traceback
 
 if TYPE_CHECKING:
     from kaizen.cli.commands.models import TestConfiguration
@@ -453,16 +454,86 @@ class LLMCodeFixer:
             # Process the response
             fixed_code = self.response_processor.clean_markdown_notations(response)
             logger.info(f"Markdown clean success")
-            return FixResult(
-                status=FixStatus.SUCCESS,
-                fixed_code=fixed_code,
-                changes=self.response_processor.analyze_changes(content, fixed_code),
-                explanation=self.response_processor.extract_explanation(response),
-                confidence=self.response_processor.calculate_confidence(response),
-                context_analysis=self.response_processor.analyze_context(
-                    content, fixed_code, context_files
+
+            try:
+                logger.info("Starting to create FixResult", extra={
+                    'has_fixed_code': bool(fixed_code),
+                    'has_content': bool(content),
+                    'has_response': bool(response),
+                    'has_context_files': bool(context_files)
+                })
+
+                # Safely analyze changes
+                try:
+                    changes = self.response_processor.analyze_changes(content, fixed_code)
+                    logger.info("Successfully analyzed changes", extra={'changes_type': type(changes)})
+                except Exception as e:
+                    logger.error("Failed to analyze changes", extra={
+                        'error': str(e),
+                        'error_type': type(e).__name__
+                    })
+                    changes = {}
+
+                # Safely extract explanation
+                try:
+                    explanation = self.response_processor.extract_explanation(response)
+                    logger.info("Successfully extracted explanation", extra={'has_explanation': bool(explanation)})
+                except Exception as e:
+                    logger.error("Failed to extract explanation", extra={
+                        'error': str(e),
+                        'error_type': type(e).__name__
+                    })
+                    explanation = None
+
+                # Safely calculate confidence
+                try:
+                    confidence = self.response_processor.calculate_confidence(response)
+                    logger.info("Successfully calculated confidence", extra={'confidence': confidence})
+                except Exception as e:
+                    logger.error("Failed to calculate confidence", extra={
+                        'error': str(e),
+                        'error_type': type(e).__name__
+                    })
+                    confidence = 0.0
+
+                # Safely analyze context
+                try:
+                    context_analysis = self.response_processor.analyze_context(
+                        content, fixed_code, context_files
+                    )
+                    logger.info("Successfully analyzed context", extra={'has_context_analysis': bool(context_analysis)})
+                except Exception as e:
+                    logger.error("Failed to analyze context", extra={
+                        'error': str(e),
+                        'error_type': type(e).__name__
+                    })
+                    context_analysis = {}
+
+                logger.info("Creating FixResult with processed data")
+                return FixResult(
+                    status=FixStatus.SUCCESS,
+                    fixed_code=fixed_code,
+                    changes=changes,
+                    explanation=explanation,
+                    confidence=confidence,
+                    context_analysis=context_analysis
                 )
-            )
+
+            except Exception as e:
+                logger.error("Failed to create FixResult", extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__,
+                    'traceback': traceback.format_exc()
+                })
+                # Return a minimal FixResult with just the essential information
+                return FixResult(
+                    status=FixStatus.SUCCESS,
+                    fixed_code=fixed_code,
+                    changes={},
+                    explanation=None,
+                    confidence=0.0,
+                    context_analysis={}
+                )
             
         except LLMResponseError as e:
             logger.error(f"Invalid LLM response: {str(e)}", extra={
