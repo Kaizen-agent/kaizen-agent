@@ -1177,20 +1177,20 @@ class AutoFix:
         logger.info("Applying code changes", extra={'file_path': current_file_path})
         apply_code_changes(current_file_path, fixed_code)
 
-    def _create_success_result(self, fix_result: FixResultDict) -> FixResult:
+    def _create_success_result(self, fixed_code: str) -> FixResult:
         """Create a success result object.
         
         Args:
-            fix_result: Dictionary containing fix results
+            fixed_code: The fixed code string
             
         Returns:
             FixResult object
         """
         return FixResult(
             status=FixStatus.SUCCESS,
-            changes=fix_result['changes'],
-            explanation=fix_result.get('explanation'),
-            confidence=fix_result.get('confidence')
+            changes={'fixed_code': fixed_code},
+            explanation=None,
+            confidence=None
         )
 
     def _handle_failed_fix(self, current_file_path: str, file_content: str) -> FixResult:
