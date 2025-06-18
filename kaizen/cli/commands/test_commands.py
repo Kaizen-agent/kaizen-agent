@@ -190,23 +190,6 @@ class TestAllCommand(BaseTestCommand):
                 self.logger.warning("No fix attempts were made")
                 return None
                 
-            # Log results of each attempt
-            for attempt in attempts:
-                status = attempt.get('status', 'unknown')
-                attempt_num = attempt.get('attempt_number', 'unknown')
-                self.logger.info(f"Attempt {attempt_num}: {status}")
-                
-                if status == FixStatus.SUCCESS.name:
-                    self.logger.info("Successfully fixed all failing tests!")
-                    if self.config.settings.create_pr:
-                        pr_data = fix_results.get('pr')
-                        if pr_data:
-                            self.logger.info(f"Created pull request: {pr_data.get('url', 'Unknown URL')}")
-                elif status == FixStatus.FAILED.name:
-                    self.logger.warning("Failed to fix all tests after all attempts")
-                elif status == FixStatus.ERROR.name:
-                    error = attempt.get('error', 'Unknown error')
-                    self.logger.error(f"Error during fix attempt: {error}")
             
             return attempts
             
