@@ -27,9 +27,6 @@ class EmailAgent:
         Returns:
             str: The improved email draft
         """
-        if not draft or not draft.strip():
-            raise ValueError("Email draft cannot be empty or contain only whitespace.")
-            
         # Add safety instructions to the prompt
         prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
         Focus on:
