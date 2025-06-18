@@ -32,12 +32,12 @@ steps:
     evaluation:
       type: llm
 
-  - name: Non-Email Input
-    description: Test handling of non-email input
+  - name: Too casual input
+    description: Test handling of too casual input
     input:
       file_path: email_agent.py
       method: improve_email
-      input: "Hello, how are you?"
+      input: "improve this email: hi there, are you free to meet tomorrow?"
     evaluation:
       type: llm
 
