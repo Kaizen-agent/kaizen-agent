@@ -1292,17 +1292,23 @@ class CodeRegionExecutor:
             input_data: Input data for the method
             
         Returns:
-            The result of the method execution
-            
-        Raises:
-            ValueError: If method execution fails
-            AttributeError: If method is not found
+            The result of the method execution or error information if execution fails
         """
         if not method_name:
-            raise ValueError(f"Method name required for class region '{region_info.name}'")
+            logger.error(f"Method name required for class region '{region_info.name}'")
+            return {
+                'status': 'error',
+                'error': f"Method name required for class region '{region_info.name}'",
+                'type': 'ValueError'
+            }
         
         if method_name not in region_info.class_methods:
-            raise ValueError(f"Method '{method_name}' not found in class '{region_info.name}'")
+            logger.error(f"Method '{method_name}' not found in class '{region_info.name}'")
+            return {
+                'status': 'error',
+                'error': f"Method '{method_name}' not found in class '{region_info.name}'",
+                'type': 'ValueError'
+            }
         
         try:
             logger.debug(f"Instantiating class: {region_info.name}")
@@ -1312,19 +1318,40 @@ class CodeRegionExecutor:
             method = getattr(instance, method_name)
             
             # Validate input data
-            self._validate_input_data(input_data, f"method '{method_name}'")
+            try:
+                self._validate_input_data(input_data, f"method '{method_name}'")
+            except ValueError as e:
+                logger.error(f"Input validation failed: {str(e)}")
+                return {
+                    'status': 'error',
+                    'error': str(e),
+                    'type': 'ValueError'
+                }
             
             logger.debug(f"Executing method with input data")
             result = method(input_data)
             logger.debug(f"Method execution completed successfully")
-            return result
+            return {
+                'status': 'success',
+                'result': result
+            }
             
         except AttributeError as e:
-            logger.error(f"Method '{method_name}' not found: {str(e)}")
-            raise
+            error_msg = f"Method '{method_name}' not found: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'status': 'error',
+                'error': error_msg,
+                'type': 'AttributeError'
+            }
         except Exception as e:
-            logger.error(f"Error executing method '{method_name}': {str(e)}")
-            raise ValueError(f"Error executing method '{method_name}': {str(e)}")
+            error_msg = f"Error executing method '{method_name}': {str(e)}"
+            logger.error(error_msg)
+            return {
+                'status': 'error',
+                'error': error_msg,
+                'type': type(e).__name__
+            }
     
     def _execute_function(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                          input_data: Any) -> Any:
