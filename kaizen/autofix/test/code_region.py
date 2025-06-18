@@ -1186,44 +1186,117 @@ class CodeRegionExecutor:
         self.workspace_root = workspace_root
         self.import_manager = ImportManager(workspace_root)
     
+    def _ensure_standard_imports(self, namespace: Dict[str, Any]) -> None:
+        """Ensure all standard library imports are available in the namespace.
+        
+        Args:
+            namespace: Dictionary to add imports to
+        """
+        for module_name in STANDARD_MODULES:
+            if module_name not in namespace:
+                try:
+                    module = __import__(module_name)
+                    namespace[module_name] = module
+                    if module_name == 'typing':
+                        self.import_manager._add_typing_imports(namespace)
+                except ImportError as e:
+                    logger.warning(f"Failed to import standard library {module_name}: {str(e)}")
+
+    def _validate_input_data(self, input_data: Any, name: str) -> None:
+        """Validate input data for execution.
+        
+        Args:
+            input_data: Data to validate
+            name: Name of the function/method being called
+            
+        Raises:
+            ValueError: If input data is invalid
+        """
+        if input_data is None:
+            raise ValueError(f"Input data required for {name}")
+        
+        if isinstance(input_data, str) and not input_data.strip():
+            raise ValueError(f"Input data for {name} cannot be empty")
+
+    def _execute_code(self, code: str, namespace: Dict[str, Any]) -> None:
+        """Execute Python code in the given namespace.
+        
+        Args:
+            code: Python code to execute
+            namespace: Dictionary containing the execution namespace
+            
+        Raises:
+            SyntaxError: If the code contains syntax errors
+            ValueError: For other execution errors
+        """
+        try:
+            exec(code, namespace)
+            logger.debug("Code execution completed successfully")
+        except SyntaxError as e:
+            logger.error(f"Syntax error in code: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error executing code: {type(e).__name__}: {str(e)}")
+            raise ValueError(f"Failed to execute code: {str(e)}")
+
     def execute_region(self, region_info: RegionInfo, method_name: Optional[str] = None, 
                       input_data: Any = None) -> Any:
-        """Execute a code region and return its result."""
-        logger.info(f"Executing region: {region_info.name}")
+        """Execute a code region and return its result.
         
+        Args:
+            region_info: Information about the code region to execute
+            method_name: Optional name of the method to call
+            input_data: Optional input data for the execution
+            
+        Returns:
+            The result of executing the region
+            
+        Raises:
+            ValueError: If execution fails
+        """
+        logger.info(f"Executing region: {region_info.name}")
         
         try:
             with self.import_manager.managed_imports(region_info) as namespace:
-                
-                
+                # Ensure standard library imports are available
+                self._ensure_standard_imports(namespace)
                 
                 # Execute the code
-                try:
-                    exec(region_info.code, namespace)
-                    print("DEBUG: exec() completed successfully")
-                except Exception as e:
-                    print(f"DEBUG: exec() failed with {type(e).__name__}: {str(e)}")
-                    raise
+                self._execute_code(region_info.code, namespace)
                 
+                # Execute based on region type
                 if region_info.type == RegionType.CLASS:
-                    print(f"DEBUG: Calling _execute_class_method with method_name={method_name}")
+                    logger.debug(f"Executing class method: {method_name}")
                     return self._execute_class_method(namespace, region_info, method_name, input_data)
                 elif region_info.type == RegionType.FUNCTION:
+                    logger.debug(f"Executing function: {region_info.name}")
                     return self._execute_function(namespace, region_info, input_data)
                 else:
+                    logger.debug(f"Executing module function: {method_name}")
                     return self._execute_module(namespace, region_info, method_name, input_data)
+                    
         except Exception as e:
-            print(f"DEBUG: Final exception type: {type(e)}")
-            print(f"DEBUG: Final exception: {str(e)}")
-            import traceback
-            print("DEBUG: Full traceback:")
-            traceback.print_exc()
+            logger.error(f"Failed to execute region '{region_info.name}': {str(e)}")
+            logger.debug("Full traceback:", exc_info=True)
             raise ValueError(f"Error executing region '{region_info.name}': {str(e)}")
-        
+    
     def _execute_class_method(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                             method_name: str, input_data: Any) -> Any:
-        """Execute a method from a class."""
-       
+        """Execute a method from a class.
+        
+        Args:
+            namespace: Dictionary containing the execution namespace
+            region_info: Information about the code region
+            method_name: Name of the method to call
+            input_data: Input data for the method
+            
+        Returns:
+            The result of the method execution
+            
+        Raises:
+            ValueError: If method execution fails
+            AttributeError: If method is not found
+        """
         if not method_name:
             raise ValueError(f"Method name required for class region '{region_info.name}'")
         
@@ -1231,34 +1304,27 @@ class CodeRegionExecutor:
             raise ValueError(f"Method '{method_name}' not found in class '{region_info.name}'")
         
         try:
-            print(f"DEBUG: About to instantiate {region_info.name}")
-            print(f"DEBUG: Type of class: {type(namespace[region_info.name])}")
-            
-            # Create instance and get method
+            logger.debug(f"Instantiating class: {region_info.name}")
             instance = namespace[region_info.name]()
-            print(f"DEBUG: Instance created successfully: {type(instance)}")
             
+            logger.debug(f"Getting method: {method_name}")
             method = getattr(instance, method_name)
-            print(f"DEBUG: Got method {method_name}: {method}")
             
             # Validate input data
-            if input_data is None:
-                raise ValueError(f"Input data required for method '{method_name}'")
+            self._validate_input_data(input_data, f"method '{method_name}'")
             
-            # If input_data is a string, ensure it's not empty
-            if isinstance(input_data, str) and not input_data.strip():
-                raise ValueError(f"Input data for method '{method_name}' cannot be empty")
-            
-            print(f"DEBUG: About to execute method with input_data: {input_data[:50] if isinstance(input_data, str) else input_data}")
-            
-            # Execute the method
+            logger.debug(f"Executing method with input data")
             result = method(input_data)
-            print(f"DEBUG: Method executed successfully, result type: {type(result)}")
+            logger.debug(f"Method execution completed successfully")
             return result
-        
+            
+        except AttributeError as e:
+            logger.error(f"Method '{method_name}' not found: {str(e)}")
+            raise
         except Exception as e:
+            logger.error(f"Error executing method '{method_name}': {str(e)}")
             raise ValueError(f"Error executing method '{method_name}': {str(e)}")
-        
+    
     def _execute_function(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                          input_data: Any) -> Any:
         """Execute a function."""
@@ -1266,12 +1332,7 @@ class CodeRegionExecutor:
             func = namespace[region_info.name]
             
             # Validate input data
-            if input_data is None:
-                raise ValueError(f"Input data required for function '{region_info.name}'")
-            
-            # If input_data is a string, ensure it's not empty
-            if isinstance(input_data, str) and not input_data.strip():
-                raise ValueError(f"Input data for function '{region_info.name}' cannot be empty")
+            self._validate_input_data(input_data, f"function '{region_info.name}'")
             
             return func(input_data)
         except Exception as e:
@@ -1290,12 +1351,7 @@ class CodeRegionExecutor:
             func = namespace[method_name]
             
             # Validate input data
-            if input_data is None:
-                raise ValueError(f"Input data required for function '{method_name}'")
-            
-            # If input_data is a string, ensure it's not empty
-            if isinstance(input_data, str) and not input_data.strip():
-                raise ValueError(f"Input data for function '{method_name}' cannot be empty")
+            self._validate_input_data(input_data, f"function '{method_name}'")
             
             return func(input_data)
         except Exception as e:
