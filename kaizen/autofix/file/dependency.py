@@ -19,6 +19,43 @@ class ImportError:
     error_message: str
     file_path: Path
 
+def resolve_file_path(file_path: Union[str, Path], base_dir: Optional[Union[str, Path]] = None) -> tuple[Path, Path]:
+    """
+    Resolve a file path relative to a base directory if provided, otherwise resolve to absolute path.
+    
+    Args:
+        file_path: Path to resolve, can be relative or absolute
+        base_dir: Optional base directory for resolving relative paths
+        
+    Returns:
+        Tuple of (resolved_file_path, resolved_base_dir)
+        
+    Raises:
+        FileNotFoundError: If the file doesn't exist after resolution
+        ValueError: If the path is invalid
+    """
+    try:
+        if base_dir:
+            base_dir = Path(base_dir).resolve()
+            # Try relative path first if base_dir is provided
+            relative_path = base_dir / file_path
+            if relative_path.exists():
+                return relative_path, base_dir
+            # Fall back to absolute path
+            file_path = Path(file_path).resolve()
+        else:
+            file_path = Path(file_path).resolve()
+            base_dir = file_path.parent
+
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+            
+        return file_path, base_dir
+    except Exception as e:
+        if isinstance(e, FileNotFoundError):
+            raise
+        raise ValueError(f"Invalid path: {str(e)}")
+
 def collect_referenced_files(
     file_path: Union[str, Path],
     processed_files: Optional[Set[Path]] = None,
@@ -53,13 +90,11 @@ def collect_referenced_files(
     llm_checked_files = llm_checked_files or set()
     logger.info(f"Processed files: {processed_files}")
     logger.info(f"LLM checked files: {llm_checked_files}")
-    # Convert inputs to Path objects
-    file_path = Path(file_path).resolve()
-    base_dir = Path(base_dir).resolve() if base_dir else file_path.parent
+
+    # Resolve file path and base directory
+    file_path, base_dir = resolve_file_path(file_path, base_dir)
     logger.info(f"Base directory: {base_dir}")
-    if not file_path.exists():
-        logger.error(f"File not found: {file_path}")
-        raise FileNotFoundError(f"File not found: {file_path}")
+    logger.info(f"File path: {file_path}")
     
     if file_path in processed_files:
         logger.info(f"File {file_path} already processed")
