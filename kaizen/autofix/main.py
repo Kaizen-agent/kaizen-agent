@@ -601,7 +601,7 @@ class AutoFix:
             pr_data = self.pr_manager.create_pr(results['changes'], results['test_results'])
             results['pr'] = pr_data
     
-    def fix_code(self, file_path: str, failure_data: Optional[Dict] = None, 
+    def fix_code(self, file_path: str, failure_data: List[Dict[str, Any]] = None, 
                 user_goal: Optional[str] = None) -> Dict:
         """Fix code in the given file with retry logic."""
         try:

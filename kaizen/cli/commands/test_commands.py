@@ -172,7 +172,6 @@ class TestAllCommand(BaseTestCommand):
         try:
             # Create AutoFix instance and run fixes
             fixer = AutoFix(self.config)
-            self.logger.info(f"AutoFix instance created")
             fix_results = fixer.fix_code(
                 file_path=str(self.config.file_path),
                 failure_data=failed_tests
