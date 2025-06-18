@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 import shutil
 import tempfile
+import traceback
 
 if TYPE_CHECKING:
     from kaizen.cli.commands.models import TestConfiguration
@@ -488,45 +489,107 @@ class AutoFix:
             )
             
             if fix_result['status'] == 'success':
-                fixed_code = self.llm_fixer._clean_markdown_notations(fix_result['fixed_code'])
-                
+                logger.info(f"Starting markdown cleanup for {current_file}")
+                try:
+                    fixed_code = self.llm_fixer._clean_markdown_notations(fix_result['fixed_code'])
+                    logger.info(f"Successfully cleaned markdown notations for {current_file}")
+                except Exception as e:
+                    logger.error(f"Failed to clean markdown notations for {current_file}", extra={
+                        'error': str(e),
+                        'error_type': type(e).__name__,
+                        'fix_result': fix_result
+                    })
+                    raise
+
                 # Check compatibility
-                is_compatible, compatibility_issues = self.compatibility_checker.check_compatibility(
-                    current_file, fixed_code, context_files
-                )
-                
-                if is_compatible:
-                    apply_code_changes(current_file, fixed_code)
-                    return FixResult(
-                        status=FixStatus.SUCCESS,
-                        changes=fix_result['changes'],
-                        explanation=fix_result['explanation'],
-                        confidence=fix_result['confidence']
+                logger.info(f"Starting compatibility check for {current_file}")
+                try:
+                    is_compatible, compatibility_issues = self.compatibility_checker.check_compatibility(
+                        current_file, fixed_code, context_files
                     )
+                    logger.info(f"Compatibility check completed for {current_file}", extra={
+                        'is_compatible': is_compatible,
+                        'compatibility_issues': compatibility_issues
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to check compatibility for {current_file}", extra={
+                        'error': str(e),
+                        'error_type': type(e).__name__,
+                        'fixed_code_length': len(fixed_code) if fixed_code else 0
+                    })
+                    raise
+
+                if is_compatible:
+                    logger.info(f"Applying compatible changes to {current_file}")
+                    try:
+                        apply_code_changes(current_file, fixed_code)
+                        logger.info(f"Successfully applied changes to {current_file}")
+                        return FixResult(
+                            status=FixStatus.SUCCESS,
+                            changes=fix_result['changes'],
+                            explanation=fix_result['explanation'],
+                            confidence=fix_result['confidence']
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to apply changes to {current_file}", extra={
+                            'error': str(e),
+                            'error_type': type(e).__name__,
+                            'fixed_code_length': len(fixed_code) if fixed_code else 0
+                        })
+                        raise
                 else:
                     # Try to fix compatibility issues
                     logger.warning(f"Compatibility issues found in {current_file}", extra={
-                        'issues': compatibility_issues
+                        'issues': compatibility_issues,
+                        'fixed_code_length': len(fixed_code) if fixed_code else 0
                     })
                     
-                    compatibility_fix = self.llm_fixer.fix_compatibility_issues(
-                        fixed_code,
-                        current_file,
-                        compatibility_issues,
-                        context_files
-                    )
+                    logger.info(f"Attempting to fix compatibility issues for {current_file}")
+                    try:
+                        compatibility_fix = self.llm_fixer.fix_compatibility_issues(
+                            fixed_code,
+                            current_file,
+                            compatibility_issues,
+                            context_files
+                        )
+                        logger.info(f"Compatibility fix attempt completed for {current_file}", extra={
+                            'status': compatibility_fix['status'],
+                            'has_changes': bool(compatibility_fix.get('changes')),
+                            'has_explanation': bool(compatibility_fix.get('explanation'))
+                        })
+                    except Exception as e:
+                        logger.error(f"Failed to fix compatibility issues for {current_file}", extra={
+                            'error': str(e),
+                            'error_type': type(e).__name__,
+                            'compatibility_issues': compatibility_issues
+                        })
+                        raise
                     
                     if compatibility_fix['status'] == 'success':
-                        fixed_code = compatibility_fix['fixed_code']
-                        apply_code_changes(current_file, fixed_code)
-                        return FixResult(
-                            status=FixStatus.SUCCESS,
-                            changes=compatibility_fix['changes'],
-                            explanation=compatibility_fix['explanation'],
-                            confidence=compatibility_fix['confidence'],
-                            compatibility_issues=compatibility_issues
-                        )
+                        logger.info(f"Applying compatibility fixes to {current_file}")
+                        try:
+                            fixed_code = compatibility_fix['fixed_code']
+                            apply_code_changes(current_file, fixed_code)
+                            logger.info(f"Successfully applied compatibility fixes to {current_file}")
+                            return FixResult(
+                                status=FixStatus.SUCCESS,
+                                changes=compatibility_fix['changes'],
+                                explanation=compatibility_fix['explanation'],
+                                confidence=compatibility_fix['confidence'],
+                                compatibility_issues=compatibility_issues
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to apply compatibility fixes to {current_file}", extra={
+                                'error': str(e),
+                                'error_type': type(e).__name__,
+                                'fixed_code_length': len(fixed_code) if fixed_code else 0
+                            })
+                            raise
                     else:
+                        logger.error(f"Compatibility fix failed for {current_file}", extra={
+                            'compatibility_issues': compatibility_issues,
+                            'fix_status': compatibility_fix['status']
+                        })
                         return FixResult(
                             status=FixStatus.COMPATIBILITY_ISSUE,
                             changes={},
@@ -535,29 +598,44 @@ class AutoFix:
                         )
             else:
                 # Try common fixes
-                fixed_content = fix_common_syntax_issues(file_content)
-                if fixed_content == file_content:
-                    fixed_content = fix_aggressive_syntax_issues(file_content)
-                
-                if fixed_content != file_content:
-                    is_compatible, compatibility_issues = self.compatibility_checker.check_compatibility(
-                        current_file, fixed_content, context_files
-                    )
+                logger.info(f"Attempting common fixes for {current_file}")
+                try:
+                    fixed_content = fix_common_syntax_issues(file_content)
+                    if fixed_content == file_content:
+                        logger.info(f"Common fixes had no effect, trying aggressive fixes for {current_file}")
+                        fixed_content = fix_aggressive_syntax_issues(file_content)
                     
-                    if is_compatible:
-                        apply_code_changes(current_file, fixed_content)
-                        return FixResult(
-                            status=FixStatus.SUCCESS,
-                            changes={'type': 'common_fixes'}
+                    if fixed_content != file_content:
+                        logger.info(f"Syntax fixes applied, checking compatibility for {current_file}")
+                        is_compatible, compatibility_issues = self.compatibility_checker.check_compatibility(
+                            current_file, fixed_content, context_files
                         )
-                    else:
-                        return FixResult(
-                            status=FixStatus.COMPATIBILITY_ISSUE,
-                            changes={},
-                            error='Common fixes caused compatibility issues',
-                            compatibility_issues=compatibility_issues
-                        )
+                        
+                        if is_compatible:
+                            logger.info(f"Applying compatible syntax fixes to {current_file}")
+                            apply_code_changes(current_file, fixed_content)
+                            return FixResult(
+                                status=FixStatus.SUCCESS,
+                                changes={'type': 'common_fixes'}
+                            )
+                        else:
+                            logger.error(f"Syntax fixes caused compatibility issues in {current_file}", extra={
+                                'compatibility_issues': compatibility_issues
+                            })
+                            return FixResult(
+                                status=FixStatus.COMPATIBILITY_ISSUE,
+                                changes={},
+                                error='Common fixes caused compatibility issues',
+                                compatibility_issues=compatibility_issues
+                            )
+                except Exception as e:
+                    logger.error(f"Failed to apply common fixes to {current_file}", extra={
+                        'error': str(e),
+                        'error_type': type(e).__name__
+                    })
+                    raise
                 
+                logger.error(f"All fix attempts failed for {current_file}")
                 return FixResult(
                     status=FixStatus.ERROR,
                     changes={},
@@ -567,7 +645,8 @@ class AutoFix:
         except Exception as e:
             logger.error(f"Error processing file {current_file}", extra={
                 'error': str(e),
-                'error_type': type(e).__name__
+                'error_type': type(e).__name__,
+                'traceback': traceback.format_exc()
             })
             return FixResult(
                 status=FixStatus.ERROR,
