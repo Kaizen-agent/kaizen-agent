@@ -949,7 +949,7 @@ class AutoFix:
     LOG_LEVEL_ERROR = "error"
     ERROR_MSG_FIX_FAILED = "Failed to fix code"
     
-    def __init__(self, config: Union[Dict, 'TestConfiguration']):
+    def __init__(self, config: Union[Dict, 'TestConfiguration'], runner_config: Dict[str, Any]):
         """Initialize AutoFix with configuration.
         
         Args:
@@ -959,7 +959,7 @@ class AutoFix:
             if not isinstance(config, dict):
                 config = self._convert_test_config_to_dict(config)
             self.config = FixConfig.from_dict(config)
-            self.test_runner = TestRunner(config)
+            self.test_runner = TestRunner(runner_config)
             self.pr_manager = PRManager(config)
             self.llm_fixer = LLMCodeFixer(config)  # Initialize LLM fixer
             logger.info("AutoFix initialized", extra={
