@@ -47,7 +47,6 @@ class ConfigurationValidator:
             ValidationRule('evaluation', required=False, type=dict),
             ValidationRule('assertions', required=False, type=list),
             ValidationRule('expected_output', required=False, type=dict),
-            ValidationRule('files_to_fix', required=False, type=list)
         ]
     
     def validate(self, config_data: Dict[str, Any]) -> Result[Dict[str, Any]]:
