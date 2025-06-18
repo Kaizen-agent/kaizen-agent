@@ -402,6 +402,16 @@ class CodeFormatter:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        try:
+            api_key = os.environ.get("GOOGLE_API_KEY")
+            if not api_key:
+                raise ValueError("GOOGLE_API_KEY environment variable not set")
+                
+            genai.configure(api_key=api_key)
+            self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+        except Exception as e:
+            self.logger.error(f"Failed to initialize Gemini model: {str(e)}")
+            raise
     
     def _format_with_llm(self, code: str) -> str:
         """Format Python code using LLM.
