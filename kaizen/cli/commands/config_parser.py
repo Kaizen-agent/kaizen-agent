@@ -113,7 +113,6 @@ class ConfigurationParser:
                 steps=steps,
                 metadata=metadata,
                 evaluation=evaluation,
-                dependencies=config_data.get('dependencies', []),
                 files_to_fix=config_data.get('files_to_fix', [])
             )
             
