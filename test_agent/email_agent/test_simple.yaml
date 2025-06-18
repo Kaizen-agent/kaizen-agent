@@ -2,7 +2,7 @@ name: Email Agent Core Test
 agent_type: dynamic_region
 file_path: email_agent.py
 description: |
-  Test suite for the EmailAgent class that handles email improvement using OpenAI's API.
+  Test suite for the EmailAgent class that handles email improvement using Gemini's API.
   Tests cover initialization, error handling, and email improvement functionality.
 
 evaluation:
