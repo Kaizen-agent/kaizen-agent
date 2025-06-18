@@ -634,7 +634,9 @@ class AutoFix:
             results = {'status': 'pending', 'changes': {}, 'processed_files': []}
             
             try:
+                logger.info(f"Attempt tracker should continue check")
                 while attempt_tracker.should_continue():
+                    logger.info(f"Attempt tracker should continue")
                     attempt = attempt_tracker.start_attempt()
                     logger.info(f"Starting attempt {attempt.attempt_number} of {self.config.max_retries}")
                     
