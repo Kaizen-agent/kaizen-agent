@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import logging
 import re
@@ -1323,6 +1324,14 @@ class AutoFix:
             logger.info(f"Attempt tracker: {attempt_tracker}")
             results = {'status': 'pending', 'changes': {}, 'processed_files': []}
             
+            # Store the original branch
+            original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+            logger.info("Retrieved original branch", extra={'branch': original_branch})
+            
+            # Initialize branch_name with a default value
+            branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            subprocess.run(["git", "checkout", "-b", branch_name], check=True)
+            
             try:
                 logger.info(f"Attempt tracker should continue check")
                 while attempt_tracker.should_continue():
@@ -1417,6 +1426,9 @@ class AutoFix:
                     except Exception as e:
                         raise PRCreationError(f"Failed to create PR: {str(e)}")
                 
+                
+                logger.info("No tests were fixed, reverting changes")
+                subprocess.run(["git", "checkout", original_branch], check=True)
                 return {
                     'status': 'success' if attempt_tracker.get_successful_attempt() else 'failed',
                     'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],

@@ -1,13 +1,28 @@
 import os
 import logging
 import json
+import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Any, TypedDict, Union
+from typing import Dict, List, Optional, Any, TypedDict, Union, Tuple
 from dataclasses import dataclass
 from datetime import datetime
+from github import Github, GithubException
+from github.PullRequest import PullRequest
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+class PRCreationError(Exception):
+    """Error raised when PR creation fails."""
+    pass
+
+class GitHubConfigError(Exception):
+    """Error raised when GitHub configuration is invalid."""
+    pass
+
+class GitConfigError(Exception):
+    """Error raised when git configuration is invalid."""
+    pass
 
 class TestCase(TypedDict):
     name: str
@@ -45,6 +60,12 @@ class Changes(TypedDict):
     prompt_changes: Optional[List[PromptChange]]
     # Other file changes will be Dict[str, List[CodeChange]]
 
+@dataclass
+class GitHubConfig:
+    """Configuration for GitHub integration."""
+    token: str
+    base_branch: str = 'main'
+
 class PRManager:
     """A class for managing pull requests."""
     
@@ -53,10 +74,31 @@ class PRManager:
         Initialize the PR manager.
         
         Args:
-            config: Configuration dictionary
+            config: Configuration dictionary containing GitHub settings
         """
         self.config = config
         self.pr_data = {}
+        self.github_config = self._initialize_github_config()
+        self.github = Github(self.github_config.token)
+        
+    def _initialize_github_config(self) -> GitHubConfig:
+        """
+        Initialize GitHub configuration.
+        
+        Returns:
+            GitHubConfig: Initialized GitHub configuration
+            
+        Raises:
+            GitHubConfigError: If GitHub token is not set
+        """
+        token = os.environ.get("GITHUB_TOKEN")
+        if not token:
+            raise GitHubConfigError("GITHUB_TOKEN environment variable not set. Please set it with your GitHub personal access token.")
+            
+        return GitHubConfig(
+            token=token,
+            base_branch=self.config.get('base_branch', 'main')
+        )
         
     def create_pr(self, changes: Dict, test_results: Dict) -> Dict:
         """
@@ -68,6 +110,9 @@ class PRManager:
             
         Returns:
             Dict containing PR information
+            
+        Raises:
+            PRCreationError: If PR creation fails
         """
         try:
             # Log PR creation start
@@ -88,15 +133,21 @@ class PRManager:
             # Validate PR data
             self._validate_pr_data()
             
-            # Create PR files
-            self._create_pr_files()
+            # Create actual PR on GitHub
+            pr = self._create_github_pr()
             
-            # Update PR status
-            self.pr_data['status'] = 'ready'
+            # Update PR data with GitHub PR information
+            self.pr_data.update({
+                'status': 'ready',
+                'pr_number': pr.number,
+                'pr_url': pr.html_url,
+                'branch': pr.head.ref
+            })
             
             # Log PR creation completion
             logger.info("PR creation completed", extra={
-                'pr_title': self.pr_data['title']
+                'pr_title': self.pr_data['title'],
+                'pr_url': self.pr_data['pr_url']
             })
             
             return self.pr_data
@@ -106,10 +157,7 @@ class PRManager:
                 'error': str(e),
                 'error_type': type(e).__name__
             })
-            return {
-                'status': 'error',
-                'error': str(e)
-            }
+            raise PRCreationError(f"Failed to create PR: {str(e)}")
     
     def _generate_pr_title(self, changes: Dict, test_results: Dict) -> str:
         """
@@ -398,38 +446,74 @@ class PRManager:
             })
             raise
     
-    def _create_pr_files(self) -> None:
+    def _get_repository_info(self) -> Tuple[str, str]:
         """
-        Create files for the pull request.
+        Get repository owner and name from git config.
+        
+        Returns:
+            Tuple[str, str]: Repository owner and name
+            
+        Raises:
+            GitConfigError: If repository information cannot be determined
         """
         try:
-            # Create PR directory
-            pr_dir = Path(self.config.get('pr_dir', 'prs'))
-            pr_dir.mkdir(parents=True, exist_ok=True)
+            repo_url = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], text=True).strip()
+            if repo_url.endswith('.git'):
+                repo_url = repo_url[:-4]
+            repo_name = repo_url.split('/')[-1]
+            repo_owner = repo_url.split('/')[-2]
+            return repo_owner, repo_name
+        except subprocess.CalledProcessError:
+            raise GitConfigError("Could not determine repository information. Please ensure you're in a git repository with a remote origin.")
             
-            # Create PR file
-            pr_file = pr_dir / f"pr_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            with open(pr_file, 'w') as f:
-                json.dump(self.pr_data, f, indent=2)
+    def _get_current_branch(self) -> str:
+        """
+        Get current git branch.
+        
+        Returns:
+            str: Current branch name
             
-            # Create changes directory
-            changes_dir = pr_dir / 'changes'
-            changes_dir.mkdir(parents=True, exist_ok=True)
+        Raises:
+            GitConfigError: If branch information cannot be determined
+        """
+        try:
+            return subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+        except subprocess.CalledProcessError:
+            raise GitConfigError("Could not determine current branch.")
             
-            # Create change files
-            for file_path, file_changes in self.pr_data['changes'].items():
-                change_file = changes_dir / f"{Path(file_path).name}.json"
-                with open(change_file, 'w') as f:
-                    json.dump(file_changes, f, indent=2)
+    def _create_github_pr(self) -> PullRequest:
+        """
+        Create a pull request on GitHub.
+        
+        Returns:
+            PullRequest: Created GitHub pull request
             
-            # Create test results file
-            test_file = pr_dir / 'test_results.json'
-            with open(test_file, 'w') as f:
-                json.dump(self.pr_data['test_results'], f, indent=2)
+        Raises:
+            GitHubConfigError: If GitHub repository access fails
+            GitConfigError: If git configuration is invalid
+        """
+        try:
+            # Get repository information
+            repo_owner, repo_name = self._get_repository_info()
             
-        except Exception as e:
-            logger.error("Error creating PR files", extra={
-                'error': str(e),
-                'error_type': type(e).__name__
+            # Get repository
+            repo = self.github.get_repo(f"{repo_owner}/{repo_name}")
+            logger.info("Connected to repository", extra={
+                'repo': f"{repo_owner}/{repo_name}"
             })
-            raise 
+            
+            # Get current branch
+            current_branch = self._get_current_branch()
+            
+            # Create PR
+            pr = repo.create_pull(
+                title=self.pr_data['title'],
+                body=self.pr_data['description'],
+                head=current_branch,
+                base=self.github_config.base_branch
+            )
+            
+            return pr
+            
+        except GithubException as e:
+            raise GitHubConfigError(f"Error accessing GitHub repository: {str(e)}") 
