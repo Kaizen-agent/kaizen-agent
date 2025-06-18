@@ -488,7 +488,7 @@ class AutoFix:
                 context_files=context_files
             )
             logger.info(f"fix_result: {fix_result}")
-            if fix_result['status'] == 'success':
+            if fix_result.status == FixStatus.SUCCESS:
                 logger.info(f"Starting markdown cleanup for {current_file}")
                 try:
                     fixed_code = self.llm_fixer._clean_markdown_notations(fix_result['fixed_code'])
@@ -526,9 +526,9 @@ class AutoFix:
                         logger.info(f"Successfully applied changes to {current_file}")
                         return FixResult(
                             status=FixStatus.SUCCESS,
-                            changes=fix_result['changes'],
-                            explanation=fix_result['explanation'],
-                            confidence=fix_result['confidence']
+                            changes=fix_result.changes,
+                            explanation=fix_result.explanation,
+                            confidence=fix_result.confidence
                         )
                     except Exception as e:
                         logger.error(f"Failed to apply changes to {current_file}", extra={
