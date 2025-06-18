@@ -409,6 +409,7 @@ class CodeFormatter:
                 
             genai.configure(api_key=api_key)
             self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+            self.logger.info("Gemini model initialized successfully")
         except Exception as e:
             self.logger.error(f"Failed to initialize Gemini model: {str(e)}")
             raise
@@ -503,14 +504,14 @@ Code to format:
             ValueError: If formatting fails
         """
         try:
-            self.logger.debug("Starting code formatting", extra={'code_length': len(code)})
+            self.logger.info("Starting code formatting", extra={'code_length': len(code)})
             
             ## LLM FIXER
             # First try LLM-based formatting
             try:
                 llm_formatted = self._format_with_llm(code)
                 if llm_formatted and llm_formatted != code:
-                    self.logger.debug("LLM formatting successful")
+                    self.logger.info("LLM formatting successful")
                     code = llm_formatted
             except Exception as e:
                 self.logger.warning(f"LLM formatting failed, falling back to standard formatting: {str(e)}")
