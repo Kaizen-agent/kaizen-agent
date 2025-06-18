@@ -58,6 +58,7 @@ def collect_referenced_files(
     base_dir = Path(base_dir).resolve() if base_dir else file_path.parent
     logger.info(f"Base directory: {base_dir}")
     if not file_path.exists():
+        logger.error(f"File not found: {file_path}")
         raise FileNotFoundError(f"File not found: {file_path}")
     
     if file_path in processed_files:
