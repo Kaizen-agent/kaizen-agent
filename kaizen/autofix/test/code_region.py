@@ -1147,30 +1147,11 @@ class CodeRegionExecutor:
         """Execute a code region and return its result."""
         logger.info(f"Executing region: {region_info.name}")
         
-        # Debug: Check exception types before execution
-        import builtins
-        print(f"DEBUG: Before execution - Exception type: {type(Exception)}")
-        print(f"DEBUG: Before execution - builtins.Exception type: {type(builtins.Exception)}")
         
         try:
             with self.import_manager.managed_imports(region_info) as namespace:
-                # Debug: Check namespace
-                print(f"DEBUG: Namespace has {len(namespace)} keys")
-                if 'Exception' in namespace:
-                    print(f"DEBUG: namespace['Exception'] type: {type(namespace['Exception'])}")
-                    print(f"DEBUG: namespace['Exception'] is builtins.Exception: {namespace['Exception'] is builtins.Exception}")
-                else:
-                    print("DEBUG: Exception NOT in namespace")
                 
-                if '__builtins__' in namespace:
-                    print(f"DEBUG: __builtins__ type: {type(namespace['__builtins__'])}")
-                    if isinstance(namespace['__builtins__'], dict):
-                        if 'Exception' in namespace['__builtins__']:
-                            print(f"DEBUG: __builtins__['Exception'] type: {type(namespace['__builtins__']['Exception'])}")
                 
-                # Debug: Show the actual code being executed
-                print(f"DEBUG: About to exec code of length {len(region_info.code)}")
-                print(f"DEBUG: First 200 chars of code: {region_info.code[:200]}")
                 
                 # Execute the code
                 try:
@@ -1179,13 +1160,6 @@ class CodeRegionExecutor:
                 except Exception as e:
                     print(f"DEBUG: exec() failed with {type(e).__name__}: {str(e)}")
                     raise
-                
-                # Debug: Check if class was created
-                if region_info.name in namespace:
-                    print(f"DEBUG: {region_info.name} found in namespace, type: {type(namespace[region_info.name])}")
-                else:
-                    print(f"DEBUG: {region_info.name} NOT found in namespace")
-                    print(f"DEBUG: Available names: {list(namespace.keys())[:10]}...")
                 
                 if region_info.type == RegionType.CLASS:
                     print(f"DEBUG: Calling _execute_class_method with method_name={method_name}")
@@ -1205,10 +1179,7 @@ class CodeRegionExecutor:
     def _execute_class_method(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                             method_name: str, input_data: Any) -> Any:
         """Execute a method from a class."""
-        import builtins
-        print(f"DEBUG _execute_class_method: Starting with method_name={method_name}")
-        print(f"DEBUG: Exception type at start: {type(Exception)}")
-        
+       
         if not method_name:
             raise ValueError(f"Method name required for class region '{region_info.name}'")
         
@@ -1242,14 +1213,6 @@ class CodeRegionExecutor:
             return result
         
         except Exception as e:
-            print(f"DEBUG: Exception caught in _execute_class_method")
-            print(f"DEBUG: Exception type: {type(e)}")
-            print(f"DEBUG: Exception is BaseException: {isinstance(e, BaseException)}")
-            print(f"DEBUG: Exception is builtins.Exception: {isinstance(e, builtins.Exception)}")
-            print(f"DEBUG: str(e): {str(e)}")
-            import traceback
-            print("DEBUG: Traceback:")
-            traceback.print_exc()
             raise ValueError(f"Error executing method '{method_name}': {str(e)}")
         
     def _execute_function(self, namespace: Dict[str, Any], region_info: RegionInfo, 
