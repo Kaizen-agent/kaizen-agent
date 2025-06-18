@@ -47,7 +47,6 @@ class ConfigurationValidator:
             ValidationRule('evaluation', required=False, type=dict),
             ValidationRule('assertions', required=False, type=list),
             ValidationRule('expected_output', required=False, type=dict),
-            ValidationRule('dependencies', required=False, type=list),
             ValidationRule('files_to_fix', required=False, type=list)
         ]
     
