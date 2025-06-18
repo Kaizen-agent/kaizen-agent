@@ -623,7 +623,8 @@ class ImportManager:
         try:
             # First analyze all required imports
             standard_imports, third_party_imports = self._import_analyzer.analyze_imports(region_info.code)
-            
+            logger.info(f"standard_imports: {standard_imports}")
+            logger.info(f"third_party_imports: {third_party_imports}")
             # Add configured third-party packages to imports
             third_party_imports.update(self.config.common_packages.keys())
             
