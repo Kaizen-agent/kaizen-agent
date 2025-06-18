@@ -299,7 +299,9 @@ class FixAttemptTracker:
     
     def start_attempt(self) -> FixAttempt:
         """Start a new fix attempt."""
+        logger.info(f"Starting new attempt")
         attempt = FixAttempt(attempt_number=len(self.attempts) + 1)
+        logger.info(f"Attempt: {attempt}")
         self.current_attempt = attempt
         self.attempts.append(attempt)
         return attempt
