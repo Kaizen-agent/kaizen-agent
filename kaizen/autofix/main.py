@@ -392,6 +392,59 @@ class FixResultDict(TypedDict):
     explanation: Optional[str]
     confidence: Optional[float]
 
+class CodeFormatter:
+    """Handles code formatting and syntax fixes."""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+    
+    def format_code(self, code: str) -> str:
+        """Format code using a progressive approach.
+        
+        Args:
+            code: The code to format
+            
+        Returns:
+            Formatted code string
+            
+        Raises:
+            ValueError: If formatting fails
+        """
+        try:
+            self.logger.debug("Starting code formatting", extra={'code_length': len(code)})
+            
+            # First try common syntax fixes
+            formatted_code = fix_common_syntax_issues(code)
+            
+            # If common fixes don't work, try aggressive fixes
+            if formatted_code == code:
+                self.logger.debug("Common fixes had no effect, trying aggressive fixes")
+                formatted_code = fix_aggressive_syntax_issues(code)
+            
+            # Validate the formatted code
+            try:
+                ast.parse(formatted_code)
+            except SyntaxError as e:
+                self.logger.error("Formatted code has syntax errors", extra={
+                    'error': str(e),
+                    'error_type': type(e).__name__
+                })
+                raise ValueError(f"Formatted code has syntax errors: {str(e)}")
+            
+            self.logger.debug("Code formatting completed", extra={
+                'original_length': len(code),
+                'formatted_length': len(formatted_code)
+            })
+            
+            return formatted_code
+            
+        except Exception as e:
+            self.logger.error("Error formatting code", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
+            raise ValueError(f"Failed to format code: {str(e)}")
+
 class AutoFix:
     """Handles automatic code fixing."""
     
@@ -531,21 +584,47 @@ class AutoFix:
         Returns:
             FixResult object
         """
-        fix_result = self.llm_fixer.fix_code(
-            file_content,
-            current_file_path,
-            failure_data=failure_data,
-            config=config,
-            context_files=context_files
-        )
-        logger.info("LLM fix result", extra={
-            'file_path': current_file_path,
-            'status': fix_result.status
-        })
+        try:
+            fix_result = self.llm_fixer.fix_code(
+                file_content,
+                current_file_path,
+                failure_data=failure_data,
+                config=config,
+                context_files=context_files
+            )
+            logger.info("LLM fix result", extra={
+                'file_path': current_file_path,
+                'status': fix_result.status
+            })
 
-        if fix_result.status == FixStatus.SUCCESS:
-            return self._handle_successful_fix(current_file_path, fix_result)
-        return self._handle_failed_fix(current_file_path, file_content)
+            # Format the fixed code
+            formatter = CodeFormatter()
+            fix_result.fixed_code = formatter.format_code(fix_result.fixed_code)
+
+            if fix_result.status == FixStatus.SUCCESS:
+                return self._handle_successful_fix(current_file_path, fix_result)
+            return self._handle_failed_fix(current_file_path, file_content)
+            
+        except ValueError as e:
+            logger.error(f"Error formatting fixed code for {current_file_path}", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
+            return FixResult(
+                status=FixStatus.ERROR,
+                changes={},
+                error=f"Failed to format fixed code: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in LLM fix for {current_file_path}", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
+            return FixResult(
+                status=FixStatus.ERROR,
+                changes={},
+                error=f"Unexpected error: {str(e)}"
+            )
 
     def _handle_successful_fix(self, current_file_path: str, fix_result: FixResultDict) -> FixResult:
         """Handle successful LLM fix.
