@@ -17,6 +17,7 @@ from .code.fixer import fix_common_syntax_issues, fix_aggressive_syntax_issues, 
 from .code.llm_fixer import LLMCodeFixer
 from .test.runner import TestRunner
 from .pr.manager import PRManager
+from .types import FixStatus, CompatibilityIssue
 
 # Configure logging
 logger = logging.getLogger(__name__)

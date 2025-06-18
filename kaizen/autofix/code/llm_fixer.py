@@ -3,22 +3,19 @@
 import os
 import logging
 import json
-from typing import Dict, Any, Optional, List, Set, Tuple, TypedDict, Union
+from typing import Dict, Any, Optional, List, Set, Tuple, TypedDict, Union, TYPE_CHECKING
 import google.generativeai as genai
 from tenacity import retry, stop_after_attempt, wait_exponential
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from enum import Enum, auto
 
-from kaizen.cli.commands.models import TestConfiguration
+if TYPE_CHECKING:
+    from kaizen.cli.commands.models import TestConfiguration
+
+from ..types import FixStatus
 
 logger = logging.getLogger(__name__)
-
-class FixStatus(Enum):
-    """Status of a fix operation."""
-    SUCCESS = auto()
-    ERROR = auto()
-    INVALID_RESPONSE = auto()
 
 class LLMError(Exception):
     """Base exception for LLM-related errors."""
@@ -200,7 +197,7 @@ class PromptBuilder:
     
     @staticmethod
     def build_fix_prompt(content: str, file_path: str, failure_data: Optional[Dict],
-                        config: Optional[TestConfiguration], context_files: Optional[Dict[str, str]]) -> str:
+                        config: Optional['TestConfiguration'], context_files: Optional[Dict[str, str]]) -> str:
         """Build prompt for code fixing in AI agent development context."""
         prompt_parts = [
             """You are an expert AI agent developer. Your task is to improve the code following these guidelines:
@@ -460,7 +457,7 @@ class LLMCodeFixer:
             raise LLMError(f"Failed to initialize LLM model: {str(e)}")
     
     def fix_code(self, content: str, file_path: str, failure_data: Optional[Dict] = None,
-                config: Optional[TestConfiguration] = None, context_files: Optional[Dict[str, str]] = None) -> FixResult:
+                config: Optional['TestConfiguration'] = None, context_files: Optional[Dict[str, str]] = None) -> FixResult:
         """
         Fix code using LLM.
         
