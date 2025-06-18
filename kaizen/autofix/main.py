@@ -894,35 +894,38 @@ Code to format:
         return '\n'.join(fixed_lines)
     
     def _basic_formatting(self, code: str) -> str:
-        """Apply basic formatting rules."""
-        lines = code.split('\n')
-        formatted_lines = []
         
-        for line in lines:
-            # Remove trailing whitespace
-            line = line.rstrip()
+        
+        # """Apply basic formatting rules."""
+        # lines = code.split('\n')
+        # formatted_lines = []
+        
+        # for line in lines:
+        #     # Remove trailing whitespace
+        #     line = line.rstrip()
             
-            # Basic operator spacing (simple cases only)
-            if '=' in line and not any(op in line for op in ['==', '!=', '<=', '>=']):
-                parts = line.split('=', 1)
-                if len(parts) == 2:
-                    line = parts[0].rstrip() + ' = ' + parts[1].lstrip()
+        #     # Basic operator spacing (simple cases only)
+        #     if '=' in line and not any(op in line for op in ['==', '!=', '<=', '>=']):
+        #         parts = line.split('=', 1)
+        #         if len(parts) == 2:
+        #             line = parts[0].rstrip() + ' = ' + parts[1].lstrip()
             
-            formatted_lines.append(line)
+        #     formatted_lines.append(line)
         
-        # Remove excessive blank lines
-        result = []
-        prev_empty = False
-        for line in formatted_lines:
-            if line.strip() == '':
-                if not prev_empty:
-                    result.append(line)
-                prev_empty = True
-            else:
-                result.append(line)
-                prev_empty = False
+        # # Remove excessive blank lines
+        # result = []
+        # prev_empty = False
+        # for line in formatted_lines:
+        #     if line.strip() == '':
+        #         if not prev_empty:
+        #             result.append(line)
+        #         prev_empty = True
+        #     else:
+        #         result.append(line)
+        #         prev_empty = False
         
-        return '\n'.join(result)
+        # return '\n'.join(result)
+        return code
 
 class AutoFix:
     """Handles automatic code fixing."""
