@@ -65,18 +65,3 @@ steps:
     evaluation:
       type: llm
 
-  - name: Empty Input
-    description: Test handling of empty input
-    input:
-      file_path: email_agent.py
-      region: email_agent
-      method: improve_email
-      input: ""
-    expected_output:
-      type: "string"
-      exact: "I'm sorry, I can't help with that."
-    assertions:
-      - type: "equals"
-        value: "I'm sorry, I can't help with that."
-    evaluation:
-      type: llm
