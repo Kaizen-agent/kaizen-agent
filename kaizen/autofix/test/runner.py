@@ -177,7 +177,9 @@ class TestRunner:
             if not resolved_path.exists():
                 raise FileNotFoundError(f"Test file not found: {resolved_path}")
             
-            for test_case in self.test_config.get('steps', []):
+            logger.info(f"Running tests: {self.test_config.get('tests', [])}")
+            for test_case in self.test_config.get('tests', []):
+                logger.info(f"Running test case: {test_case.get('name', 'Unknown')}")
                 test_name = test_case.get('name', 'Unknown')
                 test_result = self._run_test_case(test_case, resolved_path)
                 logger.info(f"Test result: {test_result}")
