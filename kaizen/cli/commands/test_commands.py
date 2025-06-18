@@ -179,7 +179,7 @@ class TestAllCommand(BaseTestCommand):
                     file_path=str(self.config.file_path),
                     failure_data=failed_tests,
                     files_to_fix=files_to_fix,
-                    user_goal=config.user_goal
+                    config=config
                 )
             else:
                 raise AutoFixError("No files to fix were provided")

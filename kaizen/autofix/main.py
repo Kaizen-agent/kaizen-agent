@@ -9,6 +9,8 @@ from enum import Enum, auto
 import shutil
 import tempfile
 
+from kaizen.cli.commands.models import TestConfiguration
+
 
 from .file.dependency import collect_referenced_files, analyze_failure_dependencies
 from .code.fixer import fix_common_syntax_issues, fix_aggressive_syntax_issues, apply_code_changes
@@ -468,7 +470,7 @@ class AutoFix:
     
     def _process_file_with_llm(self, current_file: str, file_content: str, 
                              context_files: Dict[str, str], failure_data: Optional[Dict],
-                             user_goal: Optional[str]) -> FixResult:
+                             config: Optional[TestConfiguration]) -> FixResult:
         """
         Process a single file using LLM.
         
@@ -480,7 +482,7 @@ class AutoFix:
                 file_content,
                 current_file,
                 failure_data=failure_data,
-                user_goal=user_goal,
+                config=config,
                 context_files=context_files
             )
             
@@ -609,7 +611,7 @@ class AutoFix:
             results['pr'] = pr_data
     
     def fix_code(self, file_path: str, failure_data: List[Dict[str, Any]] = None, 
-                user_goal: Optional[str] = None, files_to_fix: List[str] = None) -> Dict:
+                config: Optional[TestConfiguration] = None, files_to_fix: List[str] = None) -> Dict:
         """Fix code in the given files with retry logic.
         
         Args:
@@ -664,7 +666,7 @@ class AutoFix:
                                 }
                                 
                                 fix_result = self._process_file_with_llm(
-                                    current_file, file_content, context_files, failure_data, user_goal
+                                    current_file, file_content, context_files, failure_data, config
                                 )
                                 
                                 if fix_result.status == FixStatus.SUCCESS:

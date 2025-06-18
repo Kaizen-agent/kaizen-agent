@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from enum import Enum, auto
 
+from kaizen.cli.commands.models import TestConfiguration
+
 logger = logging.getLogger(__name__)
 
 class FixStatus(Enum):
@@ -198,7 +200,7 @@ class PromptBuilder:
     
     @staticmethod
     def build_fix_prompt(content: str, file_path: str, failure_data: Optional[Dict],
-                        user_goal: Optional[str], context_files: Optional[Dict[str, str]]) -> str:
+                        config: Optional[TestConfiguration], context_files: Optional[Dict[str, str]]) -> str:
         """Build prompt for code fixing in AI agent development context."""
         prompt_parts = [
             """You are an expert AI agent developer. Your task is to improve the code following these guidelines:
@@ -272,8 +274,8 @@ Format your response as:
         if failure_data:
             prompt_parts.append(f"\nFailure Information:\n{failure_data}")
         
-        if user_goal:
-            prompt_parts.append(f"\nUser Goal:\n{user_goal}")
+        if config:
+            prompt_parts.append(f"\nUser Goal:\n{config}")
         
         if context_files:
             prompt_parts.append("\nRelated Files (for context and dependencies):")
@@ -458,7 +460,7 @@ class LLMCodeFixer:
             raise LLMError(f"Failed to initialize LLM model: {str(e)}")
     
     def fix_code(self, content: str, file_path: str, failure_data: Optional[Dict] = None,
-                user_goal: Optional[str] = None, context_files: Optional[Dict[str, str]] = None) -> FixResult:
+                config: Optional[TestConfiguration] = None, context_files: Optional[Dict[str, str]] = None) -> FixResult:
         """
         Fix code using LLM.
         
@@ -475,7 +477,7 @@ class LLMCodeFixer:
         try:
             # Prepare the prompt
             prompt = self.prompt_builder.build_fix_prompt(
-                content, file_path, failure_data, user_goal, context_files
+                content, file_path, failure_data, config, context_files
             )
             
             # Get fix from LLM
