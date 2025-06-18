@@ -590,14 +590,25 @@ class LLMCodeFixer:
                 prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.1,  # Low temperature for more focused results
-                    max_output_tokens=2048,
+                    max_output_tokens=10000,
                     top_p=0.8,
                     top_k=40,
                 )
             )
             
-            if not response or not response.text:
+            # Check if response is None
+            if response is None:
                 raise LLMResponseError("Empty response from LLM")
+            
+            # Check if response has a valid finish reason
+            if hasattr(response, 'candidates') and response.candidates:
+                finish_reason = response.candidates[0].finish_reason
+                if finish_reason == 2:  # Safety or other constraint
+                    raise LLMResponseError("Model stopped due to safety constraints or other limitations")
+            
+            # Check if response has text
+            if not hasattr(response, 'text') or not response.text:
+                raise LLMResponseError("No text content in LLM response")
                 
             return response.text
             

@@ -119,6 +119,7 @@ class TestRunner:
             # Combine results
             return {
                 'status': status,
+                'input': test_case_obj.input,
                 'output': actual_output,
                 'assertions': assertion_results,
                 'llm_evaluation': llm_evaluation,
@@ -228,6 +229,7 @@ class TestRunner:
             'status': test_result['status'],
             'test_cases': [{
                 'status': test_result['status'],
+                'input': test_result.get('input'),
                 'output': test_result.get('output'),
                 'assertions': test_result.get('assertions', []),
                 'llm_evaluation': test_result.get('llm_evaluation', {}),
