@@ -191,7 +191,19 @@ class AssertionRunner:
     
     @staticmethod
     def run_assertions(assertions: List[Dict], actual_output: Any) -> List[Dict]:
-        """Run assertions on the test output."""
+        """Run assertions on the test output.
+        
+        Args:
+            assertions: List of assertions to run
+            actual_output: The actual output to test against
+            
+        Returns:
+            List of assertion results
+        """
+        # If no assertions provided, return empty list
+        if not assertions:
+            return []
+            
         results = []
         for assertion in assertions:
             try:

@@ -4,38 +4,40 @@ This module defines the TestStep model used to represent individual test steps
 in the test configuration.
 """
 
-from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from dataclasses import dataclass, field
+from typing import Dict, Any, List, Optional
 
-@dataclass(frozen=True)
+@dataclass
 class TestStep:
-    """A single test step in the configuration.
+    """A single test step configuration.
     
     Attributes:
-        name: Step identifier
+        name: Step name
         command: Command to execute
-        expected_output: Expected result
+        expected_output: Expected output configuration
         description: Step description
-        timeout: Timeout in seconds
+        timeout: Step timeout in seconds
         retries: Number of retry attempts
-        environment: Step-specific environment variables
-        dependencies: Required step dependencies
+        environment: Environment variables
+        dependencies: List of dependencies
+        assertions: List of assertions to run
     """
     name: str
     command: str
-    expected_output: str
+    expected_output: Optional[Dict[str, Any]] = None
     description: Optional[str] = None
     timeout: Optional[int] = None
     retries: Optional[int] = None
     environment: Optional[Dict[str, str]] = None
-    dependencies: Optional[list[str]] = None
+    dependencies: Optional[List[str]] = None
+    assertions: Optional[List[Dict[str, Any]]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TestStep':
         """Create a TestStep instance from a dictionary.
         
         Args:
-            data: Dictionary containing step data
+            data: Dictionary containing step configuration
             
         Returns:
             TestStep instance
@@ -43,10 +45,11 @@ class TestStep:
         return cls(
             name=data.get('name', ''),
             command=data.get('input', {}).get('method', ''),
-            expected_output=data.get('expected_output', ''),
+            expected_output=data.get('expected_output'),
             description=data.get('description'),
             timeout=data.get('timeout'),
             retries=data.get('retries'),
             environment=data.get('environment'),
-            dependencies=data.get('dependencies')
+            dependencies=data.get('dependencies'),
+            assertions=data.get('assertions')
         ) 

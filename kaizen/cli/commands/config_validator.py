@@ -43,7 +43,9 @@ class ConfigurationValidator:
             ValidationRule('regions', required=False, type=list),
             ValidationRule('steps', required=False, type=list),
             ValidationRule('metadata', required=False, type=dict),
-            ValidationRule('evaluation', required=False, type=dict)
+            ValidationRule('evaluation', required=False, type=dict),
+            ValidationRule('assertions', required=False, type=list),
+            ValidationRule('expected_output', required=False, type=dict)
         ]
     
     def validate(self, config_data: Dict[str, Any]) -> Result[Dict[str, Any]]:
@@ -112,12 +114,13 @@ class ConfigurationValidator:
             config_data: The configuration data to validate
             
         Returns:
-            List of missing required field names
+            List of missing required fields
         """
-        return [
-            rule.field for rule in self.rules
-            if rule.required and rule.field not in config_data
-        ]
+        missing_fields = []
+        for rule in self.rules:
+            if rule.required and rule.field not in config_data:
+                missing_fields.append(rule.field)
+        return missing_fields
     
     def _validate_field_types(self, config_data: Dict[str, Any]) -> List[str]:
         """Validate that all fields have the correct type.
@@ -126,18 +129,17 @@ class ConfigurationValidator:
             config_data: The configuration data to validate
             
         Returns:
-            List of type validation error messages
+            List of type validation errors
         """
-        errors = []
+        type_errors = []
         for rule in self.rules:
             if rule.field in config_data and rule.type is not None:
-                value = config_data[rule.field]
-                if not isinstance(value, rule.type):
-                    errors.append(
+                if not isinstance(config_data[rule.field], rule.type):
+                    type_errors.append(
                         f"Field '{rule.field}' must be of type {rule.type.__name__}, "
-                        f"got {type(value).__name__}"
+                        f"got {type(config_data[rule.field]).__name__}"
                     )
-        return errors
+        return type_errors
     
     def _validate_field_values(self, config_data: Dict[str, Any]) -> List[str]:
         """Validate field values using custom validators.
@@ -146,14 +148,13 @@ class ConfigurationValidator:
             config_data: The configuration data to validate
             
         Returns:
-            List of value validation error messages
+            List of value validation errors
         """
-        errors = []
+        value_errors = []
         for rule in self.rules:
             if rule.field in config_data and rule.validator is not None:
-                value = config_data[rule.field]
                 try:
-                    rule.validator(value)
+                    rule.validator(config_data[rule.field])
                 except ValueError as e:
-                    errors.append(f"Field '{rule.field}': {str(e)}")
-        return errors 
+                    value_errors.append(f"Field '{rule.field}': {str(e)}")
+        return value_errors 
