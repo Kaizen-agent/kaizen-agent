@@ -92,7 +92,7 @@ class TestAllCommand(BaseTestCommand):
             test_attempts = None
             if self.config.auto_fix and failed_tests:
                 self.logger.info(f"Found {len(failed_tests)} failed tests")
-                test_attempts = self._handle_auto_fix(failed_tests)
+                test_attempts = self._handle_auto_fix(failed_tests, self.config)
             
             result = TestResult(
                 name=self.config.name,
@@ -152,7 +152,7 @@ class TestAllCommand(BaseTestCommand):
             
         return config
     
-    def _handle_auto_fix(self, failed_tests: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    def _handle_auto_fix(self, failed_tests: List[Dict[str, Any]], config: TestConfiguration) -> Optional[List[Dict[str, Any]]]:
         """Handle auto-fix for failed tests.
         
         Args:
@@ -178,7 +178,8 @@ class TestAllCommand(BaseTestCommand):
                 fix_results = fixer.fix_code(
                     file_path=str(self.config.file_path),
                     failure_data=failed_tests,
-                    files_to_fix=files_to_fix
+                    files_to_fix=files_to_fix,
+                    user_goal=config.user_goal
                 )
             else:
                 raise AutoFixError("No files to fix were provided")
