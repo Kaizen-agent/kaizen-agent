@@ -120,25 +120,39 @@ def fix_common_syntax_issues(code: str) -> str:
         fixed_lines = []
         current_indent = 0
         indent_stack = []
+        bracket_stack = []
         
         for line in lines:
             stripped = line.strip()
             
-            # Handle indentation changes
-            if stripped.endswith(':'):
-                fixed_lines.append('    ' * current_indent + stripped)
-                indent_stack.append(current_indent)
-                current_indent += 1
+            # Skip empty lines
+            if not stripped:
+                fixed_lines.append('')
+                continue
+            
+            # Count brackets to track nesting
+            for char in stripped:
+                if char in '([{':
+                    bracket_stack.append(char)
+                elif char in ')]}':
+                    if bracket_stack:
+                        bracket_stack.pop()
+            
+            # Handle dedent keywords
+            if stripped.startswith(('else:', 'elif', 'except', 'finally:')):
+                if indent_stack:
+                    current_indent = indent_stack[-1]
             elif stripped.startswith(('return', 'break', 'continue', 'pass')):
                 if indent_stack:
                     current_indent = indent_stack.pop()
-                fixed_lines.append('    ' * current_indent + stripped)
-            elif stripped.startswith(('else:', 'elif ', 'except ', 'finally:')):
-                if indent_stack:
-                    current_indent = indent_stack[-1]
-                fixed_lines.append('    ' * current_indent + stripped)
-            else:
-                fixed_lines.append('    ' * current_indent + stripped)
+            
+            # Apply current indentation
+            fixed_lines.append('    ' * current_indent + stripped)
+            
+            # Handle indent increase
+            if stripped.endswith(':'):
+                indent_stack.append(current_indent)
+                current_indent += 1
         
         fixed_code = '\n'.join(fixed_lines)
         

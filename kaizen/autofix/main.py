@@ -894,38 +894,50 @@ Code to format:
         return '\n'.join(fixed_lines)
     
     def _basic_formatting(self, code: str) -> str:
+        """Apply basic formatting rules."""
+        lines = code.split('\n')
+        formatted_lines = []
+        current_indent = 0
+        indent_stack = []
         
-        
-        # """Apply basic formatting rules."""
-        # lines = code.split('\n')
-        # formatted_lines = []
-        
-        # for line in lines:
-        #     # Remove trailing whitespace
-        #     line = line.rstrip()
+        for line in lines:
+            stripped = line.strip()
             
-        #     # Basic operator spacing (simple cases only)
-        #     if '=' in line and not any(op in line for op in ['==', '!=', '<=', '>=']):
-        #         parts = line.split('=', 1)
-        #         if len(parts) == 2:
-        #             line = parts[0].rstrip() + ' = ' + parts[1].lstrip()
+            # Skip empty lines
+            if not stripped:
+                formatted_lines.append('')
+                continue
+                
+            # Handle dedent keywords
+            if stripped.startswith(('else:', 'elif', 'except', 'finally:')):
+                if indent_stack:
+                    current_indent = indent_stack[-1]
+            elif stripped.startswith(('return', 'break', 'continue', 'pass')):
+                if indent_stack:
+                    current_indent = indent_stack.pop()
             
-        #     formatted_lines.append(line)
+            # Apply current indentation
+            formatted_line = '    ' * current_indent + stripped
+            formatted_lines.append(formatted_line)
+            
+            # Handle indent increase
+            if stripped.endswith(':'):
+                indent_stack.append(current_indent)
+                current_indent += 1
         
-        # # Remove excessive blank lines
-        # result = []
-        # prev_empty = False
-        # for line in formatted_lines:
-        #     if line.strip() == '':
-        #         if not prev_empty:
-        #             result.append(line)
-        #         prev_empty = True
-        #     else:
-        #         result.append(line)
-        #         prev_empty = False
+        # Remove excessive blank lines
+        result = []
+        prev_empty = False
+        for line in formatted_lines:
+            if line.strip() == '':
+                if not prev_empty:
+                    result.append(line)
+                prev_empty = True
+            else:
+                result.append(line)
+                prev_empty = False
         
-        # return '\n'.join(result)
-        return code
+        return '\n'.join(result)
 
 class AutoFix:
     """Handles automatic code fixing."""
