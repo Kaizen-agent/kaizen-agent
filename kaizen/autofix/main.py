@@ -3,7 +3,7 @@ import logging
 import yaml
 import ast
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Set, Tuple, NamedTuple, Union, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, Set, Tuple, NamedTuple, Union, TYPE_CHECKING, TypedDict
 from dataclasses import dataclass
 from enum import Enum, auto
 import shutil
@@ -385,8 +385,20 @@ class FixConfig:
             auto_fix=config['auto_fix']
         )
 
+class FixResultDict(TypedDict):
+    """Type definition for fix result dictionary."""
+    fixed_code: str
+    changes: Dict[str, Any]
+    explanation: Optional[str]
+    confidence: Optional[float]
+
 class AutoFix:
     """Handles automatic code fixing."""
+    
+    # Constants for logging and error messages
+    LOG_LEVEL_INFO = "info"
+    LOG_LEVEL_ERROR = "error"
+    ERROR_MSG_FIX_FAILED = "Failed to fix code"
     
     def __init__(self, config: Union[Dict, 'TestConfiguration']):
         """Initialize AutoFix with configuration.
@@ -473,82 +485,26 @@ class AutoFix:
     def _process_file_with_llm(self, current_file_path: str, file_content: str, 
                              context_files: Dict[str, str], failure_data: Optional[Dict],
                              config: Optional['TestConfiguration']) -> FixResult:
-        """
-        Process a single file using LLM.
+        """Process a single file using LLM.
         
+        Args:
+            current_file_path: Path to the file being processed
+            file_content: Content of the file
+            context_files: Dictionary of related files and their contents
+            failure_data: Data about test failures
+            config: Test configuration
+            
         Returns:
             FixResult object
+            
+        Raises:
+            ConfigurationError: If there's an issue with the configuration
+            FileNotFoundError: If the file cannot be found
+            PermissionError: If there are permission issues
         """
         try:
-            fix_result = self.llm_fixer.fix_code(
-                file_content,
-                current_file_path,
-                failure_data=failure_data,
-                config=config,
-                context_files=context_files
-            )
-            logger.info(f"fix_result: {fix_result}")
-            if fix_result.status == FixStatus.SUCCESS:
-                logger.info(f"Starting markdown cleanup for {current_file_path}")
-                try:
-                    fixed_code = self.llm_fixer._clean_markdown_notations(fix_result['fixed_code'])
-                    logger.info(f"Successfully cleaned markdown notations for {current_file_path}")
-                except Exception as e:
-                    logger.error(f"Failed to clean markdown notations for {current_file_path}", extra={
-                        'error': str(e),
-                        'error_type': type(e).__name__,
-                        'fix_result': fix_result
-                    })
-                    raise
-
-                logger.info(f"Applying changes to {current_file_path}")
-                try:
-                    apply_code_changes(current_file_path, fixed_code)
-                    logger.info(f"Successfully applied changes to {current_file_path}")
-                    return FixResult(
-                        status=FixStatus.SUCCESS,
-                        changes=fix_result.changes,
-                        explanation=fix_result.explanation,
-                        confidence=fix_result.confidence
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to apply changes to {current_file_path}", extra={
-                        'error': str(e),
-                        'error_type': type(e).__name__,
-                        'fixed_code_length': len(fixed_code) if fixed_code else 0
-                    })
-                    raise
-            else:
-                # Try common fixes
-                logger.info(f"Attempting common fixes for {current_file_path}")
-                try:
-                    fixed_content = fix_common_syntax_issues(file_content)
-                    if fixed_content == file_content:
-                        logger.info(f"Common fixes had no effect, trying aggressive fixes for {current_file_path}")
-                        fixed_content = fix_aggressive_syntax_issues(file_content)
-                    
-                    if fixed_content != file_content:
-                        logger.info(f"Applying syntax fixes to {current_file_path}")
-                        apply_code_changes(current_file_path, fixed_content)
-                        return FixResult(
-                            status=FixStatus.SUCCESS,
-                            changes={'type': 'common_fixes'}
-                        )
-                except Exception as e:
-                    logger.error(f"Failed to apply common fixes to {current_file_path}", extra={
-                        'error': str(e),
-                        'error_type': type(e).__name__
-                    })
-                    raise
-                
-                logger.error(f"All fix attempts failed for {current_file_path}")
-                return FixResult(
-                    status=FixStatus.ERROR,
-                    changes={},
-                    error='Failed to fix code'
-                )
-                
-        except Exception as e:
+            return self._handle_llm_fix(current_file_path, file_content, context_files, failure_data, config)
+        except (ConfigurationError, FileNotFoundError, PermissionError) as e:
             logger.error(f"Error processing file {current_file_path}", extra={
                 'error': str(e),
                 'error_type': type(e).__name__,
@@ -559,6 +515,156 @@ class AutoFix:
                 changes={},
                 error=str(e)
             )
+
+    def _handle_llm_fix(self, current_file_path: str, file_content: str,
+                       context_files: Dict[str, str], failure_data: Optional[Dict],
+                       config: Optional['TestConfiguration']) -> FixResult:
+        """Handle LLM-based code fixing.
+        
+        Args:
+            current_file_path: Path to the file being processed
+            file_content: Content of the file
+            context_files: Dictionary of related files and their contents
+            failure_data: Data about test failures
+            config: Test configuration
+            
+        Returns:
+            FixResult object
+        """
+        fix_result = self.llm_fixer.fix_code(
+            file_content,
+            current_file_path,
+            failure_data=failure_data,
+            config=config,
+            context_files=context_files
+        )
+        logger.info("LLM fix result", extra={
+            'file_path': current_file_path,
+            'status': fix_result.status
+        })
+
+        if fix_result.status == FixStatus.SUCCESS:
+            return self._handle_successful_fix(current_file_path, fix_result)
+        return self._handle_failed_fix(current_file_path, file_content)
+
+    def _handle_successful_fix(self, current_file_path: str, fix_result: FixResultDict) -> FixResult:
+        """Handle successful LLM fix.
+        
+        Args:
+            current_file_path: Path to the file being processed
+            fix_result: Dictionary containing fix results
+            
+        Returns:
+            FixResult object
+            
+        Raises:
+            ValueError: If the fix result is invalid
+            IOError: If there are issues writing to the file
+        """
+        try:
+            fixed_code = self._clean_markdown_notations(fix_result)
+            self._apply_code_changes(current_file_path, fixed_code)
+            return self._create_success_result(fix_result)
+        except (ValueError, IOError) as e:
+            logger.error(f"Failed to apply successful fix to {current_file_path}", extra={
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'fix_result': fix_result
+            })
+            raise
+
+    def _clean_markdown_notations(self, fix_result: FixResultDict) -> str:
+        """Clean markdown notations from fixed code.
+        
+        Args:
+            fix_result: Dictionary containing fix results
+            
+        Returns:
+            Cleaned code string
+        """
+        logger.info("Cleaning markdown notations", extra={'file_path': fix_result.get('file_path')})
+        return self.llm_fixer._clean_markdown_notations(fix_result['fixed_code'])
+
+    def _apply_code_changes(self, current_file_path: str, fixed_code: str) -> None:
+        """Apply code changes to file.
+        
+        Args:
+            current_file_path: Path to the file being processed
+            fixed_code: The fixed code to apply
+            
+        Raises:
+            IOError: If there are issues writing to the file
+        """
+        logger.info("Applying code changes", extra={'file_path': current_file_path})
+        apply_code_changes(current_file_path, fixed_code)
+
+    def _create_success_result(self, fix_result: FixResultDict) -> FixResult:
+        """Create a success result object.
+        
+        Args:
+            fix_result: Dictionary containing fix results
+            
+        Returns:
+            FixResult object
+        """
+        return FixResult(
+            status=FixStatus.SUCCESS,
+            changes=fix_result['changes'],
+            explanation=fix_result.get('explanation'),
+            confidence=fix_result.get('confidence')
+        )
+
+    def _handle_failed_fix(self, current_file_path: str, file_content: str) -> FixResult:
+        """Handle failed LLM fix by attempting common fixes.
+        
+        Args:
+            current_file_path: Path to the file being processed
+            file_content: Content of the file
+            
+        Returns:
+            FixResult object
+        """
+        try:
+            fixed_content = self._attempt_common_fixes(current_file_path, file_content)
+            if fixed_content != file_content:
+                self._apply_code_changes(current_file_path, fixed_content)
+                return FixResult(
+                    status=FixStatus.SUCCESS,
+                    changes={'type': 'common_fixes'}
+                )
+        except Exception as e:
+            logger.error(f"Failed to apply common fixes to {current_file_path}", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
+            raise
+        
+        logger.error(f"All fix attempts failed for {current_file_path}")
+        return FixResult(
+            status=FixStatus.ERROR,
+            changes={},
+            error=self.ERROR_MSG_FIX_FAILED
+        )
+
+    def _attempt_common_fixes(self, current_file_path: str, file_content: str) -> str:
+        """Attempt common fixes on the file content.
+        
+        Args:
+            current_file_path: Path to the file being processed
+            file_content: Content of the file
+            
+        Returns:
+            Fixed content string
+        """
+        logger.info("Attempting common fixes", extra={'file_path': current_file_path})
+        fixed_content = fix_common_syntax_issues(file_content)
+        
+        if fixed_content == file_content:
+            logger.info("Common fixes had no effect, trying aggressive fixes", 
+                       extra={'file_path': current_file_path})
+            fixed_content = fix_aggressive_syntax_issues(file_content)
+        
+        return fixed_content
     
     def _handle_file_processing_error(self, current_file: str, error: Exception) -> Dict:
         """Handle errors during file processing."""
