@@ -513,6 +513,7 @@ Code to format:
                 if llm_formatted and llm_formatted != code:
                     self.logger.info("LLM formatting successful")
                     code = llm_formatted
+                    self.logger.info(f"LLM formatted code: {code}")
             except Exception as e:
                 self.logger.warning(f"LLM formatting failed, falling back to standard formatting: {str(e)}")
             
