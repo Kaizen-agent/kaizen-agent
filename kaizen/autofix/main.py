@@ -408,7 +408,7 @@ class AutoFix:
         return {
             'max_retries': config.max_retries,
             'create_pr': config.create_pr,
-            'pr_strategy': config.pr_strategy.name,
+            'pr_strategy': config.pr_strategy,
             'base_branch': config.base_branch,
             'auto_fix': config.auto_fix
         }
