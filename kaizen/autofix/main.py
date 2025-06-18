@@ -519,8 +519,9 @@ Code to format:
             
             # Check if code is already valid
             is_valid, _ = self._validate_syntax(code)
+            self.logger.info(f"Code is valid: {is_valid}")
             if is_valid:
-                self.logger.debug("Code already valid, applying basic formatting")
+                self.logger.info("Code already valid, applying basic formatting")
                 return self._basic_formatting(code)
             
             # First try common syntax fixes
