@@ -174,10 +174,7 @@ class TestAllCommand(BaseTestCommand):
             fixer = AutoFix(self.config)
             fix_results = fixer.fix_code(
                 str(self.config.file_path),
-                failed_tests,
-                max_retries=self.config.max_retries,
-                create_pr=self.config.create_pr,
-                base_branch=self.config.base_branch
+                failed_tests
             )
             
             # Process and return attempts
