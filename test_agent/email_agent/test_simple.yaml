@@ -28,6 +28,9 @@ evaluation:
 regions:
   - email_agent
 
+settings:
+  retries: 2
+
 steps:
   - name: Basic Email Improvement
     description: Test basic email improvement functionality

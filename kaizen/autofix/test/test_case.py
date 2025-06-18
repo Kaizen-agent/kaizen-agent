@@ -83,6 +83,7 @@ class PromptBuilder:
         and rules provided in the test case configuration.
         """
         criteria = test_case.llm_evaluation.get('criteria', {})
+        logger.info(f"EVALUATION CRITERIA: {criteria}")
         evaluation_rules = criteria.get('rules', [])
         
         prompt_parts = [
