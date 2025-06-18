@@ -28,12 +28,6 @@ regions:
 
 max_retries: 2
 
-dependencies:
-  - import os
-  - from typing import Optional
-  - import google.generativeai as genai
-  - from dotenv import load_dotenv
-
 files_to_fix:
   - email_agent.py
 
