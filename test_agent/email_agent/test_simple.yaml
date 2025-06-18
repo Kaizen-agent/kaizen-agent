@@ -27,7 +27,7 @@ regions:
   - email_agent
 
 settings:
-  retry_count: 2
+  - retry_count: 2
 
 steps:
   - name: Basic Email Improvement
