@@ -3,11 +3,12 @@ import ast
 import logging
 import importlib
 import json
-from typing import Any, Set, Dict, List, Optional, Union
+from typing import Any, Set, Dict, List, Optional, Union, Tuple, Iterator
 from pathlib import Path
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 import google.generativeai as genai
+from enum import Enum
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -19,7 +20,134 @@ class ImportError:
     error_message: str
     file_path: Path
 
-def resolve_file_path(file_path: Union[str, Path], base_dir: Optional[Union[str, Path]] = None) -> tuple[Path, Path]:
+class PathResolutionStrategy(Enum):
+    """Enumeration of path resolution strategies."""
+    BASE_DIR = "base_dir"
+    CURRENT_DIR = "current_dir"
+    ABSOLUTE = "absolute"
+    PARENT_DIR = "parent_dir"
+    SUBDIRECTORIES = "subdirectories"
+
+class PathResolver:
+    """Handles path resolution with multiple strategies."""
+    
+    def __init__(self, base_dir: Optional[Path] = None):
+        """
+        Initialize the path resolver.
+        
+        Args:
+            base_dir: Optional base directory for resolving relative paths
+        """
+        self.base_dir = Path(base_dir).resolve() if base_dir else Path.cwd().resolve()
+        logger.debug(f"Initialized PathResolver with base_dir: {self.base_dir}")
+
+    def get_resolution_strategies(self, file_path: Path) -> Iterator[Tuple[PathResolutionStrategy, Path]]:
+        """
+        Generate path resolution strategies for the given file path.
+        
+        Args:
+            file_path: The file path to resolve
+            
+        Yields:
+            Tuples of (strategy, path) for each resolution attempt
+        """
+        # Basic strategies
+        yield PathResolutionStrategy.BASE_DIR, self.base_dir / file_path
+        yield PathResolutionStrategy.CURRENT_DIR, Path.cwd() / file_path
+        yield PathResolutionStrategy.ABSOLUTE, file_path.resolve()
+        yield PathResolutionStrategy.PARENT_DIR, self.base_dir.parent / file_path
+
+        # Subdirectory strategies
+        if file_path.is_relative():
+            for subdir in self._find_relevant_subdirectories():
+                yield PathResolutionStrategy.SUBDIRECTORIES, subdir / file_path
+
+    def _find_relevant_subdirectories(self) -> Iterator[Path]:
+        """
+        Find relevant subdirectories for path resolution.
+        Optimized to avoid unnecessary directory traversal.
+        
+        Yields:
+            Path objects for relevant subdirectories
+        """
+        # First check immediate subdirectories
+        for subdir in self.base_dir.iterdir():
+            if subdir.is_dir():
+                yield subdir
+
+        # Then check one level deeper if needed
+        for subdir in self.base_dir.iterdir():
+            if subdir.is_dir():
+                for deeper_dir in subdir.iterdir():
+                    if deeper_dir.is_dir():
+                        yield deeper_dir
+
+    def resolve(self, file_path: Union[str, Path]) -> Tuple[Path, Path]:
+        """
+        Resolve a file path using multiple strategies.
+        
+        Args:
+            file_path: Path to resolve, can be relative or absolute
+            
+        Returns:
+            Tuple of (resolved_file_path, resolved_base_dir)
+            
+        Raises:
+            FileNotFoundError: If the file doesn't exist after resolution
+            ValueError: If the path is invalid
+        """
+        logger.info(f"Starting path resolution for: {file_path}")
+        logger.debug(f"Base directory: {self.base_dir}")
+        logger.debug(f"Current working directory: {Path.cwd()}")
+
+        try:
+            file_path = Path(file_path)
+            if not file_path.name:  # Empty or invalid path
+                raise ValueError("Invalid file path: empty or invalid")
+
+            # Try each resolution strategy
+            for strategy, resolved_path in self.get_resolution_strategies(file_path):
+                try:
+                    logger.debug(f"Trying {strategy.value} strategy: {resolved_path}")
+                    resolved_path = resolved_path.resolve()
+                    
+                    if resolved_path.exists():
+                        logger.info(f"Found file using {strategy.value} strategy: {resolved_path}")
+                        return resolved_path, resolved_path.parent
+                    
+                    logger.debug(f"Path exists but file not found: {resolved_path}")
+                except Exception as e:
+                    logger.debug(f"Strategy {strategy.value} failed: {str(e)}")
+                    continue
+
+            # If we get here, none of the strategies worked
+            self._raise_resolution_error(file_path)
+
+        except Exception as e:
+            if isinstance(e, FileNotFoundError):
+                raise
+            logger.error(f"Unexpected error during path resolution: {str(e)}", exc_info=True)
+            raise ValueError(f"Invalid path: {str(e)}")
+
+    def _raise_resolution_error(self, file_path: Path) -> None:
+        """
+        Raise a detailed FileNotFoundError with resolution attempts.
+        
+        Args:
+            file_path: The file path that couldn't be resolved
+        """
+        strategies = list(self.get_resolution_strategies(file_path))
+        error_msg = (
+            f"Could not resolve file path: {file_path}\n"
+            f"Base directory: {self.base_dir}\n"
+            f"Current working directory: {Path.cwd()}\n"
+            f"Resolution attempts:\n" +
+            "\n".join(f"  {i+1}. [{s.value}] {p}" for i, (s, p) in enumerate(strategies))
+        )
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+
+def resolve_file_path(file_path: Union[str, Path], base_dir: Optional[Union[str, Path]] = None) -> Tuple[Path, Path]:
     """
     Resolve a file path relative to a base directory if provided, otherwise resolve to absolute path.
     Handles both relative and absolute paths, ensuring proper resolution in all cases.
@@ -35,79 +163,8 @@ def resolve_file_path(file_path: Union[str, Path], base_dir: Optional[Union[str,
         FileNotFoundError: If the file doesn't exist after resolution
         ValueError: If the path is invalid
     """
-    logger.info(f"Starting path resolution for file_path: {file_path}, base_dir: {base_dir}")
-    logger.info(f"Current working directory: {Path.cwd()}")
-    
-    try:
-        # Convert inputs to Path objects
-        file_path = Path(file_path)
-        logger.debug(f"Converted file_path to Path object: {file_path}")
-        
-        if base_dir:
-            base_dir = Path(base_dir).resolve()
-            logger.info(f"Using provided base directory: {base_dir}")
-        else:
-            # If no base_dir provided, use current working directory
-            base_dir = Path.cwd().resolve()
-            logger.info(f"No base directory provided, using current working directory: {base_dir}")
-
-        # Handle absolute paths
-        if file_path.is_absolute():
-            logger.info(f"Detected absolute path: {file_path}")
-            resolved_path = file_path.resolve()
-            logger.debug(f"Resolved absolute path: {resolved_path}")
-            if resolved_path.exists():
-                logger.info(f"Found existing file at absolute path: {resolved_path}")
-                return resolved_path, resolved_path.parent
-            else:
-                logger.warning(f"Absolute path exists but file not found: {resolved_path}")
-
-        # Try different path resolution strategies
-        resolution_attempts = [
-            # Try relative to base_dir
-            base_dir / file_path,
-            # Try relative to current working directory
-            Path.cwd() / file_path,
-            # Try as absolute path
-            file_path.resolve(),
-            # Try relative to base_dir's parent
-            base_dir.parent / file_path,
-        ]
-
-        logger.info("Starting path resolution attempts:")
-        # Try each resolution strategy
-        for i, resolved_path in enumerate(resolution_attempts, 1):
-            try:
-                logger.debug(f"Attempt {i}: Trying to resolve path: {resolved_path}")
-                resolved_path = resolved_path.resolve()
-                logger.debug(f"Attempt {i}: Resolved to: {resolved_path}")
-                
-                if resolved_path.exists():
-                    logger.info(f"Attempt {i}: Successfully found file at: {resolved_path}")
-                    return resolved_path, resolved_path.parent
-                else:
-                    logger.debug(f"Attempt {i}: Path exists but file not found: {resolved_path}")
-            except Exception as e:
-                logger.debug(f"Attempt {i}: Failed with error: {str(e)}")
-                continue
-
-        # If we get here, none of the resolution attempts worked
-        error_msg = (
-            f"Could not resolve file path: {file_path}\n"
-            f"Base directory: {base_dir}\n"
-            f"Current working directory: {Path.cwd()}\n"
-            f"Resolution attempts:\n" + 
-            "\n".join(f"  {i+1}. {path}" for i, path in enumerate(resolution_attempts))
-        )
-        logger.error(error_msg)
-        raise FileNotFoundError(error_msg)
-
-    except Exception as e:
-        if isinstance(e, FileNotFoundError):
-            logger.error(f"FileNotFoundError: {str(e)}")
-            raise
-        logger.error(f"Unexpected error during path resolution: {str(e)}", exc_info=True)
-        raise ValueError(f"Invalid path: {str(e)}")
+    resolver = PathResolver(base_dir)
+    return resolver.resolve(file_path)
 
 def collect_referenced_files(
     file_path: Union[str, Path],
