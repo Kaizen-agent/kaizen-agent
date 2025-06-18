@@ -520,24 +520,27 @@ Code to format:
             # Check if code is already valid
             is_valid, _ = self._validate_syntax(code)
             if is_valid:
-                self.logger.debug("Code already valid, applying cosmetic formatting")
-                return self._apply_cosmetic_formatting(code)
+                self.logger.debug("Code already valid, applying basic formatting")
+                return self._basic_formatting(code)
             
             # First try common syntax fixes
+            self.logger.info("Starting common syntax fixes")
             formatted_code = self.fix_common_syntax_issues(code)
+            self.logger.info(f"Common syntax fixes completed: {formatted_code}")
             
             # Validate after common fixes
+            self.logger.info("Validating after common fixes")
             is_valid, error = self._validate_syntax(formatted_code)
             if is_valid:
                 self.logger.debug("Common fixes successful")
-                return self._apply_cosmetic_formatting(formatted_code)
-            
+                return self._basic_formatting(formatted_code)
+            self.logger.info(f"Common fixes successful")
             # If common fixes don't work, try aggressive fixes
             if formatted_code == code:
-                self.logger.debug("Common fixes had no effect, trying aggressive fixes")
+                self.logger.info("Common fixes had no effect, trying aggressive fixes")
                 formatted_code = self.fix_aggressive_syntax_issues(code)
             else:
-                self.logger.debug("Common fixes changed code but still invalid, trying aggressive fixes")
+                self.logger.info("Common fixes changed code but still invalid, trying aggressive fixes")
                 formatted_code = self.fix_aggressive_syntax_issues(formatted_code)
             
             # Final validation
@@ -551,12 +554,12 @@ Code to format:
                 self.logger.warning("Returning original code due to failed formatting")
                 return code
             
-            self.logger.debug("Code formatting completed", extra={
+            self.logger.info("Code formatting completed", extra={
                 'original_length': len(code),
                 'formatted_length': len(formatted_code)
             })
             
-            return self._apply_cosmetic_formatting(formatted_code)
+            return self._basic_formatting(formatted_code)
             
         except Exception as e:
             self.logger.error("Error formatting code", extra={
@@ -888,31 +891,6 @@ Code to format:
                 indent_stack.append(current_indent + 1)
         
         return '\n'.join(fixed_lines)
-    
-    def _apply_cosmetic_formatting(self, code: str) -> str:
-        """Apply cosmetic formatting to valid code."""
-        try:
-            # Try black formatting if available
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                f.write(code)
-                temp_file = f.name
-            
-            result = subprocess.run(
-                ['black', '--quiet', '--line-length', '88', temp_file], 
-                capture_output=True, text=True, timeout=10
-            )
-            
-            if result.returncode == 0:
-                with open(temp_file, 'r') as f:
-                    formatted_code = f.read()
-                os.unlink(temp_file)
-                return formatted_code
-            else:
-                os.unlink(temp_file)
-                return self._basic_formatting(code)
-                
-        except Exception:
-            return self._basic_formatting(code)
     
     def _basic_formatting(self, code: str) -> str:
         """Apply basic formatting rules."""
