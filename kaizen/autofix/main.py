@@ -49,11 +49,15 @@ class FixResult:
 class FixAttempt:
     """Data class for tracking fix attempts."""
     attempt_number: int
-    status: FixStatus
-    changes: Dict[str, Any]
+    status: FixStatus = FixStatus.PENDING
+    changes: Dict[str, Any] = None
     test_results: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     original_code: Optional[Dict[str, str]] = None
+
+    def __post_init__(self):
+        if self.changes is None:
+            self.changes = {}
 
 class CodeAnalyzer:
     """Handles code analysis and compatibility checking."""
