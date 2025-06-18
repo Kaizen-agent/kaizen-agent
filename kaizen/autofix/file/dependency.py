@@ -63,8 +63,8 @@ def collect_referenced_files(
         return processed_files
     
     processed_files.add(file_path)
-    
     try:
+        logger.info(f"Reading and parsing file {file_path}")
         # Read and parse file
         content = file_path.read_text(encoding='utf-8')
         tree = ast.parse(content)
@@ -78,7 +78,7 @@ def collect_referenced_files(
         # Find all imports
         imported_files: Set[Path] = set()
         import_errors: List[ImportError] = []
-        
+        logger.info(f"Finding all imports in {file_path}")
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 try:
@@ -121,7 +121,8 @@ def collect_referenced_files(
                     'errors': [vars(e) for e in import_errors]
                 }
             )
-        
+        logger.info(f"Imported files: {imported_files}")
+        logger.info(f"Heuristic: Finding relevant files for {file_path}")
         # Heuristic: Add relevant files based on filename similarity and failure data
         heuristic_files = find_heuristic_relevant_files(file_path, base_dir, processed_files, failure_data)
         for hf in heuristic_files:
