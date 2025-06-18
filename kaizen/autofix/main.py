@@ -1,5 +1,7 @@
 import os
 import logging
+import re
+import subprocess
 import yaml
 import ast
 from pathlib import Path
@@ -392,6 +394,8 @@ class FixResultDict(TypedDict):
     explanation: Optional[str]
     confidence: Optional[float]
 
+
+
 class CodeFormatter:
     """Handles code formatting and syntax fixes."""
     
@@ -413,37 +417,433 @@ class CodeFormatter:
         try:
             self.logger.debug("Starting code formatting", extra={'code_length': len(code)})
             
+            # Check if code is already valid
+            is_valid, _ = self._validate_syntax(code)
+            if is_valid:
+                self.logger.debug("Code already valid, applying cosmetic formatting")
+                return self._apply_cosmetic_formatting(code)
+            
             # First try common syntax fixes
-            formatted_code = fix_common_syntax_issues(code)
+            formatted_code = self.fix_common_syntax_issues(code)
+            
+            # Validate after common fixes
+            is_valid, error = self._validate_syntax(formatted_code)
+            if is_valid:
+                self.logger.debug("Common fixes successful")
+                return self._apply_cosmetic_formatting(formatted_code)
             
             # If common fixes don't work, try aggressive fixes
             if formatted_code == code:
                 self.logger.debug("Common fixes had no effect, trying aggressive fixes")
-                formatted_code = fix_aggressive_syntax_issues(code)
+                formatted_code = self.fix_aggressive_syntax_issues(code)
+            else:
+                self.logger.debug("Common fixes changed code but still invalid, trying aggressive fixes")
+                formatted_code = self.fix_aggressive_syntax_issues(formatted_code)
             
-            # Validate the formatted code
-            try:
-                ast.parse(formatted_code)
-            except SyntaxError as e:
+            # Final validation
+            is_valid, error = self._validate_syntax(formatted_code)
+            if not is_valid:
                 self.logger.error("Formatted code has syntax errors", extra={
-                    'error': str(e),
-                    'error_type': type(e).__name__
+                    'error': str(error),
+                    'error_type': 'SyntaxError'
                 })
-                raise ValueError(f"Formatted code has syntax errors: {str(e)}")
+                # Return original code instead of raising exception
+                self.logger.warning("Returning original code due to failed formatting")
+                return code
             
             self.logger.debug("Code formatting completed", extra={
                 'original_length': len(code),
                 'formatted_length': len(formatted_code)
             })
             
-            return formatted_code
+            return self._apply_cosmetic_formatting(formatted_code)
             
         except Exception as e:
             self.logger.error("Error formatting code", extra={
                 'error': str(e),
                 'error_type': type(e).__name__
             })
-            raise ValueError(f"Failed to format code: {str(e)}")
+            # Return original code instead of raising exception
+            return code
+    
+    def fix_common_syntax_issues(self, code: str) -> str:
+        """
+        Fix common syntax issues in the code with improved logic.
+        
+        Args:
+            code (str): The code to fix
+            
+        Returns:
+            str: The fixed code
+        """
+        try:
+            self.logger.debug("Starting common syntax fixes", extra={'code_length': len(code)})
+            
+            # Clean markdown first
+            code = self._clean_markdown_notations(code)
+            
+            # Check if already valid
+            is_valid, _ = self._validate_syntax(code)
+            if is_valid:
+                return code
+            
+            original_code = code
+            
+            # Fix 1: Missing colons after control structures
+            lines = code.split('\n')
+            fixed_lines = []
+            
+            for line in lines:
+                stripped = line.strip()
+                if stripped and not stripped.endswith(':'):
+                    # More precise pattern matching for control structures
+                    if re.match(r'^(if|elif|else|for|while|def|class|try|except|finally|with)\s+', stripped):
+                        # Don't add colon if line already has statement terminators
+                        if not any(char in stripped for char in [';', ')', ']', '}']) or stripped.startswith('def ') or stripped.startswith('class '):
+                            line = line.rstrip() + ':'
+                fixed_lines.append(line)
+            
+            code = '\n'.join(fixed_lines)
+            
+            # Fix 2: Print statements (Python 2 to 3)
+            code = re.sub(r'\bprint\s+([^(].+)', r'print(\1)', code)
+            
+            # Fix 3: Basic indentation
+            code = self._fix_basic_indentation(code)
+            
+            # Fix 4: Unclosed strings (basic cases)
+            code = self._fix_unclosed_strings(code)
+            
+            # Fix 5: Missing imports for common modules
+            code = self._add_common_imports(code)
+            
+            self.logger.debug("Common syntax fixes completed", extra={
+                'fixed_code_length': len(code),
+                'changes_made': code != original_code
+            })
+            
+            return code
+            
+        except Exception as e:
+            self.logger.error(f"Error in common syntax fixes: {str(e)}")
+            return code
+    
+    def fix_aggressive_syntax_issues(self, code: str) -> str:
+        """
+        Apply more aggressive syntax fixes when common fixes fail.
+        
+        Args:
+            code (str): The code to fix
+            
+        Returns:
+            str: The fixed code
+        """
+        try:
+            self.logger.debug("Starting aggressive syntax fixes", extra={'code_length': len(code)})
+            
+            # Start with common fixes if not already applied
+            code = self.fix_common_syntax_issues(code)
+            
+            # Check if already valid after common fixes
+            is_valid, error = self._validate_syntax(code)
+            if is_valid:
+                return code
+            
+            original_code = code
+            
+            # Aggressive fix 1: Handle specific syntax errors
+            if error:
+                code = self._fix_specific_syntax_error(code, error)
+                is_valid, _ = self._validate_syntax(code)
+                if is_valid:
+                    return code
+            
+            # Aggressive fix 2: Remove non-printable characters
+            code = ''.join(char for char in code if char.isprintable() or char in ['\n', '\t'])
+            
+            # Aggressive fix 3: Fix malformed brackets and parentheses
+            code = self._fix_brackets_and_parentheses(code)
+            
+            # Aggressive fix 4: Handle incomplete statements
+            code = self._fix_incomplete_statements(code)
+            
+            # Aggressive fix 5: Advanced indentation fixing
+            code = self._fix_advanced_indentation(code)
+            
+            self.logger.debug("Aggressive syntax fixes completed", extra={
+                'fixed_code_length': len(code),
+                'changes_made': code != original_code
+            })
+            
+            return code
+            
+        except Exception as e:
+            self.logger.error(f"Error in aggressive syntax fixes: {str(e)}")
+            return code
+    
+    def _validate_syntax(self, code: str) -> Tuple[bool, Optional[str]]:
+        """Validate Python syntax using AST parsing."""
+        try:
+            ast.parse(code)
+            return True, None
+        except SyntaxError as e:
+            return False, f"Line {e.lineno}: {e.msg}"
+        except Exception as e:
+            return False, str(e)
+    
+    def _clean_markdown_notations(self, code: str) -> str:
+        """Remove markdown notations from code."""
+        # Remove markdown code block notations
+        code = re.sub(r'^```(?:python|py)?\s*\n?', '', code, flags=re.MULTILINE)
+        code = re.sub(r'\n?\s*```\s*$', '', code, flags=re.MULTILINE)
+        
+        # Remove markdown headers at start of lines
+        code = re.sub(r'^#+\s+', '', code, flags=re.MULTILINE)
+        
+        # Remove markdown formatting (be careful not to break code)
+        lines = code.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Skip if line appears to be in a string literal
+            if not (line.strip().startswith(('"""', "'''", '"', "'")) or 
+                   '"""' in line or "'''" in line):
+                # Remove markdown formatting
+                line = re.sub(r'\*\*(.*?)\*\*', r'\1', line)  # Bold
+                line = re.sub(r'\*(.*?)\*', r'\1', line)      # Italic
+                if not line.strip().startswith('f'):
+                    line = re.sub(r'`(.*?)`', r'\1', line)    # Inline code
+            
+            cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines).strip()
+    
+    def _fix_basic_indentation(self, code: str) -> str:
+        """Fix basic indentation issues."""
+        lines = code.split('\n')
+        fixed_lines = []
+        indent_level = 0
+        
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            
+            if not stripped:
+                fixed_lines.append('')
+                continue
+            
+            # Get previous line for context
+            prev_line = lines[i-1].strip() if i > 0 else ''
+            
+            # Decrease indent for dedent keywords
+            if stripped.startswith(('else:', 'elif', 'except', 'finally:')):
+                indent_level = max(0, indent_level - 1)
+            
+            # Apply current indentation
+            proper_indent = '    ' * indent_level
+            fixed_lines.append(proper_indent + stripped)
+            
+            # Increase indent after control structures
+            if stripped.endswith(':') and any(keyword in stripped for keyword in 
+                ['if', 'elif', 'else', 'for', 'while', 'def', 'class', 'try', 'except', 'finally', 'with']):
+                indent_level += 1
+        
+        return '\n'.join(fixed_lines)
+    
+    def _fix_unclosed_strings(self, code: str) -> str:
+        """Fix basic unclosed string issues."""
+        lines = code.split('\n')
+        fixed_lines = []
+        
+        for line in lines:
+            # Count unescaped quotes
+            double_quotes = line.count('"') - line.count('\\"')
+            single_quotes = line.count("'") - line.count("\\'")
+            
+            # Fix unclosed double quotes
+            if double_quotes % 2 == 1 and not line.strip().startswith('#'):
+                line = line + '"'
+            # Fix unclosed single quotes
+            elif single_quotes % 2 == 1 and not line.strip().startswith('#'):
+                line = line + "'"
+            
+            fixed_lines.append(line)
+        
+        return '\n'.join(fixed_lines)
+    
+    def _add_common_imports(self, code: str) -> str:
+        """Add missing imports for commonly used modules."""
+        import_map = {
+            'os.': 'import os',
+            'sys.': 'import sys',
+            'json.': 'import json',
+            'datetime.': 'import datetime',
+            'random.': 'import random',
+            'math.': 'import math',
+            're.': 'import re'
+        }
+        
+        needed_imports = []
+        for pattern, import_stmt in import_map.items():
+            if pattern in code and import_stmt not in code:
+                needed_imports.append(import_stmt)
+        
+        if needed_imports:
+            imports = '\n'.join(needed_imports) + '\n\n'
+            code = imports + code
+        
+        return code
+    
+    def _fix_specific_syntax_error(self, code: str, error_msg: str) -> str:
+        """Fix specific syntax errors based on error message."""
+        lines = code.split('\n')
+        
+        # Extract line number
+        line_match = re.search(r'line (\d+)', error_msg)
+        line_num = int(line_match.group(1)) if line_match else None
+        
+        if "EOL while scanning string literal" in error_msg and line_num:
+            if line_num <= len(lines):
+                line = lines[line_num - 1]
+                double_quotes = line.count('"') - line.count('\\"')
+                single_quotes = line.count("'") - line.count("\\'")
+                
+                if double_quotes % 2 == 1:
+                    lines[line_num - 1] = line + '"'
+                elif single_quotes % 2 == 1:
+                    lines[line_num - 1] = line + "'"
+        
+        elif "unexpected EOF while parsing" in error_msg:
+            code_stripped = code.strip()
+            if code_stripped.endswith('('):
+                return code + ')'
+            elif code_stripped.endswith('['):
+                return code + ']'
+            elif code_stripped.endswith('{'):
+                return code + '}'
+            elif code_stripped.endswith(':'):
+                return code + '\n    pass'
+        
+        return '\n'.join(lines)
+    
+    def _fix_brackets_and_parentheses(self, code: str) -> str:
+        """Fix malformed brackets and parentheses."""
+        # Count and balance brackets
+        open_parens = code.count('(') - code.count(')')
+        open_brackets = code.count('[') - code.count(']')
+        open_braces = code.count('{') - code.count('}')
+        
+        # Add missing closing brackets
+        if open_parens > 0:
+            code += ')' * open_parens
+        if open_brackets > 0:
+            code += ']' * open_brackets
+        if open_braces > 0:
+            code += '}' * open_braces
+        
+        return code
+    
+    def _fix_incomplete_statements(self, code: str) -> str:
+        """Fix incomplete statements."""
+        lines = code.split('\n')
+        fixed_lines = []
+        
+        for line in lines:
+            stripped = line.strip()
+            if stripped.endswith(':') and not any(keyword in stripped for keyword in 
+                ['if', 'for', 'while', 'def', 'class', 'try', 'except', 'finally', 'with', 'else', 'elif']):
+                # Add pass for incomplete blocks
+                fixed_lines.append(line)
+                fixed_lines.append(line.replace(stripped, '    pass'))
+            else:
+                fixed_lines.append(line)
+        
+        return '\n'.join(fixed_lines)
+    
+    def _fix_advanced_indentation(self, code: str) -> str:
+        """Apply advanced indentation fixes."""
+        lines = code.split('\n')
+        fixed_lines = []
+        indent_stack = [0]
+        
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                fixed_lines.append('')
+                continue
+            
+            current_indent = len(indent_stack) - 1
+            
+            # Handle dedent keywords
+            if stripped.startswith(('else:', 'elif', 'except', 'finally:')):
+                if len(indent_stack) > 1:
+                    indent_stack.pop()
+                    current_indent = len(indent_stack) - 1
+            
+            # Apply indentation
+            proper_indent = '    ' * current_indent
+            fixed_lines.append(proper_indent + stripped)
+            
+            # Handle indent increase
+            if stripped.endswith(':'):
+                indent_stack.append(current_indent + 1)
+        
+        return '\n'.join(fixed_lines)
+    
+    def _apply_cosmetic_formatting(self, code: str) -> str:
+        """Apply cosmetic formatting to valid code."""
+        try:
+            # Try black formatting if available
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                f.write(code)
+                temp_file = f.name
+            
+            result = subprocess.run(
+                ['black', '--quiet', '--line-length', '88', temp_file], 
+                capture_output=True, text=True, timeout=10
+            )
+            
+            if result.returncode == 0:
+                with open(temp_file, 'r') as f:
+                    formatted_code = f.read()
+                os.unlink(temp_file)
+                return formatted_code
+            else:
+                os.unlink(temp_file)
+                return self._basic_formatting(code)
+                
+        except Exception:
+            return self._basic_formatting(code)
+    
+    def _basic_formatting(self, code: str) -> str:
+        """Apply basic formatting rules."""
+        lines = code.split('\n')
+        formatted_lines = []
+        
+        for line in lines:
+            # Remove trailing whitespace
+            line = line.rstrip()
+            
+            # Basic operator spacing (simple cases only)
+            if '=' in line and not any(op in line for op in ['==', '!=', '<=', '>=']):
+                parts = line.split('=', 1)
+                if len(parts) == 2:
+                    line = parts[0].rstrip() + ' = ' + parts[1].lstrip()
+            
+            formatted_lines.append(line)
+        
+        # Remove excessive blank lines
+        result = []
+        prev_empty = False
+        for line in formatted_lines:
+            if line.strip() == '':
+                if not prev_empty:
+                    result.append(line)
+                prev_empty = True
+            else:
+                result.append(line)
+                prev_empty = False
+        
+        return '\n'.join(result)
 
 class AutoFix:
     """Handles automatic code fixing."""
@@ -769,6 +1169,7 @@ class AutoFix:
     def _run_tests_and_update_status(self, results: Dict, path: Path) -> None:
         """Run tests and update results status."""
         if self.config.get('test', {}).get('enabled', False):
+            logger.info(f"Running tests for {path}")
             test_results = self.test_runner.run_tests(path)
             results['test_results'] = test_results
             results['status'] = 'success' if test_results.get('overall_status') == 'passed' else 'failed'
