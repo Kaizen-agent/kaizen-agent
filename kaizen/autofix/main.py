@@ -402,6 +402,61 @@ class CodeFormatter:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
     
+    def _format_with_llm(self, code: str) -> str:
+        """Format Python code using LLM.
+        
+        Args:
+            code: The Python code to format
+            
+        Returns:
+            Formatted code string
+        """
+        try:
+            # Prepare prompt for LLM
+            prompt = f"""You are a Python code formatter. Your task is to format the following Python code according to PEP 8 style guidelines.
+
+Key formatting rules to follow:
+1. Use 4 spaces for indentation
+2. Maximum line length of 88 characters
+3. Add proper spacing around operators and after commas
+4. Use proper blank lines between functions and classes
+5. Follow naming conventions (snake_case for functions/variables, PascalCase for classes)
+6. Organize imports (standard library, third-party, local)
+7. Add proper docstrings where missing
+8. Fix any obvious syntax issues while maintaining functionality
+
+Important:
+- Return ONLY the formatted code without any explanations
+- Do not add or remove any functionality
+- Do not include markdown formatting
+- Keep all comments and docstrings
+- Preserve all imports and their order
+
+Code to format:
+{code}"""
+            
+            # Call LLM for formatting
+            response = self.llm_fixer.llm.complete(prompt)
+            
+            # Extract just the code from the response
+            formatted_code = response.strip()
+            
+            # Remove any markdown code blocks if present
+            formatted_code = re.sub(r'^```python\s*', '', formatted_code)
+            formatted_code = re.sub(r'\s*```$', '', formatted_code)
+            
+            # Validate the formatted code
+            is_valid, _ = self._validate_syntax(formatted_code)
+            if not is_valid:
+                self.logger.warning("LLM returned invalid Python code, using original")
+                return code
+                
+            return formatted_code
+            
+        except Exception as e:
+            self.logger.warning(f"LLM formatting failed: {str(e)}")
+            return code
+
     def format_code(self, code: str) -> str:
         """Format code using a progressive approach.
         
@@ -416,6 +471,16 @@ class CodeFormatter:
         """
         try:
             self.logger.debug("Starting code formatting", extra={'code_length': len(code)})
+            
+            ## LLM FIXER
+            # First try LLM-based formatting
+            try:
+                llm_formatted = self._format_with_llm(code)
+                if llm_formatted and llm_formatted != code:
+                    self.logger.debug("LLM formatting successful")
+                    code = llm_formatted
+            except Exception as e:
+                self.logger.warning(f"LLM formatting failed, falling back to standard formatting: {str(e)}")
             
             # Check if code is already valid
             is_valid, _ = self._validate_syntax(code)
@@ -1000,6 +1065,9 @@ class AutoFix:
             # Format the fixed code
             formatter = CodeFormatter()
             fix_result.fixed_code = formatter.format_code(fix_result.fixed_code)
+
+            # Clean up any markdown or unnecessary text
+            fix_result.fixed_code = self._clean_markdown_notations(fix_result.fixed_code)
 
             if fix_result.status == FixStatus.SUCCESS:
                 return self._handle_successful_fix(current_file_path, fix_result)
