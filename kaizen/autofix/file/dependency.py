@@ -2,15 +2,28 @@ import os
 import ast
 import logging
 import importlib
-from typing import Set, Dict, List, Optional
+from typing import Set, Dict, List, Optional, Union
 from pathlib import Path
+from dataclasses import dataclass
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def collect_referenced_files(file_path: str, processed_files: set = None, base_dir: str = None, 
-                           failure_data: List[Dict] = None, llm_checked_files: set = None,
-                           patterns: Optional[Dict] = None) -> set:
+@dataclass
+class ImportError:
+    """Represents an error during import processing."""
+    module_name: str
+    error_message: str
+    file_path: Path
+
+def collect_referenced_files(
+    file_path: Union[str, Path],
+    processed_files: Optional[Set[Path]] = None,
+    base_dir: Optional[Union[str, Path]] = None,
+    failure_data: Optional[List[Dict]] = None,
+    llm_checked_files: Optional[Set[Path]] = None,
+    patterns: Optional[Dict] = None
+) -> Set[Path]:
     """
     Recursively collect all Python files referenced by imports in the given file.
     Also uses heuristics and LLM to check if files might be relevant for fixes even if not directly imported.
@@ -24,12 +37,23 @@ def collect_referenced_files(file_path: str, processed_files: set = None, base_d
         patterns: Configuration for file pattern matching
         
     Returns:
-        set: Set of all referenced file paths
+        Set of all referenced file paths as Path objects
+        
+    Raises:
+        FileNotFoundError: If the input file doesn't exist
+        PermissionError: If there are permission issues accessing files
+        ValueError: If the file path is invalid
     """
-    if processed_files is None:
-        processed_files = set()
-    if llm_checked_files is None:
-        llm_checked_files = set()
+    # Initialize sets if None
+    processed_files = processed_files or set()
+    llm_checked_files = llm_checked_files or set()
+    
+    # Convert inputs to Path objects
+    file_path = Path(file_path).resolve()
+    base_dir = Path(base_dir).resolve() if base_dir else file_path.parent
+    
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
     
     if file_path in processed_files:
         return processed_files
@@ -37,55 +61,113 @@ def collect_referenced_files(file_path: str, processed_files: set = None, base_d
     processed_files.add(file_path)
     
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-            
-        # Parse the file to find imports
+        # Read and parse file
+        content = file_path.read_text(encoding='utf-8')
         tree = ast.parse(content)
         
-        # Get the directory of the current file for relative imports
-        file_dir = os.path.dirname(os.path.abspath(file_path))
-        if base_dir is None:
-            base_dir = file_dir
-        
-        # Collect all Python files in the same directory
+        # Collect Python files in the same directory
         dir_python_files = {
-            os.path.join(file_dir, f) for f in os.listdir(file_dir)
-            if f.endswith('.py') and f != os.path.basename(file_path)
+            f.resolve() for f in file_path.parent.glob('*.py')
+            if f != file_path
         }
         
         # Find all imports
-        imported_files = set()
+        imported_files: Set[Path] = set()
+        import_errors: List[ImportError] = []
+        
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
-                if isinstance(node, ast.Import):
-                    for name in node.names:
-                        module_name = name.name
-                        try:
+                try:
+                    if isinstance(node, ast.Import):
+                        for name in node.names:
+                            module_name = name.name
                             spec = importlib.util.find_spec(module_name)
-                            if spec is not None and spec.origin is not None and spec.origin.endswith('.py'):
-                                imported_files.add(spec.origin)
-                        except (ImportError, ValueError) as e:
-                            logger.warning(f"Failed to find module {module_name}: {str(e)}")
-                else:  # ImportFrom
-                    if node.module:
-                        try:
-                            module_name = (f"{os.path.basename(file_dir)}.{node.module}" 
-                                        if node.level > 0 else node.module)
+                            if spec and spec.origin and spec.origin.endswith('.py'):
+                                imported_files.add(Path(spec.origin).resolve())
+                    else:  # ImportFrom
+                        if node.module:
+                            module_name = (
+                                f"{file_path.parent.name}.{node.module}"
+                                if node.level > 0 else node.module
+                            )
                             spec = importlib.util.find_spec(module_name)
-                            if spec is not None and spec.origin is not None and spec.origin.endswith('.py'):
-                                imported_files.add(spec.origin)
-                        except (ImportError, ValueError) as e:
-                            logger.warning(f"Failed to find module {module_name}: {str(e)}")
+                            if spec and spec.origin and spec.origin.endswith('.py'):
+                                imported_files.add(Path(spec.origin).resolve())
+                except (ImportError, ValueError) as e:
+                    import_errors.append(ImportError(
+                        module_name=module_name,
+                        error_message=str(e),
+                        file_path=file_path
+                    ))
+                    logger.warning(
+                        "Failed to find module",
+                        extra={
+                            'module_name': module_name,
+                            'error': str(e),
+                            'file_path': str(file_path)
+                        }
+                    )
+        
+        # Log import errors if any
+        if import_errors:
+            logger.warning(
+                "Import errors encountered",
+                extra={
+                    'file_path': str(file_path),
+                    'errors': [vars(e) for e in import_errors]
+                }
+            )
         
         # Process all collected files
         for imported_file in imported_files:
             if imported_file not in processed_files:
-                collect_referenced_files(imported_file, processed_files, base_dir, 
-                                      failure_data, llm_checked_files, patterns)
+                try:
+                    collect_referenced_files(
+                        imported_file,
+                        processed_files,
+                        base_dir,
+                        failure_data,
+                        llm_checked_files,
+                        patterns
+                    )
+                except (FileNotFoundError, PermissionError) as e:
+                    logger.error(
+                        "Error processing imported file",
+                        extra={
+                            'file_path': str(imported_file),
+                            'error': str(e),
+                            'error_type': type(e).__name__
+                        }
+                    )
     
+    except FileNotFoundError as e:
+        logger.error(
+            "File not found",
+            extra={
+                'file_path': str(file_path),
+                'error': str(e)
+            }
+        )
+        raise
+    except PermissionError as e:
+        logger.error(
+            "Permission denied",
+            extra={
+                'file_path': str(file_path),
+                'error': str(e)
+            }
+        )
+        raise
     except Exception as e:
-        logger.warning(f"Error processing imports in {file_path}: {str(e)}")
+        logger.error(
+            "Unexpected error processing imports",
+            extra={
+                'file_path': str(file_path),
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+        )
+        raise ValueError(f"Failed to process imports in {file_path}: {str(e)}")
     
     return processed_files
 
