@@ -47,6 +47,7 @@ def collect_referenced_files(
         PermissionError: If there are permission issues accessing files
         ValueError: If the file path is invalid
     """
+    logger.info(f"Collecting referenced files for {file_path}")
     # Initialize sets if None
     processed_files = processed_files or set()
     llm_checked_files = llm_checked_files or set()

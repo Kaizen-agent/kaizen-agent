@@ -697,7 +697,7 @@ class AutoFix:
             })
             return {'status': 'error', 'error': str(e)}
     
-    def _get_affected_files(self, file_path: str, failure_data: Optional[Dict]) -> Set[str]:
+    def _get_affected_files(self, file_path: str, failure_data: List[Dict[str, Any]] = None) -> Set[str]:
         """Get set of files affected by the fix."""
         referenced_files = collect_referenced_files(
             file_path,
@@ -708,9 +708,8 @@ class AutoFix:
         logger.info(f"Referenced files: {referenced_files}")
         return (analyze_failure_dependencies(failure_data, referenced_files) 
                 if failure_data else {file_path})
-    
-    def _apply_fixes(self, affected_files: Set[str], failure_data: Optional[Dict],
-                    user_goal: Optional[str]) -> Dict[str, Any]:
+    def _apply_fixes(self, affected_files: Set[str], user_goal: Optional[str] = None,
+                    failure_data: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Apply fixes to affected files."""
         results = self._create_initial_results()
         
