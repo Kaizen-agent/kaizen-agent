@@ -8,12 +8,12 @@ if TYPE_CHECKING:
 
 class FixStatus(Enum):
     """Status of a code fix operation."""
-    SUCCESS = auto()
-    ERROR = auto()
-    COMPATIBILITY_ISSUE = auto()
-    PENDING = auto()
-    RETRY = auto()
-    FAILED = auto()
+    SUCCESS = 'success'
+    ERROR = 'error'
+    COMPATIBILITY_ISSUE = 'compatibility_issue'
+    PENDING = 'pending'
+    RETRY = 'retry'
+    FAILED = 'failed'
 
 class CompatibilityIssue(NamedTuple):
     """Represents a compatibility issue found during code analysis."""
