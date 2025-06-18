@@ -1098,7 +1098,9 @@ class AutoFix:
             
             if fix_result.status == FixStatus.SUCCESS:
                 return self._handle_successful_fix(current_file_path, fixed_code)
-            return self._handle_failed_fix(current_file_path, fixed_code)
+            else: 
+                fixed_code = formatter.format_code(fixed_code)
+                return self._handle_successful_fix(current_file_path, fixed_code)
             
         except ValueError as e:
             logger.error(f"Error formatting fixed code for {current_file_path}", extra={
