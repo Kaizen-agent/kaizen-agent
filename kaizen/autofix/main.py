@@ -1392,12 +1392,14 @@ class AutoFix:
                 
                 # Create PR if needed
                 if self.config.create_pr:
+                    logger.info(f"start creating pr")
                     try:
                         best_attempt = self._get_attempt_for_pr(attempt_tracker)
+                        logger.info(f"best attempt: {best_attempt}")
                         if best_attempt:
                             improvement_summary = TestResultAnalyzer.get_improvement_summary(best_attempt.test_results)
                             best_attempt.test_results['improvement_summary'] = improvement_summary
-                            
+                            logger.info(f"start creating pr")
                             pr_data = self.pr_manager.create_pr(
                                 best_attempt.changes,
                                 best_attempt.test_results
