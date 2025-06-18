@@ -2,9 +2,12 @@ import os
 import ast
 import logging
 import importlib
+import json
 from typing import Set, Dict, List, Optional, Union
 from pathlib import Path
 from dataclasses import dataclass
+from difflib import SequenceMatcher
+import genai
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -118,8 +121,23 @@ def collect_referenced_files(
                 }
             )
         
-        # Process all collected files
-        for imported_file in imported_files:
+        # Heuristic: Add relevant files based on filename similarity and failure data
+        heuristic_files = find_heuristic_relevant_files(file_path, base_dir, processed_files, failure_data)
+        for hf in heuristic_files:
+            if hf not in processed_files:
+                logger.info(f"Heuristic: Adding relevant file {hf}")
+                processed_files.add(hf)
+        # LLM: Add relevant files suggested by LLM
+        if file_path not in llm_checked_files:
+            llm_files = find_llm_relevant_files(file_path, base_dir, processed_files, llm_checked_files, failure_data, patterns)
+            for lf in llm_files:
+                if lf not in processed_files:
+                    logger.info(f"LLM: Adding relevant file {lf}")
+                    processed_files.add(lf)
+            llm_checked_files.add(file_path)
+        
+        # Process all collected files (including heuristic and LLM additions)
+        for imported_file in imported_files.union(heuristic_files):
             if imported_file not in processed_files:
                 try:
                     collect_referenced_files(
@@ -313,3 +331,150 @@ def match_failure(failure: Dict, module_to_file: Dict[str, str], referenced_file
         affected_files = referenced_files
     
     return affected_files 
+
+def find_heuristic_relevant_files(file_path: Path, base_dir: Path, processed_files: Set[Path], failure_data: Optional[List[Dict]]) -> Set[Path]:
+    """
+    Heuristically find relevant files in the same directory or project based on filename similarity, common suffixes, and failure data.
+    - Looks for files with similar names or common suffixes (e.g., _utils, _helper).
+    - Looks for files mentioned in failure data (by name or module).
+    - Searches subdirectories if project is larger.
+    """
+    relevant_files = set()
+    common_suffixes = ['_utils', '_helper', '_helpers', '_base', '_core']
+    # 1. Filename similarity and common suffixes in the same directory
+    for f in base_dir.glob('*.py'):
+        if f not in processed_files and f != file_path:
+            ratio = SequenceMatcher(None, file_path.stem, f.stem).ratio()
+            if ratio > 0.7:
+                relevant_files.add(f.resolve())
+            for suffix in common_suffixes:
+                if file_path.stem + suffix == f.stem or f.stem + suffix == file_path.stem:
+                    relevant_files.add(f.resolve())
+    # 2. Failure data matching (file/module names)
+    if failure_data:
+        for failure in failure_data:
+            for key in ['error_message', 'test_name', 'output', 'details', 'region']:
+                val = failure.get(key, '')
+                if not val:
+                    continue
+                # Check for file/module names in the value
+                for f in base_dir.glob('*.py'):
+                    if f not in processed_files and f != file_path:
+                        if f.stem in val or f.name in val:
+                            relevant_files.add(f.resolve())
+                # Also check subdirectories (one level deep)
+                for subdir in base_dir.iterdir():
+                    if subdir.is_dir():
+                        for f in subdir.glob('*.py'):
+                            if f not in processed_files and f != file_path:
+                                if f.stem in val or f.name in val:
+                                    relevant_files.add(f.resolve())
+    # 3. Neighbor files in the same package (if __init__.py exists)
+    if (base_dir / '__init__.py').exists():
+        for f in base_dir.glob('*.py'):
+            if f not in processed_files and f != file_path:
+                relevant_files.add(f.resolve())
+    return relevant_files
+
+def find_llm_relevant_files(file_path: Path, base_dir: Path, processed_files: Set[Path], llm_checked_files: Set[Path], failure_data: Optional[List[Dict]], patterns: Optional[Dict]) -> Set[Path]:
+    """
+    Use an LLM to suggest additional relevant files for fixes.
+    
+    Args:
+        file_path: Path to the file being analyzed
+        base_dir: Base directory for resolving relative imports
+        processed_files: Set of already processed files to avoid cycles
+        llm_checked_files: Set of files that have already been checked by LLM
+        failure_data: List of test failures to check relevance against
+        patterns: Configuration for file pattern matching
+        
+    Returns:
+        Set of Path objects for relevant files that exist in the project
+    """
+    logger.info(f"Starting LLM file suggestion for {file_path}")
+    logger.debug(f"Base directory: {base_dir}")
+    logger.debug(f"Number of processed files: {len(processed_files)}")
+    logger.debug(f"Number of LLM checked files: {len(llm_checked_files)}")
+    
+    try:
+        # Read the file content
+        content = file_path.read_text(encoding='utf-8')
+        logger.debug(f"Successfully read file content ({len(content)} characters)")
+        
+        # Prepare the prompt for the LLM
+        prompt = f"""Analyze the following Python file and suggest other relevant files that might need to be modified together.
+        Consider:
+        1. Related functionality
+        2. Common dependencies
+        3. Test failures if provided
+        4. Code patterns and conventions
+        
+        File path: {file_path}
+        File content:
+        ```python
+        {content}
+        ```
+        
+        """
+        
+        if failure_data:
+            prompt += f"\nTest failures:\n{json.dumps(failure_data, indent=2)}\n"
+            logger.debug(f"Included {len(failure_data)} test failures in prompt")
+        
+        if patterns:
+            prompt += f"\nCode patterns:\n{json.dumps(patterns, indent=2)}\n"
+            logger.debug("Included code patterns in prompt")
+        
+        prompt += """
+        Return ONLY a JSON array of file paths that are relevant for fixes, relative to the base directory.
+        Example format:
+        ["path/to/file1.py", "path/to/file2.py"]
+        """
+        
+        # Initialize Gemini model
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            logger.warning("GOOGLE_API_KEY not found, skipping LLM file suggestion")
+            return set()
+            
+        logger.info("Initializing Gemini model")
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+        
+        # Get response from Gemini
+        logger.info("Sending prompt to Gemini model")
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.1,  # Low temperature for more focused results
+                max_output_tokens=1024,
+                top_p=0.8,
+                top_k=40,
+            )
+        )
+        logger.debug("Received response from Gemini model")
+        
+        # Parse the response
+        try:
+            suggested_files = json.loads(response.text)
+            logger.info(f"Successfully parsed LLM response: {len(suggested_files)} files suggested")
+            logger.debug(f"Suggested files: {suggested_files}")
+            
+            # Convert to absolute paths and filter for existing files
+            relevant_files = {
+                (base_dir / Path(f)).resolve()
+                for f in suggested_files
+                if (base_dir / Path(f)).exists()
+            }
+            
+            logger.info(f"Found {len(relevant_files)} existing relevant files")
+            logger.debug(f"Relevant files: {[str(f) for f in relevant_files]}")
+            return relevant_files
+            
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse LLM response as JSON: {response.text}")
+            return set()
+            
+    except Exception as e:
+        logger.error(f"Error in LLM file suggestion: {str(e)}", exc_info=True)
+        return set() 
