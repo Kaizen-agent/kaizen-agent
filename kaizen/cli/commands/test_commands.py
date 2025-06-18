@@ -173,8 +173,8 @@ class TestAllCommand(BaseTestCommand):
             # Create AutoFix instance and run fixes
             fixer = AutoFix(self.config)
             fix_results = fixer.fix_code(
-                str(self.config.file_path),
-                failed_tests
+                file_path=str(self.config.file_path),
+                failure_data=failed_tests
             )
             
             # Process and return attempts
