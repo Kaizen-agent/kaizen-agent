@@ -82,9 +82,8 @@ class PromptBuilder:
         If expected_output is None, the evaluation will be based solely on the criteria
         and rules provided in the test case configuration.
         """
-        criteria = test_case.llm_evaluation.get('criteria', {})
+        criteria = test_case.llm_evaluation
         logger.info(f"EVALUATION CRITERIA: {criteria}")
-        evaluation_rules = criteria.get('rules', [])
         
         prompt_parts = [
             "You are an expert test evaluator. Please evaluate the following test result:",
@@ -98,8 +97,6 @@ class PromptBuilder:
         prompt_parts.extend([
             f"\nEvaluation Criteria:",
             f"{json.dumps(criteria, indent=2)}",
-            f"\nEvaluation Rules:",
-            f"{json.dumps(evaluation_rules, indent=2)}",
             "\nPlease provide your evaluation in the following JSON format:",
             """{
                 "status": "passed" or "failed",
