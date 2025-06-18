@@ -820,36 +820,80 @@ class ImportManager:
         for import_info in region_info.imports:
             self._execute_import(import_info, namespace)
     
+    def _is_system_module(self, file_path: Path) -> bool:
+        """Check if the file path represents a system or built-in module.
+        
+        Args:
+            file_path: Path to check
+            
+        Returns:
+            bool: True if the path represents a system module
+        """
+        return (str(file_path).startswith('<built-in module') or 
+                str(file_path).startswith('/') or
+                not file_path.exists())
+
+    def _process_imports(self, imports: Set[str], namespace: Dict[str, Any], is_standard: bool) -> None:
+        """Process a set of imports and add them to the namespace.
+        
+        Args:
+            imports: Set of import names to process
+            namespace: Dictionary to add imports to
+            is_standard: Whether these are standard library imports
+        """
+        for module_name in imports:
+            if module_name not in namespace:
+                try:
+                    module = __import__(module_name)
+                    namespace[module_name] = module
+                    if is_standard and module_name == 'typing':
+                        self._add_typing_imports(namespace)
+                except ImportError as e:
+                    logger.warning(f"Failed to import {module_name}: {str(e)}")
+
     def _process_file_dependencies(self, file_path: Path, namespace: Dict[str, Any]) -> None:
-        """Process dependencies of a single file."""
+        """Process dependencies of a single file.
+        
+        Args:
+            file_path: Path to the file to process
+            namespace: Dictionary to add imports to
+            
+        Raises:
+            IOError: If the file cannot be read
+            SyntaxError: If the file contains invalid Python code
+        """
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            # Analyze imports in the dependency file
-            standard_imports, third_party_imports = self._import_analyzer.analyze_imports(content)
-            
-            # Add any missing imports to namespace
-            for module_name in standard_imports:
-                if module_name not in namespace:
-                    try:
-                        module = __import__(module_name)
-                        namespace[module_name] = module
-                        if module_name == 'typing':
-                            self._add_typing_imports(namespace)
-                    except ImportError as e:
-                        logger.warning(f"Failed to import {module_name}: {str(e)}")
-            
-            for module_name in third_party_imports:
-                if module_name not in namespace:
-                    try:
-                        module = __import__(module_name)
-                        namespace[module_name] = module
-                    except ImportError as e:
-                        logger.warning(f"Failed to import {module_name}: {str(e)}")
-                
+            # Skip system and built-in modules
+            if self._is_system_module(file_path):
+                logger.debug(f"Skipping system module: {file_path}")
+                return
+
+            # Read and parse file
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except IOError as e:
+                logger.error(f"Failed to read file {file_path}: {str(e)}")
+                raise
+
+            # Analyze imports
+            try:
+                standard_imports, third_party_imports = self._import_analyzer.analyze_imports(content)
+            except SyntaxError as e:
+                logger.error(f"Invalid Python code in {file_path}: {str(e)}")
+                raise
+
+            # Process imports
+            self._process_imports(standard_imports, namespace, is_standard=True)
+            self._process_imports(third_party_imports, namespace, is_standard=False)
+
+        except (IOError, SyntaxError) as e:
+            # Re-raise specific exceptions
+            raise
         except Exception as e:
-            logger.error(f"Failed to process file {file_path}: {str(e)}")
+            # Log unexpected errors but don't break execution
+            logger.error(f"Unexpected error processing {file_path}: {str(e)}")
+            logger.debug(f"Traceback: {traceback.format_exc()}")
     
     def _execute_import(self, import_info: ImportInfo, namespace: Dict[str, Any]) -> None:
         """Execute a single import statement in the namespace."""
