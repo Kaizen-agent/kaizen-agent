@@ -7,7 +7,7 @@ from typing import Set, Dict, List, Optional, Union
 from pathlib import Path
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-import genai
+import google.generativeai as genai
 
 # Configure logging
 logger = logging.getLogger(__name__)
