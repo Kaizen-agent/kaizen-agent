@@ -390,6 +390,7 @@ class AutoFix:
             self.config = FixConfig.from_dict(config)
             self.test_runner = TestRunner(config)
             self.pr_manager = PRManager(config)
+            self.llm_fixer = LLMCodeFixer(config)  # Initialize LLM fixer
             logger.info("AutoFix initialized", extra={
                 'config': vars(self.config)
             })
@@ -602,18 +603,32 @@ class AutoFix:
             results['pr'] = pr_data
     
     def fix_code(self, file_path: str, failure_data: List[Dict[str, Any]] = None, 
-                user_goal: Optional[str] = None) -> Dict:
-        """Fix code in the given file with retry logic."""
+                user_goal: Optional[str] = None, files_to_fix: List[str] = None) -> Dict:
+        """Fix code in the given files with retry logic.
+        
+        Args:
+            file_path: Main file path (used for test running)
+            failure_data: Data about test failures
+            user_goal: Optional user goal for fixing
+            files_to_fix: List of files to fix
+            
+        Returns:
+            Dict containing fix results
+        """
         try:
             logger.info("Starting code fix", extra={
                 'file_path': file_path,
+                'files_to_fix': files_to_fix,
                 'pr_strategy': self.config.pr_strategy.name
             })
             
+            if not files_to_fix:
+                return {'status': 'error', 'error': 'No files to fix provided'}
+            
             # Initialize components
-            affected_files = self._get_affected_files(file_path, failure_data)
-            state_manager = CodeStateManager(affected_files)
+            state_manager = CodeStateManager(set(files_to_fix))
             attempt_tracker = FixAttemptTracker(self.config.max_retries)
+            results = {'status': 'pending', 'changes': {}, 'processed_files': []}
             
             try:
                 while attempt_tracker.should_continue():
@@ -624,23 +639,51 @@ class AutoFix:
                         # Store original code state
                         attempt.original_code = {
                             path: self._read_file_content(path)
-                            for path in affected_files
+                            for path in files_to_fix
                         }
                         
-                        # Apply fixes
-                        fix_result = self._apply_fixes(
-                            affected_files, failure_data, user_goal
-                        )
+                        # Process each file individually
+                        for current_file in files_to_fix:
+                            try:
+                                file_content = self._read_file_content(current_file)
+                                context_files = {
+                                    path: self._read_file_content(path)
+                                    for path in files_to_fix
+                                    if path != current_file
+                                }
+                                
+                                fix_result = self._process_file_with_llm(
+                                    current_file, file_content, context_files, failure_data, user_goal
+                                )
+                                
+                                if fix_result.status == FixStatus.SUCCESS:
+                                    results['changes'][current_file] = fix_result.changes
+                                    results['processed_files'].append({
+                                        'file_path': current_file,
+                                        'status': 'processed'
+                                    })
+                                else:
+                                    results['processed_files'].append({
+                                        'file_path': current_file,
+                                        'status': 'error',
+                                        'error': fix_result.error
+                                    })
+                                    
+                            except Exception as e:
+                                logger.error(f"Error processing file {current_file}: {str(e)}")
+                                results['processed_files'].append({
+                                    'file_path': current_file,
+                                    'status': 'error',
+                                    'error': str(e)
+                                })
                         
                         # Run tests
-                        test_results = self._run_tests_and_update_status(
-                            fix_result, Path(file_path)
-                        )
+                        test_results = self._run_tests_and_update_status(results, Path(file_path))
                         
                         # Update attempt status
                         status = self._determine_attempt_status(test_results)
                         attempt_tracker.update_attempt(
-                            attempt, status, fix_result, test_results
+                            attempt, status, results, test_results
                         )
                         
                         if status == FixStatus.SUCCESS:
@@ -654,12 +697,11 @@ class AutoFix:
                         )
                         state_manager.restore_files()
                 
-                # Create PR based on strategy
-                if self.config.create_pr:
+                # Create PR if needed
+                if self.config.create_pr and results['changes']:
                     try:
                         best_attempt = self._get_attempt_for_pr(attempt_tracker)
-                        if best_attempt and best_attempt.changes:
-                            # Add improvement summary to test results
+                        if best_attempt:
                             improvement_summary = TestResultAnalyzer.get_improvement_summary(best_attempt.test_results)
                             best_attempt.test_results['improvement_summary'] = improvement_summary
                             
@@ -678,61 +720,20 @@ class AutoFix:
                 
                 return {
                     'status': 'success' if attempt_tracker.get_successful_attempt() else 'failed',
-                    'attempts': [vars(attempt) for attempt in attempt_tracker.attempts]
+                    'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                    'changes': results['changes'],
+                    'processed_files': results['processed_files']
                 }
                 
             finally:
                 state_manager.cleanup()
                 
-        except AutoFixError as e:
-            logger.error("AutoFix error", extra={
-                'error': str(e),
-                'error_type': type(e).__name__
-            })
-            return {'status': 'error', 'error': str(e)}
         except Exception as e:
             logger.error("Unexpected error", extra={
                 'error': str(e),
                 'error_type': type(e).__name__
             })
             return {'status': 'error', 'error': str(e)}
-    
-    def _get_affected_files(self, file_path: str, failure_data: List[Dict[str, Any]] = None) -> Set[str]:
-        """Get set of files affected by the fix."""
-        referenced_files = collect_referenced_files(
-            file_path,
-            processed_files=set(),
-            base_dir=os.path.dirname(file_path),
-            failure_data=failure_data
-        )
-        logger.info(f"Referenced files: {referenced_files}")
-        return (analyze_failure_dependencies(failure_data, referenced_files) 
-                if failure_data else {file_path})
-    def _apply_fixes(self, affected_files: Set[str], user_goal: Optional[str] = None,
-                    failure_data: List[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Apply fixes to affected files."""
-        results = self._create_initial_results()
-        
-        for current_file in affected_files:
-            try:
-                file_content = self._read_file_content(current_file)
-                context_files = self._get_context_files(current_file, affected_files)
-                
-                fix_result = self._process_file_with_llm(
-                    current_file, file_content, context_files, failure_data, user_goal
-                )
-                
-                self._update_results_with_file_processing(
-                    results, current_file, fix_result.changes
-                )
-                
-            except Exception as e:
-                error_changes = self._handle_file_processing_error(current_file, e)
-                self._update_results_with_file_processing(
-                    results, current_file, error_changes, is_error=True
-                )
-        
-        return results
     
     def _determine_attempt_status(self, test_results: Dict[str, Any]) -> FixStatus:
         """Determine the status of a fix attempt based on test results."""

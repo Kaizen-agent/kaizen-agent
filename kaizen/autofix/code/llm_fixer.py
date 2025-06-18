@@ -199,25 +199,173 @@ class PromptBuilder:
     @staticmethod
     def build_fix_prompt(content: str, file_path: str, failure_data: Optional[Dict],
                         user_goal: Optional[str], context_files: Optional[Dict[str, str]]) -> str:
-        """Build prompt for code fixing."""
+        """Build prompt for code fixing in AI agent development context."""
         prompt_parts = [
-            f"File: {file_path}",
+            """You are an expert AI agent developer. Your task is to improve the code following these guidelines:
+
+1. Code Structure:
+   - Break down large functions into smaller, focused ones
+   - Extract repeated patterns into reusable functions
+   - Use proper separation of concerns
+   - Implement clean architecture patterns
+
+2. Error Handling:
+   - Add proper error handling with specific error types
+   - Implement retry mechanisms with exponential backoff
+   - Use proper cleanup in finally blocks
+   - Add input validation and sanitization
+
+3. Resource Management:
+   - Use context managers for resource management
+   - Implement proper cleanup
+   - Handle API rate limits
+   - Manage memory efficiently
+
+4. Code Quality:
+   - Add proper type hints and docstrings
+   - Use dataclasses or Pydantic models for structured data
+   - Add logging for better observability
+   - Follow Python best practices
+
+5. AI Agent Specific:
+   - Proper LLM prompt engineering
+   - Efficient token usage
+   - Robust state management
+   - Clear agent transitions
+
+6. Prompt Engineering:
+   - Structure prompts with clear sections and hierarchy
+   - Use explicit instructions and constraints
+   - Include examples where helpful
+   - Add validation criteria for responses
+   - Use system messages to set context
+   - Include error handling instructions
+   - Add fallback strategies
+   - Use clear input/output formats
+   - Include token usage optimization
+   - Add context management guidelines
+   - Use proper prompt templates
+   - Include safety checks and filters
+   - Add proper error messages
+   - Use proper prompt versioning
+   - Include proper documentation
+
+IMPORTANT: Return ONLY the fixed code, properly formatted in a Python code block. Do not include any analysis or explanation in the response.
+
+The code should:
+- Include all necessary imports
+- Have proper type hints and docstrings
+- Include error handling
+- Follow Python best practices
+- Be properly formatted
+- Include all necessary changes
+- Include proper prompt engineering patterns
+
+Format your response as:
+```python
+# Your fixed code here
+```""",
+            f"\nFile: {file_path}",
             f"Content:\n{content}"
         ]
         
         if failure_data:
-            prompt_parts.append(f"Failure Information:\n{failure_data}")
+            prompt_parts.append(f"\nFailure Information:\n{failure_data}")
         
         if user_goal:
-            prompt_parts.append(f"User Goal:\n{user_goal}")
+            prompt_parts.append(f"\nUser Goal:\n{user_goal}")
         
         if context_files:
-            prompt_parts.append("Related Files:")
+            prompt_parts.append("\nRelated Files (for context and dependencies):")
             for path, file_content in context_files.items():
                 prompt_parts.append(f"\n{path}:\n{file_content}")
         
         return "\n\n".join(prompt_parts)
     
+    @staticmethod
+    def build_analysis_prompt(content: str, file_path: str, failure_data: Optional[Dict],
+                            user_goal: Optional[str], context_files: Optional[Dict[str, str]]) -> str:
+        """Build prompt for code analysis."""
+        prompt_parts = [
+            """You are an expert AI agent developer and code reviewer. Analyze the code and provide a detailed review focusing on:
+
+1. Architecture and Design:
+   - Component separation
+   - State management
+   - Error handling
+   - Resource utilization
+
+2. AI Integration:
+   - LLM usage patterns
+   - Token efficiency
+   - Error handling
+   - Rate limiting
+
+3. Testing and Validation:
+   - Test coverage
+   - Edge cases
+   - Performance
+   - Integration points
+
+4. Security and Reliability:
+   - Input validation
+   - API key handling
+   - Rate limiting
+   - Error logging
+
+5. Code Quality:
+   - Maintainability
+   - Documentation
+   - Type safety
+   - Error handling
+
+6. Prompt Engineering:
+   - Prompt structure and organization
+   - Instruction clarity
+   - Example usage
+   - Response validation
+   - Context management
+   - Error handling
+   - Token optimization
+   - Safety measures
+   - Version control
+   - Documentation
+
+Provide your analysis in the following format:
+
+1. Summary of Issues:
+   - List of identified problems
+   - Priority of fixes
+   - Impact assessment
+
+2. Proposed Changes:
+   - Specific improvements
+   - Architecture enhancements
+   - Testing additions
+   - Documentation updates
+
+3. Implementation Notes:
+   - Step-by-step guide
+   - Risks and mitigations
+   - Testing strategy
+   - Performance considerations""",
+            f"\nFile: {file_path}",
+            f"Content:\n{content}"
+        ]
+        
+        if failure_data:
+            prompt_parts.append(f"\nFailure Information:\n{failure_data}")
+        
+        if user_goal:
+            prompt_parts.append(f"\nUser Goal:\n{user_goal}")
+        
+        if context_files:
+            prompt_parts.append("\nRelated Files (for context and dependencies):")
+            for path, file_content in context_files.items():
+                prompt_parts.append(f"\n{path}:\n{file_content}")
+        
+        return "\n\n".join(prompt_parts)
+
     @staticmethod
     def build_compatibility_prompt(content: str, file_path: str,
                                  compatibility_issues: List[str],
@@ -299,9 +447,15 @@ class LLMCodeFixer:
     
     def _initialize_model(self) -> Any:
         """Initialize the LLM model."""
-        # Initialize your LLM model here based on config
-        # This could be OpenAI, Anthropic, or any other LLM provider
-        pass
+        try:
+            api_key = os.environ.get("GOOGLE_API_KEY")
+            if not api_key:
+                raise LLMError("GOOGLE_API_KEY environment variable not set")
+                
+            genai.configure(api_key=api_key)
+            return genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+        except Exception as e:
+            raise LLMError(f"Failed to initialize LLM model: {str(e)}")
     
     def fix_code(self, content: str, file_path: str, failure_data: Optional[Dict] = None,
                 user_goal: Optional[str] = None, context_files: Optional[Dict[str, str]] = None) -> FixResult:
@@ -433,10 +587,21 @@ class LLMCodeFixer:
             LLMConnectionError: If there's a connection issue
         """
         try:
-            response = self.model.generate(prompt)
-            if not response or not isinstance(response, str):
-                raise LLMResponseError("Invalid response from LLM")
-            return response
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,  # Low temperature for more focused results
+                    max_output_tokens=2048,
+                    top_p=0.8,
+                    top_k=40,
+                )
+            )
+            
+            if not response or not response.text:
+                raise LLMResponseError("Empty response from LLM")
+                
+            return response.text
+            
         except ConnectionError as e:
             raise LLMConnectionError(f"Failed to connect to LLM: {str(e)}")
         except Exception as e:

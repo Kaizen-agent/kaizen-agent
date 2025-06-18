@@ -112,7 +112,9 @@ class ConfigurationParser:
                 regions=config_data.get('regions', []),
                 steps=steps,
                 metadata=metadata,
-                evaluation=evaluation
+                evaluation=evaluation,
+                dependencies=config_data.get('dependencies', []),
+                files_to_fix=config_data.get('files_to_fix', [])
             )
             
             return Result.success(config)

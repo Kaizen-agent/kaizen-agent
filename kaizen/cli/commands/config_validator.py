@@ -7,6 +7,7 @@ ensuring that all required fields are present and valid.
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+import re
 
 from .errors import ConfigurationError
 from .result import Result
@@ -45,7 +46,9 @@ class ConfigurationValidator:
             ValidationRule('metadata', required=False, type=dict),
             ValidationRule('evaluation', required=False, type=dict),
             ValidationRule('assertions', required=False, type=list),
-            ValidationRule('expected_output', required=False, type=dict)
+            ValidationRule('expected_output', required=False, type=dict),
+            ValidationRule('dependencies', required=False, type=list),
+            ValidationRule('files_to_fix', required=False, type=list)
         ]
     
     def validate(self, config_data: Dict[str, Any]) -> Result[Dict[str, Any]]:
@@ -97,6 +100,23 @@ class ConfigurationValidator:
                     )
                 )
             
+            # Validate dependencies and files_to_fix
+            if 'dependencies' in config_data and not all(isinstance(dep, str) for dep in config_data['dependencies']):
+                return Result.failure(
+                    ConfigurationError(
+                        "All dependencies must be strings",
+                        {"field": "dependencies"}
+                    )
+                )
+            
+            if 'files_to_fix' in config_data and not all(isinstance(f, str) for f in config_data['files_to_fix']):
+                return Result.failure(
+                    ConfigurationError(
+                        "All files_to_fix must be strings",
+                        {"field": "files_to_fix"}
+                    )
+                )
+            
             return Result.success(config_data)
             
         except Exception as e:
@@ -142,19 +162,44 @@ class ConfigurationValidator:
         return type_errors
     
     def _validate_field_values(self, config_data: Dict[str, Any]) -> List[str]:
-        """Validate field values using custom validators.
+        """Validate field values.
         
         Args:
             config_data: The configuration data to validate
             
         Returns:
-            List of value validation errors
+            List of validation errors
         """
         value_errors = []
-        for rule in self.rules:
-            if rule.field in config_data and rule.validator is not None:
-                try:
-                    rule.validator(config_data[rule.field])
-                except ValueError as e:
-                    value_errors.append(f"Field '{rule.field}': {str(e)}")
+        
+        # Validate file paths
+        if 'files_to_fix' in config_data:
+            for file_path in config_data['files_to_fix']:
+                if not isinstance(file_path, str):
+                    value_errors.append(f"File path must be a string, got {type(file_path)}")
+                    continue
+                    
+                path = Path(file_path)
+                if not path.exists():
+                    value_errors.append(f"File does not exist: {file_path}")
+                elif not path.is_file():
+                    value_errors.append(f"Path is not a file: {file_path}")
+        
+        # Validate dependencies
+        if 'dependencies' in config_data:
+            for dep in config_data['dependencies']:
+                if not isinstance(dep, str):
+                    value_errors.append(f"Dependency must be a string, got {type(dep)}")
+                    continue
+                
+                # Check for valid package name format
+                if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*$', dep):
+                    value_errors.append(f"Invalid package name format: {dep}")
+                
+                # Check for version specifier format if present
+                if '==' in dep or '>=' in dep or '<=' in dep or '>' in dep or '<' in dep:
+                    pkg_name, version = re.split(r'[=><]+', dep)
+                    if not re.match(r'^[0-9][0-9_.]*$', version):
+                        value_errors.append(f"Invalid version format in dependency: {dep}")
+        
         return value_errors 

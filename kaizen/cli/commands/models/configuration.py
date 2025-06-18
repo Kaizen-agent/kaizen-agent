@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+from kaizen.cli.commands.errors import ConfigurationError
+
 from .metadata import TestMetadata
 from .evaluation import TestEvaluation
 from .settings import TestSettings
@@ -30,6 +32,8 @@ class TestConfiguration:
         max_retries: Retry limit
         base_branch: PR base branch
         pr_strategy: PR creation strategy
+        dependencies: List of required dependencies
+        files_to_fix: List of files that should be fixed
     """
     # Required fields
     name: str
@@ -49,6 +53,7 @@ class TestConfiguration:
     max_retries: int = 3
     base_branch: str = "main"
     pr_strategy: PRStrategy = PRStrategy.ANY_IMPROVEMENT
+    files_to_fix: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], config_path: Path) -> 'TestConfiguration':
@@ -88,5 +93,6 @@ class TestConfiguration:
             create_pr=data.get('create_pr', False),
             max_retries=data.get('max_retries', 3),
             base_branch=data.get('base_branch', 'main'),
-            pr_strategy=pr_strategy
+            pr_strategy=pr_strategy,
+            files_to_fix=data.get('files_to_fix', [])
         ) 

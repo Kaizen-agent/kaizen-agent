@@ -21,7 +21,7 @@ Example:
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, NoReturn
+from typing import Optional, NoReturn, List
 
 # Third-party imports
 import click
@@ -114,6 +114,51 @@ def _display_test_summary(console: Console, test_result: TestResult, rich_format
     console.print("\nTest Results Table:")
     console.print(rich_formatter.format_table(test_result.results))
 
+def _install_dependencies(dependencies: List[str], logger: logging.Logger) -> Result[None]:
+    """Install required dependencies.
+    
+    Args:
+        dependencies: List of dependencies to install
+        logger: Logger instance
+        
+    Returns:
+        Result indicating success or failure
+    """
+    if not dependencies:
+        return Result.success(None)
+        
+    try:
+        import subprocess
+        import sys
+        
+        logger.info("Installing dependencies...")
+        for dep in dependencies:
+            logger.info(f"Installing {dep}...")
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", dep],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                return Result.failure(
+                    TestError(
+                        f"Failed to install dependency {dep}: {result.stderr}",
+                        {"dependency": dep, "error": result.stderr}
+                    )
+                )
+                
+        logger.info("All dependencies installed successfully")
+        return Result.success(None)
+        
+    except Exception as e:
+        return Result.failure(
+            TestError(
+                f"Error installing dependencies: {str(e)}",
+                {"error": str(e)}
+            )
+        )
+
 @click.command()
 @click.option('--config', '-c', type=click.Path(exists=True), required=True, help='Test configuration file')
 @click.option('--auto-fix', is_flag=True, help='Automatically fix failing tests')
@@ -167,8 +212,10 @@ def test_all(
         if not config_result.is_success:
             _handle_error(config_result.error, "Configuration error")
         
+        config = config_result.value
+        
         # Execute tests
-        command = TestAllCommand(config_result.value, logger)
+        command = TestAllCommand(config, logger)
         test_result = command.execute()
         
         if not test_result.is_success:

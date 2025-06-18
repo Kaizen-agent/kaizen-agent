@@ -96,7 +96,8 @@ class ConfigurationManager:
                 regions=config_data.get('regions', []),
                 steps=parse_result.value.steps if parse_result.value else [],
                 metadata=parse_result.value.metadata if parse_result.value else None,
-                evaluation=parse_result.value.evaluation if parse_result.value else None
+                evaluation=parse_result.value.evaluation if parse_result.value else None,
+                files_to_fix=parse_result.value.files_to_fix if parse_result.value else []
             )
             
             logger.info(f"Created configuration object: {config}")

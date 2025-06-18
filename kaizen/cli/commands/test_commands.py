@@ -172,10 +172,15 @@ class TestAllCommand(BaseTestCommand):
         try:
             # Create AutoFix instance and run fixes
             fixer = AutoFix(self.config)
-            fix_results = fixer.fix_code(
-                file_path=str(self.config.file_path),
-                failure_data=failed_tests
-            )
+            files_to_fix = self.config.files_to_fix
+            if files_to_fix:
+                fix_results = fixer.fix_code(
+                    file_path=str(self.config.file_path),
+                    failure_data=failed_tests,
+                    files_to_fix=files_to_fix
+                )
+            else:
+                raise AutoFixError("No files to fix were provided")
             
             # Process and return attempts
             attempts = fix_results.get('attempts', [])
