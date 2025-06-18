@@ -1083,9 +1083,7 @@ class AutoFix:
             formatter = CodeFormatter()
             fix_result.fixed_code = formatter.format_code(fix_result.fixed_code)
 
-            # Clean up any markdown or unnecessary text
-            fix_result.fixed_code = self._clean_markdown_notations(fix_result.fixed_code)
-
+            
             if fix_result.status == FixStatus.SUCCESS:
                 return self._handle_successful_fix(current_file_path, fix_result)
             return self._handle_failed_fix(current_file_path, file_content)
@@ -1126,8 +1124,7 @@ class AutoFix:
             IOError: If there are issues writing to the file
         """
         try:
-            fixed_code = self._clean_markdown_notations(fix_result)
-            self._apply_code_changes(current_file_path, fixed_code)
+            self._apply_code_changes(current_file_path, fix_result.fixed_code)
             return self._create_success_result(fix_result)
         except (ValueError, IOError) as e:
             logger.error(f"Failed to apply successful fix to {current_file_path}", extra={
