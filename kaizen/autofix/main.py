@@ -705,6 +705,7 @@ class AutoFix:
             base_dir=os.path.dirname(file_path),
             failure_data=failure_data
         )
+        logger.info(f"Referenced files: {referenced_files}")
         return (analyze_failure_dependencies(failure_data, referenced_files) 
                 if failure_data else {file_path})
     
