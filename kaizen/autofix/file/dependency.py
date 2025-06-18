@@ -3,7 +3,7 @@ import ast
 import logging
 import importlib
 import json
-from typing import Set, Dict, List, Optional, Union
+from typing import Any, Set, Dict, List, Optional, Union
 from pathlib import Path
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -23,7 +23,7 @@ def collect_referenced_files(
     file_path: Union[str, Path],
     processed_files: Optional[Set[Path]] = None,
     base_dir: Optional[Union[str, Path]] = None,
-    failure_data: Optional[List[Dict]] = None,
+    failure_data: Optional[List[Dict[str, Any]]] = None,
     llm_checked_files: Optional[Set[Path]] = None,
     patterns: Optional[Dict] = None
 ) -> Set[Path]:
@@ -51,11 +51,12 @@ def collect_referenced_files(
     # Initialize sets if None
     processed_files = processed_files or set()
     llm_checked_files = llm_checked_files or set()
-    
+    logger.info(f"Processed files: {processed_files}")
+    logger.info(f"LLM checked files: {llm_checked_files}")
     # Convert inputs to Path objects
     file_path = Path(file_path).resolve()
     base_dir = Path(base_dir).resolve() if base_dir else file_path.parent
-    
+    logger.info(f"Base directory: {base_dir}")
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
     
@@ -63,6 +64,7 @@ def collect_referenced_files(
         return processed_files
     
     processed_files.add(file_path)
+    logger.info(f"Processed files: {processed_files}")
     try:
         logger.info(f"Reading and parsing file {file_path}")
         # Read and parse file
