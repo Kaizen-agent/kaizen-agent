@@ -46,7 +46,7 @@ class FixStatus(Enum):
 class FixResult:
     """Result of a code fix operation."""
     status: FixStatus
-    changes: Dict[str, Any]
+    changes: Dict[str, Any] = None
     explanation: Optional[str] = None
     confidence: Optional[float] = None
     compatibility_issues: List[CompatibilityIssue] = None
@@ -1342,7 +1342,7 @@ class AutoFix:
                                 fix_result = self._process_file_with_llm(
                                     current_file, file_content, context_files, failure_data, config
                                 )
-                                
+                                logger.info(f"fix result: {fix_result}")
                                 if fix_result.status == FixStatus.SUCCESS:
                                     results['changes'][current_file] = fix_result.changes
                                     results['processed_files'].append({
