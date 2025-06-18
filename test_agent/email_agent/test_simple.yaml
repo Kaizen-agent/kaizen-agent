@@ -1,4 +1,4 @@
-name: Email Agent Core Test
+test_name: Email Agent Core Test
 agent_type: dynamic_region
 file_path: email_agent.py
 description: |
