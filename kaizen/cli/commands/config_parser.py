@@ -191,6 +191,7 @@ class ConfigurationParser:
                 step = TestStep(
                     name=step_data.get('name', ''),
                     command=step_data.get('input', {}).get('method', ''),
+                    input=step_data.get('input', {}).get('input', ''),
                     expected_output=step_data.get('expected_output', ''),
                     description=step_data.get('description'),
                     timeout=step_data.get('timeout'),
