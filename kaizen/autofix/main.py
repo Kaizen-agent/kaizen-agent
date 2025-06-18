@@ -406,11 +406,14 @@ class AutoFix:
             Dictionary containing configuration
         """
         return {
+            'name': config.name,
+            'file_path': str(config.file_path),
             'max_retries': config.max_retries,
             'create_pr': config.create_pr,
             'pr_strategy': config.pr_strategy,
             'base_branch': config.base_branch,
-            'auto_fix': config.auto_fix
+            'auto_fix': config.auto_fix,
+            'tests': []  # Add empty tests list as it's required by TestRunner
         }
     
     def _load_config(self, config_path: str) -> Dict:
