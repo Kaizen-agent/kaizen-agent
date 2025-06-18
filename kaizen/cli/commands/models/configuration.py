@@ -48,7 +48,7 @@ class TestConfiguration:
     create_pr: bool = False
     max_retries: int = 3
     base_branch: str = "main"
-    pr_strategy: PRStrategy = PRStrategy.CREATE_NEW
+    pr_strategy: PRStrategy = PRStrategy.ANY_IMPROVEMENT
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], config_path: Path) -> 'TestConfiguration':
@@ -60,7 +60,19 @@ class TestConfiguration:
             
         Returns:
             TestConfiguration instance
+            
+        Raises:
+            ConfigurationError: If configuration is invalid
+            FileNotFoundError: If test file does not exist
         """
+        # Parse PR strategy
+        pr_strategy = data.get('pr_strategy', 'ANY_IMPROVEMENT')
+        if isinstance(pr_strategy, str):
+            try:
+                pr_strategy = PRStrategy.from_str(pr_strategy)
+            except ValueError as e:
+                raise ConfigurationError(str(e))
+        
         return cls(
             name=data['name'],
             file_path=Path(data['file_path']),
@@ -76,5 +88,5 @@ class TestConfiguration:
             create_pr=data.get('create_pr', False),
             max_retries=data.get('max_retries', 3),
             base_branch=data.get('base_branch', 'main'),
-            pr_strategy=PRStrategy.from_str(data.get('pr_strategy', 'CREATE_NEW'))
+            pr_strategy=pr_strategy
         ) 
