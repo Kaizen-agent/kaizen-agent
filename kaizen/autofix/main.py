@@ -3,14 +3,14 @@ import logging
 import yaml
 import ast
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Set, Tuple, NamedTuple, Union
+from typing import Dict, List, Optional, Any, Set, Tuple, NamedTuple, Union, TYPE_CHECKING
 from dataclasses import dataclass
 from enum import Enum, auto
 import shutil
 import tempfile
 
-from kaizen.cli.commands.models import TestConfiguration
-
+if TYPE_CHECKING:
+    from kaizen.cli.commands.models import TestConfiguration
 
 from .file.dependency import collect_referenced_files, analyze_failure_dependencies
 from .code.fixer import fix_common_syntax_issues, fix_aggressive_syntax_issues, apply_code_changes
@@ -470,7 +470,7 @@ class AutoFix:
     
     def _process_file_with_llm(self, current_file: str, file_content: str, 
                              context_files: Dict[str, str], failure_data: Optional[Dict],
-                             config: Optional[TestConfiguration]) -> FixResult:
+                             config: Optional['TestConfiguration']) -> FixResult:
         """
         Process a single file using LLM.
         
@@ -611,7 +611,7 @@ class AutoFix:
             results['pr'] = pr_data
     
     def fix_code(self, file_path: str, failure_data: List[Dict[str, Any]] = None, 
-                config: Optional[TestConfiguration] = None, files_to_fix: List[str] = None) -> Dict:
+                config: Optional['TestConfiguration'] = None, files_to_fix: List[str] = None) -> Dict:
         """Fix code in the given files with retry logic.
         
         Args:
