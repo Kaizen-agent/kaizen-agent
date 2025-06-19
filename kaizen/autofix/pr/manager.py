@@ -496,12 +496,17 @@ class PRManager:
             current_branch = self._get_current_branch()
             
             # Create PR
+            logger.info(f"Creating PR with title: {self.pr_data['title']}")
+            logger.info(f"Creating PR with body: {self.pr_data['description']}")
+            logger.info(f"Creating PR with head: {current_branch}")
+            logger.info(f"Creating PR with base: {self.github_config.base_branch}")
             pr = repo.create_pull(
                 title=self.pr_data['title'],
                 body=self.pr_data['description'],
                 head=current_branch,
                 base=self.github_config.base_branch
             )
+            logger.info(f"PR created: {pr.html_url}")
             
             return pr
             

@@ -1424,6 +1424,8 @@ class AutoFix:
                                 'improvement_summary': improvement_summary
                             }
                     except Exception as e:
+                        logger.info("No tests were fixed, reverting changes")
+                        subprocess.run(["git", "checkout", original_branch], check=True)
                         raise PRCreationError(f"Failed to create PR: {str(e)}")
                 
                 
