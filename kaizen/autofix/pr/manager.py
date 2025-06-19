@@ -171,18 +171,8 @@ class PRManager:
             str: PR title
         """
         try:
-            # Get change summary
-            change_summary = self._get_change_summary(changes)
             
-            # Get test summary
-            test_summary = self._get_test_summary(test_results)
-            
-            # Generate title
-            title = f"Fix: {change_summary}"
-            
-            # Add test status if available
-            if test_summary:
-                title += f" ({test_summary})"
+            title = "Fix: Code changes by Kaizen Agent"
             
             return title
             
@@ -214,8 +204,8 @@ class PRManager:
             description.extend(self._generate_agent_summary(test_results))
             description.extend(self._generate_test_results_summary(test_results))
             description.extend(self._generate_detailed_results(test_results))
-            description.extend(self._generate_code_changes(changes))
-            description.extend(self._generate_prompt_changes(changes))
+            # description.extend(self._generate_code_changes(changes))
+            # description.extend(self._generate_prompt_changes(changes))
             description.extend(self._generate_additional_summary(test_results))
             
             return "\n".join(description)
