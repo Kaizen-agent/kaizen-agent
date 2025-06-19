@@ -153,6 +153,9 @@ class PRManager:
             # Check git status
             self._check_git_status()
             
+            # Push branch if needed
+            self._push_branch_if_needed()
+            
             # Create actual PR on GitHub
             pr = self._create_github_pr()
             
@@ -755,17 +758,36 @@ Generate the complete PR description now:"""
         try:
             logger.info("Checking git status")
             
-            # Check if we have unpushed commits
-            unpushed = subprocess.check_output(
-                ["git", "log", "--oneline", f"origin/{self._get_current_branch()}..HEAD"], 
-                text=True
-            ).strip()
+            current_branch = self._get_current_branch()
             
-            if not unpushed:
-                logger.warning("No unpushed commits found - PR may be empty")
-            else:
-                commit_count = len(unpushed.split('\n'))
-                logger.info(f"Found {commit_count} unpushed commit(s)")
+            # Check if branch exists on remote first
+            try:
+                # Try to get the remote branch
+                remote_branch = subprocess.check_output(
+                    ["git", "ls-remote", "--heads", "origin", current_branch], 
+                    text=True
+                ).strip()
+                
+                if remote_branch:
+                    # Branch exists on remote, check for unpushed commits
+                    try:
+                        unpushed = subprocess.check_output(
+                            ["git", "log", "--oneline", f"origin/{current_branch}..HEAD"], 
+                            text=True
+                        ).strip()
+                        
+                        if not unpushed:
+                            logger.warning("No unpushed commits found - PR may be empty")
+                        else:
+                            commit_count = len(unpushed.split('\n'))
+                            logger.info(f"Found {commit_count} unpushed commit(s)")
+                    except subprocess.CalledProcessError:
+                        logger.warning("Could not check unpushed commits")
+                else:
+                    logger.warning(f"Branch {current_branch} does not exist on remote yet - will need to push first")
+                    
+            except subprocess.CalledProcessError:
+                logger.warning("Could not check remote branch status")
             
             # Check if working directory is clean
             status = subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
@@ -789,6 +811,77 @@ Generate the complete PR description now:"""
                 'error_type': type(e).__name__
             })
             # Don't raise here as this is just a warning
+
+    def _push_branch_if_needed(self) -> None:
+        """
+        Push the current branch to remote if it doesn't exist yet.
+        
+        Raises:
+            GitConfigError: If pushing fails
+        """
+        try:
+            current_branch = self._get_current_branch()
+            
+            # Check if branch exists on remote
+            remote_branch = subprocess.check_output(
+                ["git", "ls-remote", "--heads", "origin", current_branch], 
+                text=True
+            ).strip()
+            
+            if not remote_branch:
+                # Check if we have any commits to push
+                try:
+                    local_commits = subprocess.check_output(
+                        ["git", "log", "--oneline", f"origin/{self.github_config.base_branch}..HEAD"], 
+                        text=True
+                    ).strip()
+                    
+                    if not local_commits:
+                        logger.warning("No local commits found to push")
+                        raise GitConfigError(
+                            "No local commits found. Please commit your changes before creating a PR."
+                        )
+                    
+                    commit_count = len(local_commits.split('\n'))
+                    logger.info(f"Found {commit_count} local commit(s) to push")
+                    
+                except subprocess.CalledProcessError:
+                    logger.warning("Could not check local commits")
+                
+                logger.info(f"Branch {current_branch} does not exist on remote, pushing...")
+                
+                # Push the branch to remote
+                result = subprocess.run(
+                    ["git", "push", "origin", current_branch],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode != 0:
+                    logger.error("Failed to push branch to remote", extra={
+                        'return_code': result.returncode,
+                        'stdout': result.stdout,
+                        'stderr': result.stderr
+                    })
+                    raise GitConfigError(f"Failed to push branch {current_branch} to remote: {result.stderr}")
+                
+                logger.info(f"Successfully pushed branch {current_branch} to remote")
+            else:
+                logger.info(f"Branch {current_branch} already exists on remote")
+                
+        except subprocess.CalledProcessError as e:
+            logger.error("Failed to check remote branch status", extra={
+                'return_code': e.returncode,
+                'output': e.output,
+                'cmd': e.cmd
+            })
+            raise GitConfigError(f"Failed to check remote branch status: {e.output}")
+        except Exception as e:
+            logger.error("Unexpected error pushing branch", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
+            raise GitConfigError(f"Error pushing branch: {str(e)}")
 
     def _create_github_pr(self) -> PullRequest:
         """
@@ -833,7 +926,32 @@ Generate the complete PR description now:"""
                     'error': str(e),
                     'status_code': e.status
                 })
-                raise GitConfigError(f"Branch {current_branch} not found on remote repository. Please push your changes first.")
+                
+                # Check if we have local commits that need to be pushed
+                try:
+                    local_commits = subprocess.check_output(
+                        ["git", "log", "--oneline", f"origin/{self.github_config.base_branch}..HEAD"], 
+                        text=True
+                    ).strip()
+                    
+                    if local_commits:
+                        commit_count = len(local_commits.split('\n'))
+                        logger.info(f"Found {commit_count} local commit(s) that need to be pushed")
+                        raise GitConfigError(
+                            f"Branch {current_branch} not found on remote repository. "
+                            f"You have {commit_count} local commit(s) that need to be pushed first. "
+                            f"Please run: git push origin {current_branch}"
+                        )
+                    else:
+                        raise GitConfigError(
+                            f"Branch {current_branch} not found on remote repository and no local commits found. "
+                            f"Please ensure you have committed your changes and pushed them to the remote."
+                        )
+                except subprocess.CalledProcessError:
+                    raise GitConfigError(
+                        f"Branch {current_branch} not found on remote repository. "
+                        f"Please push your changes first with: git push origin {current_branch}"
+                    )
             
             # Validate base branch exists
             logger.info(f"Validating base branch: {self.github_config.base_branch}")
