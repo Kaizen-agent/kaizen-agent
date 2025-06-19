@@ -1180,12 +1180,18 @@ class CodeRegionExtractor:
             raise ValueError(f"Failed to determine region type: {str(e)}")
 
 class CodeRegionExecutor:
-    """Executes code regions and manages their execution context."""
+    """Executes code regions with proper import management."""
     
-    def __init__(self, workspace_root: Path):
-        """Initialize the code region executor."""
+    def __init__(self, workspace_root: Path, imported_dependencies: Optional[Dict[str, Any]] = None):
+        """Initialize the code region executor.
+        
+        Args:
+            workspace_root: Root directory of the workspace
+            imported_dependencies: Optional dictionary containing pre-imported dependencies
+        """
         self.workspace_root = workspace_root
         self.import_manager = ImportManager(workspace_root)
+        self.imported_dependencies = imported_dependencies or {}
     
     def _ensure_standard_imports(self, namespace: Dict[str, Any]) -> None:
         """Ensure all standard library imports are available in the namespace.
@@ -1193,6 +1199,12 @@ class CodeRegionExecutor:
         Args:
             namespace: Dictionary to add imports to
         """
+        # Add pre-imported dependencies first
+        if self.imported_dependencies:
+            namespace.update(self.imported_dependencies)
+            logger.info(f"Added {len(self.imported_dependencies)} pre-imported dependencies to namespace")
+        
+        # Add standard library imports
         for module_name in STANDARD_MODULES:
             if module_name not in namespace:
                 try:

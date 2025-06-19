@@ -32,11 +32,10 @@ class TestSummary:
         }
 
 class TestRunner:
-    """A class for running tests and processing results."""
+    """Runs tests using the code region execution system."""
     
     def __init__(self, test_config: Dict):
-        """
-        Initialize the test runner.
+        """Initialize the test runner.
         
         Args:
             test_config: Test configuration dictionary
@@ -45,8 +44,12 @@ class TestRunner:
         self._validate_config()
         self.workspace_root = self._find_workspace_root()
         self.config_file_path = Path(test_config.get('config_file', ''))
+        
+        # Get imported dependencies from config
+        imported_dependencies = test_config.get('imported_dependencies', {})
+        
         self.code_region_extractor = CodeRegionExtractor()
-        self.code_region_executor = CodeRegionExecutor(self.workspace_root)
+        self.code_region_executor = CodeRegionExecutor(self.workspace_root, imported_dependencies)
         self.llm_evaluator = LLMEvaluator()
         self.assertion_runner = AssertionRunner()
         

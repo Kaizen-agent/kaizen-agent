@@ -9,6 +9,27 @@ The Kaizen CLI now supports specifying dependencies and referenced files in test
 1. **Import Python packages** before test execution
 2. **Import local files** that are referenced by your test code
 3. **Ensure all dependencies are available** before running tests
+4. **Use imported dependencies during test execution**
+
+## How It Works
+
+### Complete Integration Flow
+
+1. **Configuration Loading**: When you run a test, the CLI loads the configuration file
+2. **Dependency Import**: The system imports all specified packages and files using the `DependencyManager`
+3. **Namespace Creation**: A namespace dictionary is created containing all imported modules
+4. **Test Execution**: The namespace is passed to the test runner and made available during test execution
+5. **Code Execution**: When test code runs, it has access to all imported dependencies
+6. **Cleanup**: The system cleans up any modifications to the Python environment
+
+### Technical Details
+
+The integration works through several components:
+
+- **DependencyManager**: Handles importing packages and files, creating a namespace
+- **TestAllCommand**: Orchestrates the dependency import and test execution
+- **TestRunner**: Receives the imported dependencies and passes them to the execution system
+- **CodeRegionExecutor**: Uses the imported dependencies during code execution
 
 ## Configuration Structure
 
@@ -39,13 +60,6 @@ referenced_files:
 ### Complete Example
 
 See `test_config_with_dependencies.yaml` for a complete example configuration.
-
-## How It Works
-
-1. **Configuration Loading**: When you run a test, the CLI loads the configuration file
-2. **Dependency Import**: The system imports all specified packages and files
-3. **Test Execution**: Tests are executed with all dependencies available
-4. **Cleanup**: The system cleans up any modifications to the Python environment
 
 ## Usage
 
@@ -102,6 +116,7 @@ steps:
 - **Version Support**: Supports version specifiers (`==`, `>=`, `<=`, `>`, `<`)
 - **Error Handling**: Gracefully handles missing packages with warnings
 - **Import Validation**: Validates that packages can be imported
+- **Runtime Availability**: Imported packages are available during test execution
 
 ### Local File Dependencies
 
@@ -109,12 +124,65 @@ steps:
 - **Absolute Paths**: Supports absolute paths
 - **Module Import**: Imports files as Python modules
 - **Path Resolution**: Automatically resolves file paths
+- **Runtime Availability**: Imported files are available during test execution
 
 ### Error Handling
 
 - **Missing Packages**: Logs warnings for missing packages but continues execution
 - **Missing Files**: Logs warnings for missing files but continues execution
 - **Import Errors**: Provides detailed error messages for import failures
+- **Graceful Degradation**: Tests can still run even if some dependencies fail to import
+
+## Testing the Integration
+
+### Running the Integration Test
+
+```bash
+cd kaizen/cli/commands
+python examples/test_integration.py
+```
+
+This test verifies that:
+1. Dependencies are properly imported
+2. The namespace is created correctly
+3. Dependencies are passed to the test runner
+4. The integration works end-to-end
+
+### Example Test File
+
+The `test_file.py` example demonstrates how to use imported dependencies:
+
+```python
+import requests
+import pandas as pd
+import numpy as np
+from typing import Dict, Any, Optional
+
+def test_function(input_data: str) -> Dict[str, Any]:
+    """Test function that uses dependencies."""
+    try:
+        # Use pandas for data processing
+        df = pd.DataFrame({'data': [input_data]})
+        
+        # Use numpy for calculations
+        result = np.mean([1, 2, 3, 4, 5])
+        
+        # Use requests for API call (simulated)
+        response = {"status": "success", "data": input_data}
+        
+        return {
+            "status": "success",
+            "result": result,
+            "data": df.to_dict(),
+            "response": response
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+```
 
 ## Best Practices
 
@@ -123,12 +191,7 @@ steps:
 3. **Test Dependencies**: Ensure all dependencies are available in your test environment
 4. **Minimize Dependencies**: Only include dependencies that are actually needed
 5. **Document Dependencies**: Add comments explaining why each dependency is needed
-
-## Example Files
-
-- `test_config_with_dependencies.yaml`: Complete configuration example
-- `test_file.py`: Example test file that uses dependencies
-- `README.md`: This documentation file
+6. **Handle Import Errors**: Write your test code to handle cases where dependencies might not be available
 
 ## Troubleshooting
 
@@ -138,6 +201,7 @@ steps:
 2. **File Not Found**: Check that the file path is correct relative to the config file
 3. **Import Errors**: Verify that the file contains valid Python code
 4. **Version Conflicts**: Use specific version requirements to avoid conflicts
+5. **Namespace Issues**: Check that imported modules are available in your test code
 
 ### Debugging
 
@@ -147,6 +211,14 @@ Enable debug logging to see detailed information about dependency imports:
 kaizen test-all --config test_config.yaml --auto-fix --log-level DEBUG
 ```
 
+### Verification
+
+To verify that dependencies are properly imported, you can:
+
+1. Check the console output for dependency import messages
+2. Use the integration test to verify the complete flow
+3. Add logging to your test code to verify imports are available
+
 ## Integration with Existing Features
 
 The dependency management system integrates seamlessly with existing Kaizen CLI features:
@@ -154,4 +226,12 @@ The dependency management system integrates seamlessly with existing Kaizen CLI 
 - **Auto-fix**: Dependencies are available during auto-fix operations
 - **Test Execution**: All dependencies are imported before test execution
 - **Error Reporting**: Dependency errors are included in test reports
-- **Configuration Validation**: Dependencies are validated during configuration loading 
+- **Configuration Validation**: Dependencies are validated during configuration loading
+- **Code Region Execution**: Imported dependencies are available in the execution namespace
+
+## Example Files
+
+- `test_config_with_dependencies.yaml`: Complete configuration example
+- `test_file.py`: Example test file that uses dependencies
+- `test_integration.py`: Integration test to verify functionality
+- `README.md`: This documentation file 
