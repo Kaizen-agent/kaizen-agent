@@ -238,7 +238,13 @@ class DependencyManager:
                 spec.loader.exec_module(module)
                 self._imported_modules[module_name] = module
                 
-                logger.info(f"Successfully imported file: {resolved_path}")
+                # Also add the module with the original file path as key for easier access
+                # This helps when the code tries to import using the original path
+                path_key = str(resolved_path.relative_to(self.workspace_root)).replace('/', '.').replace('.py', '')
+                if path_key not in self._imported_modules:
+                    self._imported_modules[path_key] = module
+                
+                logger.info(f"Successfully imported file: {resolved_path} as {module_name}")
                 return DependencyInfo(
                     name=file_path,
                     type='local_file',
@@ -299,7 +305,9 @@ class DependencyManager:
         # Add standard library modules
         standard_modules = [
             'os', 'sys', 'pathlib', 'typing', 'logging', 'json', 
-            'datetime', 'time', 're', 'math', 'random', 'itertools'
+            'datetime', 'time', 're', 'math', 'random', 'itertools',
+            'collections', 'dataclasses', 'enum', 'importlib', 'ast',
+            'contextlib', 'functools'
         ]
         
         for module_name in standard_modules:
@@ -311,6 +319,17 @@ class DependencyManager:
         
         # Add imported modules
         namespace.update(self._imported_modules)
+        
+        # Add common aliases for better compatibility
+        if 'pathlib' in namespace:
+            namespace['Path'] = namespace['pathlib'].Path
+        
+        if 'typing' in namespace:
+            # Add common typing imports
+            typing_module = namespace['typing']
+            for attr in ['List', 'Dict', 'Tuple', 'Set', 'Optional', 'Any', 'Union']:
+                if hasattr(typing_module, attr):
+                    namespace[attr] = getattr(typing_module, attr)
         
         return namespace
     
