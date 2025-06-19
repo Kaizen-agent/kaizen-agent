@@ -175,27 +175,28 @@ def test_all(
         command = TestAllCommand(config, logger)
         test_result = command.execute()
         
-        if not test_result.is_success:
-            _handle_error(test_result.error, "Test execution error")
+        ## FIX LATER Add TERMINAL OUTPUT
+        # if not test_result.is_success:
+        #     _handle_error(test_result.error, "Test execution error")
         
-        # Generate report
-        result_file = _generate_report_path(test_result.value)
+        # # Generate report
+        # result_file = _generate_report_path(test_result.value)
         
-        # Use Markdown formatter for file output
-        markdown_formatter = MarkdownTestResultFormatter()
-        report_writer = TestReportWriter(test_result.value, markdown_formatter, logger)
-        report_result = report_writer.write_report(result_file)
+        # # Use Markdown formatter for file output
+        # markdown_formatter = MarkdownTestResultFormatter()
+        # report_writer = TestReportWriter(test_result.value, markdown_formatter, logger)
+        # report_result = report_writer.write_report(result_file)
         
-        if not report_result.is_success:
-            _handle_error(report_result.error, "Report generation error")
+        # if not report_result.is_success:
+        #     _handle_error(report_result.error, "Report generation error")
         
-        # Use Rich formatter for console output
-        rich_formatter = RichTestResultFormatter(console)
+        # # Use Rich formatter for console output
+        # rich_formatter = RichTestResultFormatter(console)
         
-        # Display test summary
-        _display_test_summary(console, test_result.value, rich_formatter)
+        # # Display test summary
+        # _display_test_summary(console, test_result.value, rich_formatter)
         
-        console.print(f"\nDetailed report saved to: {result_file}")
+        # console.print(f"\nDetailed report saved to: {result_file}")
         
     except Exception as e:
         _handle_error(e, "Unexpected error")

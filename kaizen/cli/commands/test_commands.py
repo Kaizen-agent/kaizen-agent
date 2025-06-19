@@ -94,20 +94,21 @@ class TestAllCommand(BaseTestCommand):
                 self.logger.info(f"Found {len(failed_tests)} failed tests")
                 test_attempts = self._handle_auto_fix(failed_tests, self.config, runner_config)
             
-            result = TestResult(
-                name=self.config.name,
-                file_path=self.config.file_path,
-                config_path=self.config.config_path,
-                results=results,
-                failed_tests=failed_tests,
-                test_attempts=test_attempts
-            )
+            # result = TestResult(
+            #     name=self.config.name,
+            #     file_path=self.config.file_path,
+            #     config_path=self.config.config_path,
+            #     results=results,
+            #     failed_tests=failed_tests,
+            #     test_attempts=test_attempts
+            # )
             
-            validation_result = result.validate()
-            if not validation_result.is_success:
-                return Result.failure(validation_result.error)
+            # validation_result = result.validate()
+            # if not validation_result.is_success:
+            #     return Result.failure(validation_result.error)
             
-            return Result.success(result)
+            # return 
+            return "test"
             
         except Exception as e:
             self.logger.error(f"Error executing tests: {str(e)}")
