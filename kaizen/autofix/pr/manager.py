@@ -153,6 +153,9 @@ class PRManager:
             # Check git status
             self._check_git_status()
             
+            # Ensure working directory is clean
+            self._ensure_clean_working_directory()
+            
             # Push branch if needed
             self._push_branch_if_needed()
             
@@ -160,19 +163,36 @@ class PRManager:
             pr = self._create_github_pr()
             
             # Update PR data with GitHub PR information
-            self.pr_data.update({
-                'status': 'ready',
-                'pr_number': pr.number,
-                'pr_url': pr.html_url,
-                'branch': pr.head.ref
-            })
+            # Only update status to 'ready' if it's not already set to 'existing' or 'reopened'
+            if self.pr_data['status'] not in ['existing', 'reopened']:
+                self.pr_data.update({
+                    'status': 'ready',
+                    'pr_number': pr.number,
+                    'pr_url': pr.html_url,
+                    'branch': pr.head.ref
+                })
+            else:
+                # For existing or reopened PRs, just ensure we have the PR info
+                if 'pr_number' not in self.pr_data:
+                    self.pr_data.update({
+                        'pr_number': pr.number,
+                        'pr_url': pr.html_url,
+                        'branch': pr.head.ref
+                    })
             
             # Log PR creation completion
-            logger.info("PR creation completed successfully", extra={
+            status_message = {
+                'ready': 'PR creation completed successfully',
+                'existing': 'Returned existing PR',
+                'reopened': 'PR reopened successfully'
+            }.get(self.pr_data['status'], 'PR operation completed')
+            
+            logger.info(status_message, extra={
                 'pr_title': self.pr_data['title'],
                 'pr_url': self.pr_data['pr_url'],
                 'pr_number': self.pr_data['pr_number'],
-                'branch': self.pr_data['branch']
+                'branch': self.pr_data['branch'],
+                'status': self.pr_data['status']
             })
             
             return self.pr_data
@@ -643,7 +663,7 @@ Generate the complete PR description now:"""
                 raise ValueError("Test results must be a dictionary")
             
             # Validate status
-            valid_statuses = ['draft', 'ready', 'error']
+            valid_statuses = ['draft', 'ready', 'error', 'existing', 'reopened']
             if self.pr_data['status'] not in valid_statuses:
                 raise ValueError(f"Invalid status: {self.pr_data['status']}")
             
@@ -965,14 +985,75 @@ Generate the complete PR description now:"""
                 })
                 raise GitHubConfigError(f"Base branch {self.github_config.base_branch} not found in repository.")
             
-            # Check if PR already exists
+            # Check if PR already exists (both open and closed)
             logger.info("Checking for existing PRs")
-            existing_prs = repo.get_pulls(state='open', head=f"{repo_owner}:{current_branch}")
-            existing_pr_list = list(existing_prs)
-            if existing_pr_list:
-                logger.warning(f"Found {len(existing_pr_list)} existing open PR(s) for this branch", extra={
-                    'existing_prs': [pr.html_url for pr in existing_pr_list]
+            existing_open_prs = repo.get_pulls(state='open', head=f"{repo_owner}:{current_branch}")
+            existing_closed_prs = repo.get_pulls(state='closed', head=f"{repo_owner}:{current_branch}")
+            
+            existing_open_list = list(existing_open_prs)
+            existing_closed_list = list(existing_closed_prs)
+            
+            if existing_open_list:
+                logger.info(f"Found {len(existing_open_list)} existing open PR(s) for this branch", extra={
+                    'existing_prs': [pr.html_url for pr in existing_open_list]
                 })
+                
+                # Return the first existing open PR
+                existing_pr = existing_open_list[0]
+                logger.info(f"Returning existing PR: #{existing_pr.number} - {existing_pr.title}", extra={
+                    'pr_url': existing_pr.html_url,
+                    'pr_state': existing_pr.state
+                })
+                
+                # Update PR data to reflect existing PR
+                self.pr_data.update({
+                    'status': 'existing',
+                    'pr_number': existing_pr.number,
+                    'pr_url': existing_pr.html_url,
+                    'branch': existing_pr.head.ref
+                })
+                
+                return existing_pr
+            
+            # Check if there's a recently closed PR that we can reopen
+            if existing_closed_list:
+                # Get the most recently closed PR
+                most_recent_closed = max(existing_closed_list, key=lambda pr: pr.closed_at or pr.updated_at)
+                logger.info(f"Found recently closed PR #{most_recent_closed.number}, attempting to reopen", extra={
+                    'pr_url': most_recent_closed.html_url,
+                    'closed_at': most_recent_closed.closed_at,
+                    'updated_at': most_recent_closed.updated_at
+                })
+                
+                try:
+                    # Reopen the closed PR
+                    reopened_pr = repo.get_pull(most_recent_closed.number)
+                    reopened_pr.edit(
+                        title=self.pr_data['title'],
+                        body=self.pr_data['description']
+                    )
+                    
+                    logger.info(f"Successfully reopened PR #{reopened_pr.number}", extra={
+                        'pr_url': reopened_pr.html_url,
+                        'pr_state': reopened_pr.state
+                    })
+                    
+                    # Update PR data
+                    self.pr_data.update({
+                        'status': 'reopened',
+                        'pr_number': reopened_pr.number,
+                        'pr_url': reopened_pr.html_url,
+                        'branch': reopened_pr.head.ref
+                    })
+                    
+                    return reopened_pr
+                    
+                except GithubException as e:
+                    logger.warning(f"Failed to reopen closed PR #{most_recent_closed.number}, will create new PR", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    # Continue to create new PR
             
             # Log PR creation parameters
             logger.info("PR creation parameters", extra={
@@ -1018,15 +1099,36 @@ Generate the complete PR description now:"""
             
             # Provide more specific error messages based on status code
             if e.status == 422:
-                logger.error("422 error typically means validation failed - check if PR already exists or branch issues")
+                error_message = "422 error - validation failed"
+                if hasattr(e, 'data') and e.data:
+                    # Try to extract more specific error information
+                    if isinstance(e.data, dict):
+                        if 'message' in e.data:
+                            error_message = f"422 error: {e.data['message']}"
+                        if 'errors' in e.data and e.data['errors']:
+                            error_details = []
+                            for error in e.data['errors']:
+                                if isinstance(error, dict) and 'message' in error:
+                                    error_details.append(error['message'])
+                            if error_details:
+                                error_message = f"422 error: {'; '.join(error_details)}"
+                
+                # Log the full error data for debugging
+                logger.error(f"Full 422 error data: {e.data}")
+                logger.error(f"Full 422 error message: {e}")
+                
+                raise GitHubConfigError(f"{error_message}. This usually means a PR already exists for this branch or there are validation issues.")
             elif e.status == 404:
                 logger.error("404 error - repository or branch not found")
+                raise GitHubConfigError(f"Repository or branch not found: {str(e)}")
             elif e.status == 403:
                 logger.error("403 error - insufficient permissions to create PR")
+                raise GitHubConfigError(f"Insufficient permissions to create PR: {str(e)}")
             elif e.status == 401:
                 logger.error("401 error - authentication failed, check GitHub token")
-                
-            raise GitHubConfigError(f"GitHub API error: {str(e)} (Status: {e.status})")
+                raise GitHubConfigError(f"Authentication failed, check GitHub token: {str(e)}")
+            else:
+                raise GitHubConfigError(f"GitHub API error: {str(e)} (Status: {e.status})")
         except Exception as e:
             logger.error("Unexpected error during PR creation", extra={
                 'error': str(e),
@@ -1034,3 +1136,86 @@ Generate the complete PR description now:"""
                 'traceback': str(e.__traceback__)
             })
             raise 
+
+    def get_pr_status_message(self) -> str:
+        """
+        Get a user-friendly message about the PR status.
+        
+        Returns:
+            str: User-friendly status message
+        """
+        if not hasattr(self, 'pr_data') or 'status' not in self.pr_data:
+            return "PR status unknown"
+        
+        status = self.pr_data['status']
+        messages = {
+            'draft': 'PR is being prepared',
+            'ready': 'PR created successfully',
+            'existing': 'PR already exists - returned existing PR',
+            'reopened': 'PR was reopened from a previously closed state',
+            'error': f"PR creation failed: {self.pr_data.get('error', 'Unknown error')}"
+        }
+        
+        return messages.get(status, f"PR status: {status}")
+    
+    def get_pr_info(self) -> Dict[str, Any]:
+        """
+        Get comprehensive PR information.
+        
+        Returns:
+            Dict containing PR information and status
+        """
+        if not hasattr(self, 'pr_data'):
+            return {'status': 'not_initialized'}
+        
+        info = self.pr_data.copy()
+        info['status_message'] = self.get_pr_status_message()
+        
+        return info 
+
+    def _ensure_clean_working_directory(self) -> None:
+        """
+        Ensure the working directory is clean before creating a PR.
+        
+        Raises:
+            GitConfigError: If working directory has uncommitted changes
+        """
+        try:
+            logger.info("Checking if working directory is clean")
+            status = subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
+            
+            if status:
+                # Parse the status to see what files are modified
+                modified_files = []
+                for line in status.split('\n'):
+                    if line.strip():
+                        status_code = line[:2]
+                        file_path = line[3:]
+                        modified_files.append(f"{status_code} {file_path}")
+                
+                logger.error("Working directory has uncommitted changes", extra={
+                    'modified_files': modified_files,
+                    'total_files': len(modified_files)
+                })
+                
+                raise GitConfigError(
+                    f"Working directory has {len(modified_files)} uncommitted change(s). "
+                    f"Please commit or stash your changes before creating a PR. "
+                    f"Modified files: {', '.join(modified_files[:5])}{'...' if len(modified_files) > 5 else ''}"
+                )
+            else:
+                logger.info("Working directory is clean")
+                
+        except subprocess.CalledProcessError as e:
+            logger.error("Failed to check git status", extra={
+                'return_code': e.returncode,
+                'output': e.output,
+                'cmd': e.cmd
+            })
+            raise GitConfigError(f"Failed to check git status: {e.output}")
+        except Exception as e:
+            logger.error("Unexpected error checking working directory", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
+            raise GitConfigError(f"Error checking working directory: {str(e)}") 
