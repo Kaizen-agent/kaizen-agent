@@ -66,9 +66,23 @@ class GitHubConfig:
     """Configuration for GitHub integration."""
     token: str
     base_branch: str = 'main'
+    auto_commit_changes: bool = True  # Whether to automatically commit uncommitted changes
 
 class PRManager:
-    """A class for managing pull requests."""
+    """
+    A class for managing pull requests with automatic handling of uncommitted changes.
+    
+    Features:
+    - Automatic commit of uncommitted changes before PR creation
+    - Configurable auto-commit behavior
+    - Smart commit message generation
+    - Existing PR detection and reuse
+    - Comprehensive error handling and logging
+    
+    Configuration:
+    - auto_commit_changes: Whether to automatically commit uncommitted changes (default: True)
+    - base_branch: The target branch for PRs (default: 'main')
+    """
     
     def __init__(self, config: Dict):
         """
@@ -98,7 +112,8 @@ class PRManager:
             
         return GitHubConfig(
             token=token,
-            base_branch=self.config.get('base_branch', 'main')
+            base_branch=self.config.get('base_branch', 'main'),
+            auto_commit_changes=self.config.get('auto_commit_changes', True)
         )
         
     def create_pr(self, changes: Dict, test_results: Dict) -> Dict:
@@ -1173,12 +1188,32 @@ Generate the complete PR description now:"""
         
         return info 
 
+    def configure_auto_commit(self, enabled: bool) -> None:
+        """
+        Configure whether to automatically commit uncommitted changes.
+        
+        Args:
+            enabled: Whether to enable automatic commits
+        """
+        self.github_config.auto_commit_changes = enabled
+        logger.info(f"Auto-commit configuration updated: {'enabled' if enabled else 'disabled'}")
+    
+    def get_auto_commit_status(self) -> bool:
+        """
+        Get the current auto-commit configuration status.
+        
+        Returns:
+            bool: Whether auto-commit is enabled
+        """
+        return self.github_config.auto_commit_changes
+
     def _ensure_clean_working_directory(self) -> None:
         """
         Ensure the working directory is clean before creating a PR.
+        If there are uncommitted changes, automatically commit them if configured to do so.
         
         Raises:
-            GitConfigError: If working directory has uncommitted changes
+            GitConfigError: If git operations fail or if auto-commit is disabled
         """
         try:
             logger.info("Checking if working directory is clean")
@@ -1193,16 +1228,23 @@ Generate the complete PR description now:"""
                         file_path = line[3:]
                         modified_files.append(f"{status_code} {file_path}")
                 
-                logger.error("Working directory has uncommitted changes", extra={
+                logger.warning("Working directory has uncommitted changes", extra={
                     'modified_files': modified_files,
                     'total_files': len(modified_files)
                 })
                 
-                raise GitConfigError(
-                    f"Working directory has {len(modified_files)} uncommitted change(s). "
-                    f"Please commit or stash your changes before creating a PR. "
-                    f"Modified files: {', '.join(modified_files[:5])}{'...' if len(modified_files) > 5 else ''}"
-                )
+                if self.github_config.auto_commit_changes:
+                    # Auto-commit the changes
+                    logger.info("Auto-committing uncommitted changes")
+                    self._auto_commit_changes(modified_files)
+                else:
+                    # Fail with clear error message
+                    raise GitConfigError(
+                        f"Working directory has {len(modified_files)} uncommitted change(s). "
+                        f"Please commit or stash your changes before creating a PR, or enable auto_commit_changes in config. "
+                        f"Modified files: {', '.join(modified_files[:5])}{'...' if len(modified_files) > 5 else ''}"
+                    )
+                
             else:
                 logger.info("Working directory is clean")
                 
@@ -1218,4 +1260,122 @@ Generate the complete PR description now:"""
                 'error': str(e),
                 'error_type': type(e).__name__
             })
-            raise GitConfigError(f"Error checking working directory: {str(e)}") 
+            raise GitConfigError(f"Error checking working directory: {str(e)}")
+    
+    def _auto_commit_changes(self, modified_files: List[str]) -> None:
+        """
+        Automatically commit uncommitted changes.
+        
+        Args:
+            modified_files: List of modified files
+            
+        Raises:
+            GitConfigError: If commit fails
+        """
+        try:
+            # Add all changes
+            logger.info("Adding all changes to staging area")
+            result = subprocess.run(
+                ["git", "add", "."],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                logger.error("Failed to add changes", extra={
+                    'return_code': result.returncode,
+                    'stdout': result.stdout,
+                    'stderr': result.stderr
+                })
+                raise GitConfigError(f"Failed to add changes: {result.stderr}")
+            
+            # Check if there are any changes to commit
+            status = subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
+            if not status:
+                logger.info("No changes to commit after adding")
+                return
+            
+            # Generate commit message based on changes
+            commit_message = self._generate_commit_message(modified_files)
+            
+            # Commit the changes
+            logger.info(f"Committing changes with message: {commit_message}")
+            result = subprocess.run(
+                ["git", "commit", "-m", commit_message],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                logger.error("Failed to commit changes", extra={
+                    'return_code': result.returncode,
+                    'stdout': result.stdout,
+                    'stderr': result.stderr
+                })
+                raise GitConfigError(f"Failed to commit changes: {result.stderr}")
+            
+            logger.info("Successfully auto-committed changes", extra={
+                'commit_message': commit_message,
+                'files_committed': len(modified_files)
+            })
+            
+        except subprocess.CalledProcessError as e:
+            logger.error("Failed to auto-commit changes", extra={
+                'return_code': e.returncode,
+                'output': e.output,
+                'cmd': e.cmd
+            })
+            raise GitConfigError(f"Failed to auto-commit changes: {e.output}")
+        except Exception as e:
+            logger.error("Unexpected error during auto-commit", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
+            raise GitConfigError(f"Error during auto-commit: {str(e)}")
+    
+    def _generate_commit_message(self, modified_files: List[str]) -> str:
+        """
+        Generate a commit message based on the modified files.
+        
+        Args:
+            modified_files: List of modified files
+            
+        Returns:
+            str: Generated commit message
+        """
+        try:
+            # Analyze the types of changes
+            file_types = {}
+            for file_info in modified_files:
+                status_code = file_info[:2]
+                file_path = file_info[3:]
+                
+                # Determine file type
+                if file_path.endswith('.py'):
+                    file_type = 'Python'
+                elif file_path.endswith('.yaml') or file_path.endswith('.yml'):
+                    file_type = 'YAML'
+                elif file_path.endswith('.json'):
+                    file_type = 'JSON'
+                elif file_path.endswith('.md'):
+                    file_type = 'Documentation'
+                elif file_path.endswith('.txt'):
+                    file_type = 'Text'
+                else:
+                    file_type = 'Other'
+                
+                file_types[file_type] = file_types.get(file_type, 0) + 1
+            
+            # Generate commit message
+            if len(modified_files) == 1:
+                file_path = modified_files[0][3:]
+                return f"Auto-commit: Update {file_path}"
+            else:
+                type_summary = ", ".join([f"{count} {file_type}" for file_type, count in file_types.items()])
+                return f"Auto-commit: Update {len(modified_files)} files ({type_summary})"
+                
+        except Exception as e:
+            logger.warning("Failed to generate commit message, using fallback", extra={
+                'error': str(e)
+            })
+            return f"Auto-commit: Update {len(modified_files)} files" 
