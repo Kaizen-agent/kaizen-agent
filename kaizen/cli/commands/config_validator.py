@@ -47,6 +47,9 @@ class ConfigurationValidator:
             ValidationRule('evaluation', required=False, type=dict),
             ValidationRule('assertions', required=False, type=list),
             ValidationRule('expected_output', required=False, type=dict),
+            ValidationRule('dependencies', required=False, type=list),
+            ValidationRule('referenced_files', required=False, type=list),
+            ValidationRule('files_to_fix', required=False, type=list),
         ]
     
     def validate(self, config_data: Dict[str, Any]) -> Result[Dict[str, Any]]:
@@ -104,6 +107,14 @@ class ConfigurationValidator:
                     ConfigurationError(
                         "All dependencies must be strings",
                         {"field": "dependencies"}
+                    )
+                )
+            
+            if 'referenced_files' in config_data and not all(isinstance(f, str) for f in config_data['referenced_files']):
+                return Result.failure(
+                    ConfigurationError(
+                        "All referenced_files must be strings",
+                        {"field": "referenced_files"}
                     )
                 )
             
@@ -171,6 +182,18 @@ class ConfigurationValidator:
         value_errors = []
         
         # Validate file paths
+        if 'referenced_files' in config_data:
+            for file_path in config_data['referenced_files']:
+                if not isinstance(file_path, str):
+                    value_errors.append(f"Referenced file path must be a string, got {type(file_path)}")
+                    continue
+                    
+                path = Path(file_path)
+                if not path.exists():
+                    value_errors.append(f"Referenced file does not exist: {file_path}")
+                elif not path.is_file():
+                    value_errors.append(f"Referenced path is not a file: {file_path}")
+        
         if 'files_to_fix' in config_data:
             for file_path in config_data['files_to_fix']:
                 if not isinstance(file_path, str):

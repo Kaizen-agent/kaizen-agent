@@ -89,6 +89,20 @@ class AutoFixError(TestError):
     """
     pass
 
+class DependencyError(TestError):
+    """Error raised when dependency management fails.
+    
+    This error is raised when:
+    - Required dependencies cannot be imported
+    - Referenced files cannot be found or imported
+    - Dependency resolution fails
+    - Import process encounters unexpected errors
+    
+    Example:
+        >>> raise DependencyError("Failed to import required package", {"package": "requests", "error": "ModuleNotFoundError"})
+    """
+    pass
+
 class FileNotFoundError(Exception):
     """Error raised when a required file cannot be found.
     

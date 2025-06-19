@@ -1,0 +1,78 @@
+# Example test configuration with dependencies and referenced files
+name: "Test with Dependencies"
+file_path: "test_file.py"
+description: "Example test that demonstrates dependency management"
+
+# Package dependencies to import before test execution
+dependencies:
+  - "requests>=2.25.0"
+  - "pandas==1.3.0"
+  - "numpy"
+  - "click"
+  - "rich"
+
+# Local files to import (relative to config file location)
+referenced_files:
+  - "utils/helper.py"
+  - "models/data_processor.py"
+  - "config/settings.py"
+
+# Files that should be fixed if tests fail
+files_to_fix:
+  - "test_file.py"
+  - "utils/helper.py"
+
+# Test configuration
+agent_type: "default"
+auto_fix: true
+create_pr: false
+max_retries: 3
+base_branch: "main"
+pr_strategy: "ANY_IMPROVEMENT"
+
+# Test regions to execute
+regions:
+  - "test_function"
+  - "test_class"
+
+# Test steps
+steps:
+  - name: "Test basic functionality"
+    input:
+      method: "run"
+      input: "test input data"
+    expected_output:
+      status: "success"
+      result: "expected result"
+    description: "Test the basic functionality of the main function"
+    timeout: 30
+    retries: 2
+
+  - name: "Test error handling"
+    input:
+      method: "run"
+      input: "invalid input"
+    expected_output:
+      status: "error"
+      error_type: "ValueError"
+    description: "Test error handling with invalid input"
+    timeout: 15
+
+# Metadata
+metadata:
+  version: "1.0.0"
+  author: "Test Author"
+  created_at: "2024-01-01T00:00:00Z"
+  description: "Test configuration for dependency management example"
+
+# Evaluation criteria
+evaluation:
+  criteria:
+    - "Function returns expected result"
+    - "Error handling works correctly"
+    - "Performance meets requirements"
+  llm_provider: "openai"
+  model: "gpt-4"
+  settings:
+    temperature: 0.1
+    max_tokens: 1000 

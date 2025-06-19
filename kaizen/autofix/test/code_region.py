@@ -376,6 +376,12 @@ class DependencyResolver:
                 self._module_cache[module_name] = module_info
                 return module_info
             
+            # Check if this is a local module that should be skipped
+            # (it will be handled by the CLI dependency manager)
+            if '.' in module_name and not module_name.startswith(('google', 'openai', 'anthropic', 'click', 'rich', 'yaml')):
+                logger.debug(f"Skipping local module resolution for {module_name} - will be handled by CLI dependency manager")
+                return None
+            
             # Handle third-party modules
             return self._resolve_third_party_module(module_name)
             
@@ -584,19 +590,27 @@ class ImportAnalyzer:
                             if module_name in self._standard_libs:
                                 standard_imports.add(module_name)
                             else:
-                                third_party_imports.add(module_name)
+                                # Skip local modules with dots (they'll be handled by CLI dependency manager)
+                                if '.' not in module_name or module_name.startswith(('google', 'openai', 'anthropic', 'click', 'rich', 'yaml')):
+                                    third_party_imports.add(module_name)
                     else:  # ImportFrom
                         if node.module:
                             module_name = node.module.split('.')[0]
                             if module_name in self._standard_libs:
                                 standard_imports.add(module_name)
                             else:
-                                third_party_imports.add(module_name)
+                                # Skip local modules with dots (they'll be handled by CLI dependency manager)
+                                if '.' not in module_name or module_name.startswith(('google', 'openai', 'anthropic', 'click', 'rich', 'yaml')):
+                                    third_party_imports.add(module_name)
             
             return standard_imports, third_party_imports
             
         except SyntaxError as e:
-            raise ValueError(f"Invalid Python code: {str(e)}")
+            logger.error(f"Syntax error in code: {str(e)}")
+            return set(), set()
+        except Exception as e:
+            logger.error(f"Error analyzing imports: {str(e)}")
+            return set(), set()
 
 class ImportManager:
     """Manages imports for code region execution."""
@@ -1180,12 +1194,18 @@ class CodeRegionExtractor:
             raise ValueError(f"Failed to determine region type: {str(e)}")
 
 class CodeRegionExecutor:
-    """Executes code regions and manages their execution context."""
+    """Executes code regions with proper import management."""
     
-    def __init__(self, workspace_root: Path):
-        """Initialize the code region executor."""
+    def __init__(self, workspace_root: Path, imported_dependencies: Optional[Dict[str, Any]] = None):
+        """Initialize the code region executor.
+        
+        Args:
+            workspace_root: Root directory of the workspace
+            imported_dependencies: Optional dictionary containing pre-imported dependencies
+        """
         self.workspace_root = workspace_root
         self.import_manager = ImportManager(workspace_root)
+        self.imported_dependencies = imported_dependencies or {}
     
     def _ensure_standard_imports(self, namespace: Dict[str, Any]) -> None:
         """Ensure all standard library imports are available in the namespace.
@@ -1193,6 +1213,12 @@ class CodeRegionExecutor:
         Args:
             namespace: Dictionary to add imports to
         """
+        # Add pre-imported dependencies first
+        if self.imported_dependencies:
+            namespace.update(self.imported_dependencies)
+            logger.info(f"Added {len(self.imported_dependencies)} pre-imported dependencies to namespace")
+        
+        # Add standard library imports
         for module_name in STANDARD_MODULES:
             if module_name not in namespace:
                 try:
@@ -1258,7 +1284,8 @@ class CodeRegionExecutor:
         logger.info(f"Executing region: {region_info.name}")
         
         try:
-            with self.import_manager.managed_imports(region_info) as namespace:
+            # Create a custom import manager that uses pre-imported dependencies
+            with self._create_custom_import_manager(region_info) as namespace:
                 # Ensure standard library imports are available
                 self._ensure_standard_imports(namespace)
                 
@@ -1280,6 +1307,48 @@ class CodeRegionExecutor:
             logger.error(f"Failed to execute region '{region_info.name}': {str(e)}")
             logger.debug("Full traceback:", exc_info=True)
             raise ValueError(f"Error executing region '{region_info.name}': {str(e)}")
+    
+    def _create_custom_import_manager(self, region_info: RegionInfo):
+        """Create a custom import manager that uses pre-imported dependencies.
+        
+        Args:
+            region_info: Information about the code region
+            
+        Returns:
+            Context manager for the custom import manager
+        """
+        class CustomImportManager:
+            def __init__(self, executor, region_info):
+                self.executor = executor
+                self.region_info = region_info
+                self.namespace = {}
+            
+            def __enter__(self):
+                # Start with pre-imported dependencies
+                if self.executor.imported_dependencies:
+                    self.namespace.update(self.executor.imported_dependencies)
+                    logger.info(f"Added {len(self.executor.imported_dependencies)} pre-imported dependencies to namespace")
+                    
+                    # Log what functions are available
+                    function_names = [name for name, obj in self.namespace.items() if callable(obj) and not name.startswith('_')]
+                    if function_names:
+                        logger.info(f"Available functions: {function_names}")
+                
+                # Add standard library modules
+                for module_name in ['os', 'sys', 'pathlib', 'typing', 'logging', 'json', 'datetime', 'time', 're', 'math', 'random']:
+                    try:
+                        module = __import__(module_name)
+                        self.namespace[module_name] = module
+                    except ImportError:
+                        pass
+                
+                return self.namespace
+            
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                # Cleanup if needed
+                pass
+        
+        return CustomImportManager(self, region_info)
     
     def _execute_class_method(self, namespace: Dict[str, Any], region_info: RegionInfo, 
                             method_name: str, input_data: Any) -> Any:

@@ -175,9 +175,6 @@ def test_all(
         command = TestAllCommand(config, logger)
         test_result = command.execute()
         
-        ## FIX LATER Add TERMINAL OUTPUT
-        # if not test_result.is_success:
-        #     _handle_error(test_result.error, "Test execution error")
         
         # # Generate report
         # result_file = _generate_report_path(test_result.value)

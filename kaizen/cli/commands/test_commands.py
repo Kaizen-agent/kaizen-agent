@@ -14,9 +14,10 @@ from abc import ABC, abstractmethod
 from ...autofix.test.runner import TestRunner
 from ...utils.test_utils import collect_failed_tests
 from .models import TestConfiguration, TestResult, Result
-from .errors import TestExecutionError, AutoFixError
+from .errors import TestExecutionError, AutoFixError, DependencyError
 from .types import TestStatus, PRStrategy
 from ...autofix.main import AutoFix, FixStatus
+from .dependency_manager import DependencyManager, ImportResult
 
 @runtime_checkable
 class TestCommand(Protocol):
@@ -62,6 +63,7 @@ class TestAllCommand(BaseTestCommand):
         """
         super().__init__(logger)
         self.config = config
+        self.dependency_manager = DependencyManager()
     
     def execute(self) -> Result[TestResult]:
         """Execute all tests.
@@ -74,8 +76,15 @@ class TestAllCommand(BaseTestCommand):
             if self.config.description:
                 self.logger.info(f"Description: {self.config.description}")
             
-            # Create and validate runner configuration
-            runner_config = self._create_runner_config()
+            # Import dependencies and referenced files first
+            import_result = self._import_dependencies()
+            if not import_result.is_success:
+                return Result.failure(import_result.error)
+            
+            self.logger.info("Dependencies imported successfully")
+            
+            # Create and validate runner configuration with imported dependencies
+            runner_config = self._create_runner_config(import_result.value.namespace if import_result.value else {})
             self.logger.info("Starting test execution...")
             
             # Execute tests
@@ -113,10 +122,49 @@ class TestAllCommand(BaseTestCommand):
         except Exception as e:
             self.logger.error(f"Error executing tests: {str(e)}")
             return Result.failure(TestExecutionError(f"Failed to execute tests: {str(e)}"))
+        finally:
+            # Clean up dependency manager
+            self.dependency_manager.cleanup()
     
-    def _create_runner_config(self) -> Dict[str, Any]:
+    def _import_dependencies(self) -> Result[ImportResult]:
+        """Import dependencies and referenced files.
+        
+        Returns:
+            Result containing import result or error
+        """
+        try:
+            if not self.config.dependencies and not self.config.referenced_files:
+                self.logger.info("No dependencies or referenced files to import")
+                return Result.success(ImportResult(success=True))
+            
+            self.logger.info(f"Importing {len(self.config.dependencies)} dependencies and {len(self.config.referenced_files)} referenced files")
+            
+            import_result = self.dependency_manager.import_dependencies(
+                dependencies=self.config.dependencies,
+                referenced_files=self.config.referenced_files,
+                config_path=self.config.config_path
+            )
+            
+            if not import_result.is_success:
+                return import_result
+            
+            if not import_result.value.success:
+                # Log warnings for failed imports but don't fail the test
+                for error in import_result.value.errors:
+                    self.logger.warning(f"Dependency import warning: {error}")
+            
+            return import_result
+            
+        except Exception as e:
+            self.logger.error(f"Error importing dependencies: {str(e)}")
+            return Result.failure(DependencyError(f"Failed to import dependencies: {str(e)}"))
+    
+    def _create_runner_config(self, imported_namespace: Dict[str, Any] = None) -> Dict[str, Any]:
         """Create configuration for test runner.
         
+        Args:
+            imported_namespace: Dictionary containing imported modules and dependencies
+            
         Returns:
             Dictionary containing runner configuration
         """
@@ -128,6 +176,11 @@ class TestAllCommand(BaseTestCommand):
             'description': self.config.description,
             'metadata': self.config.metadata.__dict__ if self.config.metadata else None,
         }
+        
+        # Add imported dependencies to the configuration
+        if imported_namespace:
+            config['imported_dependencies'] = imported_namespace
+            self.logger.info(f"Added {len(imported_namespace)} imported dependencies to runner config")
         
         if self.config.regions:
             config['regions'] = self.config.regions
