@@ -17,7 +17,7 @@ from .models import TestConfiguration, TestResult, Result
 from .errors import TestExecutionError, AutoFixError, DependencyError
 from .types import TestStatus, PRStrategy
 from ...autofix.main import AutoFix, FixStatus
-from .dependency_manager import DependencyManager
+from .dependency_manager import DependencyManager, ImportResult
 
 @runtime_checkable
 class TestCommand(Protocol):
