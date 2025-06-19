@@ -97,6 +97,8 @@ class ConfigurationManager:
                 steps=parse_result.value.steps if parse_result.value else [],
                 metadata=parse_result.value.metadata if parse_result.value else None,
                 evaluation=parse_result.value.evaluation if parse_result.value else None,
+                dependencies=config_data.get('dependencies', []),
+                referenced_files=config_data.get('referenced_files', []),
                 files_to_fix=parse_result.value.files_to_fix if parse_result.value else []
             )
             

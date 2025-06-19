@@ -22,6 +22,11 @@ max_retries: 2
 files_to_fix:
   - agent.py
   - prompt.py
+  - utils.py
+
+referenced_files:
+  - prompt.py
+  - utils.py
 
 steps:
   - name: Basic Summarization

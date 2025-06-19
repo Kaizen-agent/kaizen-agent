@@ -175,9 +175,20 @@ def test_all(
         command = TestAllCommand(config, logger)
         test_result = command.execute()
         
-        ## FIX LATER Add TERMINAL OUTPUT
-        # if not test_result.is_success:
-        #     _handle_error(test_result.error, "Test execution error")
+        if not test_result.is_success:
+            _handle_error(test_result.error, "Test execution error")
+        
+        # Display success message
+        console.print(f"\n✅ Test execution completed successfully!")
+        console.print(f"Test: {config.name}")
+        console.print(f"File: {config.file_path}")
+        
+        if config.dependencies or config.referenced_files:
+            console.print(f"\n📦 Dependencies imported:")
+            if config.dependencies:
+                console.print(f"  Packages: {', '.join(config.dependencies)}")
+            if config.referenced_files:
+                console.print(f"  Files: {', '.join(config.referenced_files)}")
         
         # # Generate report
         # result_file = _generate_report_path(test_result.value)
