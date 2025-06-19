@@ -1328,6 +1328,11 @@ class CodeRegionExecutor:
                 if self.executor.imported_dependencies:
                     self.namespace.update(self.executor.imported_dependencies)
                     logger.info(f"Added {len(self.executor.imported_dependencies)} pre-imported dependencies to namespace")
+                    
+                    # Log what functions are available
+                    function_names = [name for name, obj in self.namespace.items() if callable(obj) and not name.startswith('_')]
+                    if function_names:
+                        logger.info(f"Available functions: {function_names}")
                 
                 # Add standard library modules
                 for module_name in ['os', 'sys', 'pathlib', 'typing', 'logging', 'json', 'datetime', 'time', 're', 'math', 'random']:

@@ -298,7 +298,7 @@ class DependencyManager:
         """Build a namespace dictionary from imported modules.
         
         Returns:
-            Dictionary containing imported modules
+            Dictionary containing imported modules and their functions
         """
         namespace = {}
         
@@ -317,8 +317,22 @@ class DependencyManager:
             except ImportError:
                 pass  # Skip if module not available
         
-        # Add imported modules
-        namespace.update(self._imported_modules)
+        # Add imported modules and extract their functions
+        for module_name, module in self._imported_modules.items():
+            namespace[module_name] = module
+            
+            # Extract functions from local modules (not standard library or third-party)
+            if hasattr(module, '__file__') and module.__file__:
+                module_path = Path(module.__file__)
+                # Check if this is a local module (not in site-packages or similar)
+                if not any(part in str(module_path) for part in ['site-packages', 'dist-packages', 'lib/python']):
+                    # Extract all callable functions from the module
+                    for attr_name in dir(module):
+                        attr = getattr(module, attr_name)
+                        # Only add callable functions that don't start with underscore
+                        if callable(attr) and not attr_name.startswith('_'):
+                            namespace[attr_name] = attr
+                            logger.debug(f"Added function {attr_name} from module {module_name}")
         
         # Add common aliases for better compatibility
         if 'pathlib' in namespace:
