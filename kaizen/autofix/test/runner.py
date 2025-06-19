@@ -92,6 +92,7 @@ class TestRunner:
                 test_file_path, 
                 test_case_obj.input['region']
             )
+            logger.info(f"Region info: {region_info}")
             
             # Add imports from test case to region info
             if 'imports' in test_case_obj.input:
