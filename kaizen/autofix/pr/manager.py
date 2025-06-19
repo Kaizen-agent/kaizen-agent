@@ -13,6 +13,10 @@ import google.generativeai as genai
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# GitHub API limits
+GITHUB_PR_TITLE_MAX_LENGTH = 256
+GITHUB_PR_BODY_MAX_LENGTH = 65536
+
 class PRCreationError(Exception):
     """Error raised when PR creation fails."""
     pass
@@ -682,12 +686,165 @@ Generate the complete PR description now:"""
             if self.pr_data['status'] not in valid_statuses:
                 raise ValueError(f"Invalid status: {self.pr_data['status']}")
             
+            # Validate description length (GitHub limit is 65536 characters)
+            max_description_length = GITHUB_PR_BODY_MAX_LENGTH
+            if len(self.pr_data['description']) > max_description_length:
+                logger.warning(f"PR description is too long ({len(self.pr_data['description'])} chars), truncating to {max_description_length}")
+                self.pr_data['description'] = self._truncate_description(self.pr_data['description'], max_description_length)
+            
         except Exception as e:
             logger.error("PR data validation failed", extra={
                 'error': str(e),
                 'error_type': type(e).__name__
             })
             raise
+    
+    def _truncate_description(self, description: str, max_length: int) -> str:
+        """
+        Truncate the PR description to fit within GitHub's character limit while preserving important sections.
+        
+        Args:
+            description: The full PR description
+            max_length: Maximum allowed length
+            
+        Returns:
+            str: Truncated description that fits within the limit
+        """
+        try:
+            if len(description) <= max_length:
+                return description
+            
+            logger.info(f"Truncating description from {len(description)} to {max_length} characters")
+            
+            # Reserve space for truncation notice
+            truncation_notice = "\n\n---\n*Description truncated due to length limit*"
+            reserved_length = len(truncation_notice)
+            available_length = max_length - reserved_length
+            
+            # Define priority sections in order of importance
+            priority_sections = [
+                "## Summary",
+                "## Test Results Summary", 
+                "## Code Changes",
+                "## Detailed Results",
+                "## Additional Summary"
+            ]
+            
+            # Try to preserve sections in priority order
+            truncated_parts = []
+            current_length = 0
+            
+            # Always include the beginning (before first section)
+            lines = description.split('\n')
+            section_start = -1
+            
+            # Find where the first section starts
+            for i, line in enumerate(lines):
+                if line.startswith('## '):
+                    section_start = i
+                    break
+            
+            if section_start > 0:
+                # Include everything before the first section
+                intro_lines = lines[:section_start]
+                intro_text = '\n'.join(intro_lines)
+                if len(intro_text) <= available_length:
+                    truncated_parts.append(intro_text)
+                    current_length += len(intro_text) + 1  # +1 for newline
+                else:
+                    # Even the intro is too long, truncate it
+                    truncated_parts.append(intro_text[:available_length-3] + "...")
+                    current_length = available_length
+            
+            # Process sections in priority order
+            for section_name in priority_sections:
+                if current_length >= available_length:
+                    break
+                
+                # Find the section
+                section_start = -1
+                section_end = -1
+                
+                for i, line in enumerate(lines):
+                    if line.strip() == section_name:
+                        section_start = i
+                        # Find the end of this section (next section or end of file)
+                        for j in range(i + 1, len(lines)):
+                            if lines[j].startswith('## ') and lines[j] != section_name:
+                                section_end = j
+                                break
+                        if section_end == -1:
+                            section_end = len(lines)
+                        break
+                
+                if section_start != -1:
+                    section_lines = lines[section_start:section_end]
+                    section_text = '\n'.join(section_lines)
+                    
+                    # Check if we can fit this section
+                    remaining_length = available_length - current_length
+                    
+                    if len(section_text) <= remaining_length:
+                        # Can fit the entire section
+                        if truncated_parts:
+                            truncated_parts.append('')  # Add blank line between sections
+                            current_length += 1
+                        truncated_parts.append(section_text)
+                        current_length += len(section_text)
+                    else:
+                        # Can't fit the entire section, try to fit a truncated version
+                        if truncated_parts:
+                            truncated_parts.append('')  # Add blank line between sections
+                            current_length += 1
+                        
+                        # For summary sections, try to fit at least the header and some content
+                        if section_name in ["## Summary", "## Test Results Summary", "## Code Changes"]:
+                            # Try to fit header + some content
+                            header_line = section_lines[0]
+                            truncated_parts.append(header_line)
+                            current_length += len(header_line) + 1
+                            
+                            # Try to add some content lines
+                            remaining_length = available_length - current_length
+                            content_lines = section_lines[1:]
+                            content_text = '\n'.join(content_lines)
+                            
+                            if len(content_text) <= remaining_length:
+                                truncated_parts.append(content_text)
+                                current_length += len(content_text)
+                            else:
+                                # Truncate content
+                                truncated_content = content_text[:remaining_length-3] + "..."
+                                truncated_parts.append(truncated_content)
+                                current_length += len(truncated_content)
+                        else:
+                            # For less critical sections, just add header if possible
+                            header_line = section_lines[0]
+                            if len(header_line) <= remaining_length:
+                                truncated_parts.append(header_line)
+                                current_length += len(header_line)
+            
+            # Combine all parts
+            final_description = '\n'.join(truncated_parts)
+            
+            # Add truncation notice
+            final_description += truncation_notice
+            
+            # Final safety check
+            if len(final_description) > max_length:
+                # Emergency truncation
+                final_description = final_description[:max_length-3] + "..."
+            
+            logger.info(f"Successfully truncated description to {len(final_description)} characters")
+            return final_description
+            
+        except Exception as e:
+            logger.error("Error truncating description", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
+            # Fallback: simple truncation
+            return description[:max_length-3] + "..."
     
     def _get_repository_info(self) -> Tuple[str, str]:
         """
@@ -1081,9 +1238,15 @@ Generate the complete PR description now:"""
             })
             
             # Validate title length (GitHub limit is 256 characters)
-            if len(self.pr_data['title']) > 256:
-                logger.warning(f"PR title is too long ({len(self.pr_data['title'])} chars), truncating to 256")
-                self.pr_data['title'] = self.pr_data['title'][:253] + "..."
+            if len(self.pr_data['title']) > GITHUB_PR_TITLE_MAX_LENGTH:
+                logger.warning(f"PR title is too long ({len(self.pr_data['title'])} chars), truncating to {GITHUB_PR_TITLE_MAX_LENGTH}")
+                self.pr_data['title'] = self.pr_data['title'][:GITHUB_PR_TITLE_MAX_LENGTH-3] + "..."
+            
+            # Final validation of description length (GitHub limit is 65536 characters)
+            max_description_length = GITHUB_PR_BODY_MAX_LENGTH
+            if len(self.pr_data['description']) > max_description_length:
+                logger.warning(f"PR description is too long ({len(self.pr_data['description'])} chars), truncating to {max_description_length}")
+                self.pr_data['description'] = self._truncate_description(self.pr_data['description'], max_description_length)
             
             # Create PR
             logger.info("Creating pull request on GitHub")
