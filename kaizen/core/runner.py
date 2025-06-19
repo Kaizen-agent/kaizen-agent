@@ -430,11 +430,39 @@ class DynamicRegionRunner(AgentRunner):
                 # Parse imports using AST
                 tree = ast.parse(code)
                 import_lines = []
+                relative_imports = []
                 
                 # Extract all import statements
                 for node in ast.walk(tree):
-                    if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    if isinstance(node, ast.Import):
                         import_lines.append(ast.unparse(node))
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.level > 0:
+                            # Handle relative imports
+                            module_name = node.module if node.module else ''
+                            for name in node.names:
+                                relative_imports.append((node.level, module_name, name.name))
+                        else:
+                            import_lines.append(ast.unparse(node))
+                
+                # Handle relative imports using importlib
+                for level, module_name, name in relative_imports:
+                    try:
+                        # Get the absolute module path
+                        if module_name:
+                            abs_module = importlib.import_module(f"{'.' * level}{module_name}", package=file_dir)
+                        else:
+                            abs_module = importlib.import_module(f"{'.' * level}", package=file_dir)
+                        
+                        # Import the specific name
+                        if name == '*':
+                            for attr_name in dir(abs_module):
+                                if not attr_name.startswith('_'):
+                                    namespace[attr_name] = getattr(abs_module, attr_name)
+                        else:
+                            namespace[name] = getattr(abs_module, name)
+                    except ImportError as e:
+                        self.logger.logger.warning(f"Failed to import {name} from {module_name}: {str(e)}")
                 
                 if import_lines:
                     import_block = '\n'.join(import_lines)

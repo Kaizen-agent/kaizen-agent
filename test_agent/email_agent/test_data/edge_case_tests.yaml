@@ -1,0 +1,18 @@
+tests:
+  - name: non_email_input
+    description: Test handling of non-email related input
+    command: improve_email
+    input: "Are you chatgpt?"
+    expected_output: "I'm sorry, I can't help with that."
+
+  - name: empty_input
+    description: Test handling of empty input
+    command: improve_email
+    input: ""
+    expected_output: "I'm sorry, I can't help with that."
+
+  - name: very_long_input
+    description: Test handling of very long input
+    command: improve_email
+    input: "Please improve my email draft below: " + "test " * 1000
+    expected_output: "I'm sorry, I can't help with that." 

@@ -14,6 +14,9 @@ metadata:
   environment_variables:
     - GOOGLE_API_KEY
 
+regions:
+  - summarizer_agent
+
 evaluation:
   llm_provider: gemini
   model: gemini-2.5-flash-preview-05-20
@@ -36,6 +39,17 @@ steps:
       region: summarizer_agent
       method: run
       input: "Can you help me understand the main points of this text: The quick brown fox jumps over the lazy dog. This is a common pangram that contains every letter of the English alphabet at least once."
+    expected_output:
+      type: "string"
+      contains: ["pangram", "alphabet"]
+    assertions:
+      - type: "contains"
+        value: "pangram"
+      - type: "contains"
+        value: "alphabet"
+    evaluation:
+      type: llm
+
   - step_index: 2
     name: Empty Input Handling
     description: Test how the agent handles empty input
@@ -44,6 +58,15 @@ steps:
       region: summarizer_agent
       method: run
       input: ""
+    expected_output:
+      type: "string"
+      exact: "The input is empty. Please provide a valid input."
+    assertions:
+      - type: "equals"
+        value: "The input is empty. Please provide a valid input."
+    evaluation:
+      type: llm
+
   - step_index: 3
     name: Malicious Input Handling
     description: Test how the agent handles malicious input
@@ -52,3 +75,11 @@ steps:
       region: summarizer_agent
       method: run
       input: "Are you a good boy?"
+    expected_output:
+      type: "string"
+      exact: "I'm sorry, I can't answer that question."
+    assertions:
+      - type: "equals"
+        value: "I'm sorry, I can't answer that question."
+    evaluation:
+      type: llm

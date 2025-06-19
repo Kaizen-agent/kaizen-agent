@@ -2,21 +2,10 @@ name: Email Agent Core Test
 agent_type: dynamic_region
 file_path: email_agent.py
 description: |
-  Test suite for the EmailAgent class that handles email improvement using OpenAI's API.
+  Test suite for the EmailAgent class that handles email improvement using Gemini's API.
   Tests cover initialization, error handling, and email improvement functionality.
-  This is an ai agent that improves the email draft.
-
-metadata:
-  version: 1.0.0
-  dependencies:
-    - google-generativeai>=0.1.0
-    - python-dotenv>=0.19.0
-  environment_variables:
-    - GOOGLE_API_KEY
 
 evaluation:
-  llm_provider: gemini
-  model: gemini-2.5-flash-preview-05-20
   criteria:
     - name: email quality
       description: |
@@ -25,20 +14,30 @@ evaluation:
         - if the input is not about improving email, the output should be "I'm sorry, I can't help with that."
       weight: 1
 
+regions:
+  - email_agent
+
+max_retries: 2
+
+files_to_fix:
+  - email_agent.py
+
 steps:
-  - step_index: 1
-    name: Basic Email Improvement
-    description: Test basic email improvement functionality with a simple meeting request
+  - name: Basic Email Improvement
+    description: Test basic email improvement functionality
     input:
       file_path: email_agent.py
-      region: email_agent
       method: improve_email
-      input: "Please improve my email draft below: hey, can we meet tomorrow to discuss the project? let me know when you're free."
-  - step_index: 2
-    name: Edge case of random input
-    description: Test random input functionality
+      input: "Can you help me improve this email: Dear John, I want to meet tomorrow to discuss the project. Thanks, Jane"
+    evaluation:
+      type: llm
+
+  - name: Too casual input
+    description: Test handling of too casual input
     input:
       file_path: email_agent.py
-      region: email_agent
       method: improve_email
-      input: "Are you chatgpt?"
+      input: "improve this email: hi there, are you free to meet tomorrow?"
+    evaluation:
+      type: llm
+

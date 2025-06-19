@@ -1,155 +1,185 @@
-# Kaizen Agent
+# Kaizen - AI-Powered Test Automation and Code Fixing
 
+[![PyPI version](https://badge.fury.io/py/kaizen.svg)](https://badge.fury.io/py/kaizen)
+[![Python Versions](https://img.shields.io/pypi/pyversions/kaizen.svg)](https://pypi.org/project/kaizen/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/downloads/)
-[![OpenAI GPT-4](https://img.shields.io/badge/OpenAI-GPT--4-purple)](https://openai.com/gpt-4)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Tests](https://github.com/yourusername/kaizen/actions/workflows/tests.yml/badge.svg)](https://github.com/yourusername/kaizen/actions/workflows/tests.yml)
+[![Documentation](https://readthedocs.org/projects/kaizen/badge/?version=latest)](https://kaizen.readthedocs.io/en/latest/?badge=latest)
 
-Kaizen Agent is an AI-powered testing framework that helps you run tests, analyze failures, and automatically fix issues in your code. The name "Kaizen" comes from the Japanese philosophy of continuous improvement, reflecting our tool's purpose of helping developers write better code.
+Kaizen is a powerful CLI tool that automates test execution, failure analysis, and code fixing. It can run multiple tests simultaneously, analyze failures, automatically fix code issues, and create pull requests with the fixes.
 
-## 🌟 Features
+## Table of Contents
 
-- 🧪 Run multiple tests from YAML files
-- 🔍 Analyze test failures
-- 🛠️ Automatically fix failing tests
-- 🔄 Rerun tests after fixes
-- 📊 Create pull requests for successful improvements
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+- [Support](#support)
 
-## 📋 Prerequisites
+## Features
 
-- Python 3.8 or higher
-- OpenAI API key
-- GitHub account (for PR features)
-- Git
+- **Parallel Test Execution**: Run multiple tests simultaneously across different files
+- **Intelligent Failure Analysis**: Automatically analyze test failures and identify root causes
+- **Automated Code Fixing**: Fix code issues automatically using AI-powered analysis
+- **Pull Request Integration**: Create pull requests with fixes for review
+- **Retry Mechanism**: Automatically retry failed tests after fixes
+- **Detailed Reporting**: Generate comprehensive test reports and fix attempts
 
-## 🚀 Installation
+## Installation
+
+### From PyPI
+
+```bash
+pip install kaizen
+```
+
+### From Source
+
+```bash
+git clone https://github.com/yourusername/kaizen.git
+cd kaizen
+pip install -e ".[dev]"
+```
+
+## Quick Start
+
+1. Create a test configuration file (YAML):
+
+```yaml
+name: My Test Suite
+file_path: path/to/your/code.py
+tests:
+  - name: Test Case 1
+    input:
+      region: block  # Optional: specify code region to test
+      method: run    # Optional: specify method to run
+      input: "test input"  # Optional: input for the test
+  - name: Test Case 2
+    input:
+      file: path/to/test/file.py  # Optional: specify test file
+```
+
+2. Run tests with auto-fix:
+
+```bash
+kaizen test-all --config test_config.yaml --auto-fix --create-pr
+```
+
+## Usage
+
+### Run Tests with Auto-Fix
+
+```bash
+kaizen test-all --config <config_file> [--auto-fix] [--create-pr] [--max-retries <n>] [--base-branch <branch>]
+```
+
+Options:
+- `--config`: Path to test configuration file (required)
+- `--auto-fix`: Enable automatic code fixing
+- `--create-pr`: Create a pull request with fixes
+- `--max-retries`: Maximum number of fix attempts (default: 1)
+- `--base-branch`: Base branch for pull request (default: main)
+
+### Fix Specific Tests
+
+```bash
+kaizen fix-tests <test_files> --project <project_path> [--make-pr] [--max-retries <n>] [--base-branch <branch>]
+```
+
+Options:
+- `test_files`: One or more test files to fix
+- `--project`: Project root directory (required)
+- `--make-pr`: Create a pull request with fixes
+- `--max-retries`: Maximum number of fix attempts (default: 1)
+- `--base-branch`: Base branch for pull request (default: main)
+
+## Configuration
+
+The test configuration file (YAML) supports the following structure:
+
+```yaml
+name: Test Suite Name
+file_path: path/to/main/code.py
+tests:
+  - name: Test Case Name
+    input:
+      # Optional: Test a specific code region
+      region: block
+      method: run
+      input: "test input"
+      
+  - name: Another Test Case
+    input:
+      # Optional: Test a specific file
+      file: path/to/test/file.py
+```
+
+Configuration fields:
+- `name`: Name of the test suite
+- `file_path`: Path to the main code file
+- `tests`: List of test cases
+  - `name`: Name of the test case
+  - `input`: Test input configuration
+    - `region`: Optional code region to test
+    - `method`: Optional method to run
+    - `input`: Optional input for the test
+    - `file`: Optional test file path
+
+## Development
+
+### Prerequisites
+
+- Python 3.8+
+- pip
+- git
+
+### Setup Development Environment
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/kaizen-agent.git
-cd kaizen-agent
+git clone https://github.com/yourusername/kaizen.git
+cd kaizen
 ```
 
 2. Create and activate a virtual environment:
 ```bash
-# On macOS/Linux
 python -m venv venv
-source venv/bin/activate
-
-# On Windows
-python -m venv venv
-venv\Scripts\activate
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-3. Install the package:
+3. Install development dependencies:
 ```bash
-pip install -e .
+pip install -e ".[dev]"
 ```
 
-4. Install development dependencies:
+4. Install pre-commit hooks:
 ```bash
-pip install -r requirements-dev.txt
+pre-commit install
 ```
 
-5. Set up your environment variables:
-```bash
-# Create a .env file in the project root
-OPENAI_API_KEY=your_api_key_here
-GITHUB_TOKEN=your_github_token_here
-```
-
-### Environment Configuration
-
-Kaizen Agent supports multiple LLM providers and models. You can configure them in your `.env` file. Here are some example configurations:
-
-```env
-# OpenAI Configuration
-KAIZEN_CLI_MODEL=gpt-4
-KAIZEN_CLI_API_KEY=your-openai-key
-KAIZEN_CLI_PROVIDER=openai
-
-# Anthropic Configuration
-KAIZEN_CLI_MODEL=claude-3-opus
-KAIZEN_CLI_API_KEY=your-anthropic-key
-KAIZEN_CLI_PROVIDER=anthropic
-
-# Google Configuration (Default)
-KAIZEN_CLI_MODEL=gemini-1.5-flash
-KAIZEN_CLI_API_KEY=your-google-key
-KAIZEN_CLI_PROVIDER=google
-```
-
-## 💻 Usage
-
-### Command Line Interface
-
-Kaizen provides two main commands for testing and fixing your code:
-
-1. Run tests from YAML files:
-```bash
-kaizen run-tests test1.yaml test2.yaml --project path/to/project --results path/to/results
-```
-
-2. Fix failing tests and create a PR:
-```bash
-kaizen fix-tests test1.yaml test2.yaml --project path/to/project --results path/to/results --make-pr
-```
-
-### Test Configuration
-
-Example test configuration:
-```yaml
-name: Email Agent Test
-agent_type: dynamic_region
-steps:
-  - name: Basic Email Test
-    input:
-      file_path: email_agent.py
-      region: email_agent
-      method: improve_email
-      input: "hey, can we meet tomorrow?"
-    expected_output_contains:
-      - "Dear"
-      - "meeting"
-      - "schedule"
-    validation:
-      type: contains
-      min_length: 100
-      max_length: 500
-```
-
-### Using as a Python Module
-
-You can integrate Kaizen into your Python projects:
-
-```python
-from kaizen import TestRunner, auto_fix_tests
-
-# Run tests
-runner = TestRunner("path/to/project", "path/to/results")
-results = runner.run_tests(["test1.yaml", "test2.yaml"])
-
-# Fix failing tests
-fixed_tests = auto_fix_tests(["test1.yaml", "test2.yaml"], "path/to/project", "path/to/results", make_pr=True)
-```
-
-## 🧪 Testing
-
-Run the test suite using pytest:
+### Running Tests
 
 ```bash
-# Run all tests
 pytest
-
-# Run tests with coverage report
-pytest --cov=kaizen
-
-# Run specific test file
-pytest test_kaizen.py
 ```
 
-## 🤝 Contributing
+### Code Style
 
-We welcome contributions! Here's how you can help:
+We use [black](https://github.com/psf/black) for code formatting and [isort](https://pycqa.github.io/isort/) for import sorting. To format your code:
+
+```bash
+black .
+isort .
+```
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -159,36 +189,19 @@ We welcome contributions! Here's how you can help:
 6. Push to the branch (`git push origin feature/amazing-feature`)
 7. Open a Pull Request
 
-Please read our [Contributing Guidelines](CONTRIBUTING.md) for more details.
-
-## 📝 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Support
 
-- OpenAI for providing the GPT-4 API
-- All contributors who have helped improve this project
+- 📚 [Documentation](https://kaizen.readthedocs.io/)
+- 💬 [Discord Community](https://discord.gg/kaizen)
+- 🐛 [Issue Tracker](https://github.com/yourusername/kaizen/issues)
+- 📧 [Email Support](mailto:support@kaizen.dev)
 
-## 📚 Documentation
+## Acknowledgments
 
-For more detailed documentation, visit our [documentation site](https://kaizen-agent.readthedocs.io/).
-
-## 💬 Support
-
-If you need help or have questions:
-- Open an issue
-- Join our [Discord community](https://discord.gg/kaizen-agent)
-- Check our [FAQ](docs/FAQ.md)
-
-## 🔄 Roadmap
-
-- [ ] Support for more programming languages
-- [ ] Enhanced test failure analysis
-- [ ] Integration with more CI/CD platforms
-- [ ] Custom test validation rules
-- [ ] Performance optimization suggestions
-
----
-
-Made with ❤️ by the Kaizen Agent team
+- Thanks to all our contributors
+- Inspired by [list of inspirations]
+- Built with [list of key technologies]
