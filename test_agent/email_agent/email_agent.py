@@ -1,17 +1,25 @@
 import os
+import sys
 from typing import Optional
-import google.generativeai as genai
+
+import click
 from dotenv import load_dotenv
+import google.generativeai as genai
+
 
 # kaizen:start:email_agent
 class EmailAgent:
+    """Initialize the EmailAgent with Google API key."""
+
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize the EmailAgent with Google API key."""
         load_dotenv()  # Load environment variables from .env file
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
-            raise ValueError("Google API key is required. Set it as GOOGLE_API_KEY environment variable or pass it to the constructor.")
-        
+            raise ValueError(
+                "Google API key is required. Set it as GOOGLE_API_KEY "
+                "environment variable or pass it to the constructor."
+            )
+
         # Configure the API (no try/except)
         genai.configure(api_key=self.api_key)
         self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
@@ -20,26 +28,30 @@ class EmailAgent:
     def improve_email(self, draft: str) -> str:
         """
         Improve the given email draft using Gemini's API.
-        
+
         Args:
             draft (str): The original email draft to improve
-            
+
         Returns:
             str: The improved email draft
         """
         # Add safety instructions to the prompt
-        prompt = f"""Please improve the following email draft. Make it more professional, clear, and effective while maintaining its original intent.
-        Focus on:
-        - Professional tone and language
-        - Clear and concise communication
-        - Proper email etiquette
-        - Maintaining the original message's intent
-        
-        Here's the draft:
-        
-        {draft}
-        
-        Improved version:"""
+        # Modified prompt to ensure only the improved email draft is returned,
+        # without additional conversational text or multiple options.
+        prompt = (
+            f"Please improve the following email draft. Provide ONLY the improved "
+            f"email draft. Do not include any conversational text, multiple "
+            f"options, or explanations. Make it more professional, clear, and "
+            f"effective while maintaining its original intent.\n"
+            f"Focus on:\n"
+            f"- Professional tone and language\n"
+            f"- Clear and concise communication\n"
+            f"- Proper email etiquette\n"
+            f"- Maintaining the original message's intent\n\n"
+            f"Here's the draft:\n\n"
+            f"{draft}\n\n"
+            f"Improved version:"
+        )
 
         response = self.model.generate_content(
             prompt,
@@ -68,13 +80,10 @@ class EmailAgent:
                 }
             ]
         )
-        
+
         return response.text
 # kaizen:end:email_agent
 
-
-import sys
-import click
 
 @click.command()
 @click.option('--draft', type=str, help='Email draft to improve')
@@ -82,7 +91,7 @@ import click
 def main(draft: str, file: str):
     """Main function to run the email agent from command line."""
     agent = EmailAgent()
-    
+
     email_draft = None
     if draft:
         email_draft = draft
@@ -91,7 +100,10 @@ def main(draft: str, file: str):
             email_draft = f.read()
     else:
         # If no --draft or --file is provided, read from stdin
-        click.echo("Please enter your email draft (press Ctrl+D or Ctrl+Z on Windows when finished):")
+        click.echo(
+            "Please enter your email draft (press Ctrl+D or Ctrl+Z on Windows "
+            "when finished):"
+        )
         email_draft = sys.stdin.read()
 
     if not email_draft.strip():
@@ -103,6 +115,7 @@ def main(draft: str, file: str):
     click.echo("-" * 50)
     click.echo(improved_email)
     click.echo("-" * 50)
+
 
 if __name__ == '__main__':
     main()
