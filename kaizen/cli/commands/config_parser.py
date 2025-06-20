@@ -186,18 +186,12 @@ class ConfigurationParser:
             
             steps = []
             for step_data in steps_data:
-                step = TestStep(
-                    name=step_data.get('name', ''),
-                    command=step_data.get('input', {}).get('method', ''),
-                    input=step_data.get('input', {}).get('input', ''),
-                    expected_output=step_data.get('expected_output', ''),
-                    description=step_data.get('description'),
-                    timeout=step_data.get('timeout'),
-                    retries=step_data.get('retries'),
-                    environment=step_data.get('environment'),
-                    dependencies=step_data.get('dependencies')
-                )
-                steps.append(step)
+                try:
+                    # Use TestStep.from_dict which has proper input parsing logic
+                    step = TestStep.from_dict(step_data)
+                    steps.append(step)
+                except Exception as e:
+                    return Result.failure(f"Failed to parse step '{step_data.get('name', 'Unknown')}': {str(e)}")
             
             return Result.success(steps)
             

@@ -204,6 +204,16 @@ class TestAllCommand(BaseTestCommand):
                 ])
             config['tests'] = [item for sublist in config_tests_temp for item in sublist]
             
+            # DEBUG: Print the test configuration being created
+            self.logger.info(f"DEBUG: Created {len(config['tests'])} test(s) for runner")
+            for i, test in enumerate(config['tests']):
+                self.logger.info(f"DEBUG: Test {i}: {test['name']}")
+                self.logger.info(f"DEBUG: Test {i} input: {test['input']}")
+                self.logger.info(f"DEBUG: Test {i} input type: {type(test['input'])}")
+                if 'input' in test['input']:
+                    self.logger.info(f"DEBUG: Test {i} nested input: {test['input']['input']}")
+                    self.logger.info(f"DEBUG: Test {i} nested input type: {type(test['input']['input'])}")
+            
         return config
     
     def _handle_auto_fix(self, failed_tests: List[Dict[str, Any]], config: TestConfiguration, runner_config: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:

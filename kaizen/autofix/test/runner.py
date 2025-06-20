@@ -128,8 +128,15 @@ class TestRunner:
         """
         try:
             logger.info(f"Running test case: {test_case.get('name', 'Unknown')}")
+            
+            # DEBUG: Print the raw test case
+            logger.info(f"DEBUG: Raw test case: {test_case}")
+            
             # Convert test case dict to TestCase object
             test_case_obj = TestCase.from_dict(test_case)
+            
+            # DEBUG: Print the parsed test case input
+            logger.info(f"DEBUG: TestCase input: {test_case_obj.input}")
             
             # Extract and analyze the code region
             region_info = self.code_region_extractor.extract_region(
@@ -144,10 +151,24 @@ class TestRunner:
             
             # Parse input data using the new input parser
             input_data = test_case_obj.input.get('input')
+            
+            # DEBUG: Print the input data before parsing
+            logger.info(f"DEBUG: Input data before parsing: {input_data}")
+            logger.info(f"DEBUG: Input data type: {type(input_data)}")
+            if isinstance(input_data, list):
+                logger.info(f"DEBUG: Input data length: {len(input_data)}")
+                for i, item in enumerate(input_data):
+                    logger.info(f"DEBUG: Input item {i}: {item} (type: {type(item)})")
+            
             if input_data is not None:
                 try:
                     parsed_inputs = self.input_parser.parse_inputs(input_data)
                     logger.info(f"Parsed {len(parsed_inputs)} input(s) for test case")
+                    
+                    # DEBUG: Print the parsed inputs
+                    for i, parsed_input in enumerate(parsed_inputs):
+                        logger.info(f"DEBUG: Parsed input {i}: {parsed_input} (type: {type(parsed_input)})")
+                        
                 except InputParsingError as e:
                     logger.error(f"Failed to parse inputs: {str(e)}")
                     return {

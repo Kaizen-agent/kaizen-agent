@@ -75,6 +75,10 @@ class InputParser:
         Raises:
             InputParsingError: If parsing fails
         """
+        # DEBUG: Print the input configuration received
+        logger.info(f"DEBUG: InputParser.parse_inputs received: {input_config}")
+        logger.info(f"DEBUG: InputParser.parse_inputs type: {type(input_config)}")
+        
         try:
             # Handle backward compatibility: single value
             if not isinstance(input_config, (list, dict)):
@@ -103,6 +107,9 @@ class InputParser:
             # Handle list of input definitions
             if isinstance(input_config, list):
                 logger.debug(f"Multiple input definitions detected: {len(input_config)} items")
+                logger.info(f"DEBUG: InputParser.parse_inputs processing list with {len(input_config)} items")
+                for i, item in enumerate(input_config):
+                    logger.info(f"DEBUG: InputParser.parse_inputs item {i}: {item} (type: {type(item)})")
                 return self._parse_input_list(input_config)
             
             # Fallback: treat as direct value

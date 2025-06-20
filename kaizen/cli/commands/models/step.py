@@ -6,6 +6,7 @@ in the test configuration.
 
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Union
+import logging
 
 @dataclass
 class TestStep:
@@ -44,17 +45,27 @@ class TestStep:
         Returns:
             TestStep instance
         """
+        # DEBUG: Print the raw step data
+        logger = logging.getLogger(__name__)
+        logger.info(f"DEBUG: TestStep.from_dict raw data: {data}")
+        
         # Handle input parsing with backward compatibility
         input_data = data.get('input', {})
+        logger.info(f"DEBUG: TestStep.from_dict input_data: {input_data}")
+        logger.info(f"DEBUG: TestStep.from_dict input_data type: {type(input_data)}")
         
         # If input is a dict with 'method' and 'input' keys (old format)
         if isinstance(input_data, dict) and 'method' in input_data and 'input' in input_data:
             command = input_data.get('method', '')
             input_value = input_data.get('input', '')
+            logger.info(f"DEBUG: TestStep.from_dict using old format - command: {command}, input_value: {input_value}")
         else:
             # New format: input can be directly specified
             command = data.get('command', '')
             input_value = input_data
+            logger.info(f"DEBUG: TestStep.from_dict using new format - command: {command}, input_value: {input_value}")
+        
+        logger.info(f"DEBUG: TestStep.from_dict final input_value type: {type(input_value)}")
         
         return cls(
             name=data.get('name', ''),

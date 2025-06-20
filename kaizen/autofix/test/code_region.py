@@ -1286,15 +1286,33 @@ class CodeRegionExecutor:
         logger.info(f"Executing region: {region_info.name}")
         
         try:
-            # Parse inputs if provided
+            # Handle input data - it may already be parsed from TestRunner
             parsed_inputs = []
             if input_data is not None:
-                try:
-                    parsed_inputs = self.input_parser.parse_inputs(input_data)
-                    logger.info(f"Parsed {len(parsed_inputs)} input(s) for region execution")
-                except InputParsingError as e:
-                    logger.error(f"Failed to parse inputs: {str(e)}")
-                    raise ValueError(f"Input parsing error: {str(e)}")
+                # DEBUG: Print input data details
+                logger.info(f"DEBUG: CodeRegionExecutor received input_data: {input_data}")
+                logger.info(f"DEBUG: CodeRegionExecutor input_data type: {type(input_data)}")
+                
+                # Check if input_data is already a list of parsed values (from TestRunner)
+                if isinstance(input_data, list) and len(input_data) > 0:
+                    # If the first item is not a dict with 'type' key, assume it's already parsed
+                    if not (isinstance(input_data[0], dict) and 'type' in input_data[0]):
+                        logger.info(f"Using already-parsed inputs: {len(input_data)} items")
+                        logger.info(f"DEBUG: Already-parsed inputs: {input_data}")
+                        parsed_inputs = input_data
+                    else:
+                        # It's raw YAML config, need to parse it
+                        logger.info(f"Parsing raw YAML config inputs")
+                        try:
+                            parsed_inputs = self.input_parser.parse_inputs(input_data)
+                            logger.info(f"Parsed {len(parsed_inputs)} input(s) for region execution")
+                        except InputParsingError as e:
+                            logger.error(f"Failed to parse inputs: {str(e)}")
+                            raise ValueError(f"Input parsing error: {str(e)}")
+                else:
+                    # Single value or empty list
+                    logger.info(f"Using single value or empty list input")
+                    parsed_inputs = input_data if isinstance(input_data, list) else [input_data]
             
             # Create a custom import manager that uses pre-imported dependencies
             with self._create_custom_import_manager(region_info) as namespace:
@@ -1342,15 +1360,33 @@ class CodeRegionExecutor:
             tracked_variables = set()
         
         try:
-            # Parse inputs if provided
+            # Handle input data - it may already be parsed from TestRunner
             parsed_inputs = []
             if input_data is not None:
-                try:
-                    parsed_inputs = self.input_parser.parse_inputs(input_data)
-                    logger.info(f"Parsed {len(parsed_inputs)} input(s) for region execution")
-                except InputParsingError as e:
-                    logger.error(f"Failed to parse inputs: {str(e)}")
-                    raise ValueError(f"Input parsing error: {str(e)}")
+                # DEBUG: Print input data details
+                logger.info(f"DEBUG: CodeRegionExecutor received input_data: {input_data}")
+                logger.info(f"DEBUG: CodeRegionExecutor input_data type: {type(input_data)}")
+                
+                # Check if input_data is already a list of parsed values (from TestRunner)
+                if isinstance(input_data, list) and len(input_data) > 0:
+                    # If the first item is not a dict with 'type' key, assume it's already parsed
+                    if not (isinstance(input_data[0], dict) and 'type' in input_data[0]):
+                        logger.info(f"Using already-parsed inputs: {len(input_data)} items")
+                        logger.info(f"DEBUG: Already-parsed inputs: {input_data}")
+                        parsed_inputs = input_data
+                    else:
+                        # It's raw YAML config, need to parse it
+                        logger.info(f"Parsing raw YAML config inputs")
+                        try:
+                            parsed_inputs = self.input_parser.parse_inputs(input_data)
+                            logger.info(f"Parsed {len(parsed_inputs)} input(s) for region execution")
+                        except InputParsingError as e:
+                            logger.error(f"Failed to parse inputs: {str(e)}")
+                            raise ValueError(f"Input parsing error: {str(e)}")
+                else:
+                    # Single value or empty list
+                    logger.info(f"Using single value or empty list input")
+                    parsed_inputs = input_data if isinstance(input_data, list) else [input_data]
             
             # Create a custom import manager that uses pre-imported dependencies
             with self._create_custom_import_manager(region_info) as namespace:
