@@ -66,9 +66,10 @@ def load_config(config_path: Path) -> Dict:
         for field in required_fields:
             if field not in config:
                 raise click.ClickException(f"Missing required field '{field}' in config")
-                
-        if 'tests' not in config:
-            raise click.ClickException("Config must contain 'tests' section")
+        
+        # Support both old 'tests' format and new 'steps' format
+        if 'tests' not in config and 'steps' not in config:
+            raise click.ClickException("Config must contain either 'tests' or 'steps' section")
             
         return config
         
@@ -165,6 +166,9 @@ def test_all(ctx: click.Context, config: str, auto_fix: bool, create_pr: bool,
         # Load config
         ctx.obj.config = load_config(ctx.obj.config_path)
         
+        # Add config file path to config for proper file resolution
+        ctx.obj.config['config_file'] = str(ctx.obj.config_path)
+        
         # Run tests
         test_file_path = Path(ctx.obj.config['file_path'])
         runner = TestRunner(ctx.obj.config)
@@ -192,53 +196,6 @@ def test_all(ctx: click.Context, config: str, auto_fix: bool, create_pr: bool,
     except click.ClickException as e:
         click.echo(f"Error: {str(e)}", err=True)
         sys.exit(ExitCode.CONFIG_ERROR.value)
-    except Exception as e:
-        logger.exception("Unexpected error")
-        click.echo(f"Unexpected error: {str(e)}", err=True)
-        sys.exit(ExitCode.UNKNOWN_ERROR.value)
-
-@cli.command()
-@click.argument('test_files', nargs=-1, type=click.Path(exists=True))
-@click.option('--project', type=click.Path(exists=True), required=True, help='Project root directory')
-@click.option('--make-pr', is_flag=True, help='Create pull request with fixes')
-@click.option('--max-retries', type=int, default=1, help='Maximum number of fix attempts')
-@click.option('--base-branch', type=str, default='main', help='Base branch for pull request')
-@click.option('--skip-env-check', is_flag=True, help='Skip environment validation')
-@click.pass_context
-def fix_tests(ctx: click.Context, test_files: tuple, project: str, make_pr: bool,
-              max_retries: int, base_branch: str, skip_env_check: bool) -> None:
-    """Fix specific test files."""
-    try:
-        # Validate environment unless skipped
-        if not skip_env_check:
-            validate_environment(True, make_pr)
-        
-        # Update context
-        ctx.obj.config = {
-            'name': 'Fix Tests',
-            'file_path': project,
-            'tests': [{'name': Path(f).stem, 'input': {'file': f}} for f in test_files]
-        }
-        ctx.obj.auto_fix = True
-        ctx.obj.create_pr = make_pr
-        ctx.obj.max_retries = max_retries
-        ctx.obj.base_branch = base_branch
-        
-        # Run fixer
-        fixer = AutoFix(ctx.obj.config)
-        results = fixer.fix_issues({}, max_retries)
-        
-        if make_pr and results.get('fixed'):
-            pr_creator = PRManager(ctx.obj.config)
-            pr_url = pr_creator.create_pr(base_branch)
-            click.echo(f"Created pull request: {pr_url}")
-            
-        if not results.get('fixed'):
-            sys.exit(ExitCode.FIX_ERROR.value)
-            
-        click.echo("All tests fixed!")
-        sys.exit(ExitCode.SUCCESS.value)
-        
     except Exception as e:
         logger.exception("Unexpected error")
         click.echo(f"Unexpected error: {str(e)}", err=True)

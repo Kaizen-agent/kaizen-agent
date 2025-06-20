@@ -34,6 +34,7 @@ Kaizen is a powerful CLI tool that automates test execution, failure analysis, a
 - **Retry Mechanism**: Automatically retry failed tests after fixes
 - **Detailed Reporting**: Generate comprehensive test reports and fix attempts
 - **Configuration Management**: YAML-based configuration with validation and dependency management
+- **Dependency Management**: Automatic handling of package dependencies and local file imports
 
 ## Installation
 
@@ -55,24 +56,6 @@ pip install -e ".[dev]"
 
 Before using Kaizen, you need to set up your environment variables for API access.
 
-### Quick Setup
-
-1. **Check your current setup:**
-   ```bash
-   kaizen setup check-env
-   ```
-
-2. **Create a template .env file:**
-   ```bash
-   kaizen setup create-env-example
-   ```
-
-3. **Configure your API keys:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your actual API keys
-   ```
-
 ### Required Environment Variables
 
 - **`GOOGLE_API_KEY`** (Required): Your Google AI API key for LLM operations
@@ -88,18 +71,20 @@ Before using Kaizen, you need to set up your environment variables for API acces
 - **`ANTHROPIC_API_KEY`**: Alternative LLM provider
 - **`LLM_MODEL_NAME`**: Custom LLM model name (default: `gemini-2.5-flash-preview-05-20`)
 
-### Setup Commands
+### Environment Setup
 
-```bash
-# Check environment status
-kaizen setup check-env
+1. **Create a .env file:**
+   ```bash
+   # Create .env file with your API keys
+   echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
+   echo "GITHUB_TOKEN=your_github_token_here" >> .env
+   ```
 
-# Create .env.example template
-kaizen setup create-env-example
-
-# Validate environment (for CI/CD)
-kaizen setup validate-env
-```
+2. **Or use environment variables:**
+   ```bash
+   export GOOGLE_API_KEY="your_google_api_key_here"
+   export GITHUB_TOKEN="your_github_token_here"
+   ```
 
 For detailed setup instructions, see the [Environment Setup Guide](docs/environment-setup.md).
 
@@ -110,15 +95,21 @@ For detailed setup instructions, see the [Environment Setup Guide](docs/environm
 ```yaml
 name: My Test Suite
 file_path: path/to/your/code.py
-tests:
+description: "Test suite for my application"
+
+# Test steps
+steps:
   - name: Test Case 1
     input:
-      region: block  # Optional: specify code region to test
-      method: run    # Optional: specify method to run
-      input: "test input"  # Optional: input for the test
+      method: run
+      input: "test input"
+    description: "Test basic functionality"
+    
   - name: Test Case 2
     input:
-      file: path/to/test/file.py  # Optional: specify test file
+      method: process_data
+      input: {"data": [1, 2, 3]}
+    description: "Test data processing"
 ```
 
 2. Run tests with auto-fix:
@@ -129,6 +120,16 @@ kaizen test-all --config test_config.yaml --auto-fix --create-pr
 
 ## Usage
 
+### Available Commands
+
+```bash
+# Run all tests in configuration
+kaizen test-all --config <config_file> [options]
+
+# Fix specific test files
+kaizen fix-tests <test_files> --project <project_path> [options]
+```
+
 ### Run Tests with Auto-Fix
 
 ```bash
@@ -136,11 +137,12 @@ kaizen test-all --config <config_file> [--auto-fix] [--create-pr] [--max-retries
 ```
 
 Options:
-- `--config`: Path to test configuration file (required)
+- `--config`, `-c`: Path to test configuration file (required)
 - `--auto-fix`: Enable automatic code fixing
 - `--create-pr`: Create a pull request with fixes
 - `--max-retries`: Maximum number of fix attempts (default: 1)
 - `--base-branch`: Base branch for pull request (default: main)
+- `--pr-strategy`: Strategy for when to create PRs (default: ANY_IMPROVEMENT)
 
 ### Fix Specific Tests
 
@@ -150,10 +152,11 @@ kaizen fix-tests <test_files> --project <project_path> [--make-pr] [--max-retrie
 
 Options:
 - `test_files`: One or more test files to fix
-- `--project`: Project root directory (required)
+- `--project`, `-p`: Project root directory (required)
 - `--make-pr`: Create a pull request with fixes
 - `--max-retries`: Maximum number of fix attempts (default: 1)
 - `--base-branch`: Base branch for pull request (default: main)
+- `--results`, `-r`: Path to save test results
 
 ## Configuration
 
@@ -162,30 +165,83 @@ The test configuration file (YAML) supports the following structure:
 ```yaml
 name: Test Suite Name
 file_path: path/to/main/code.py
-tests:
+description: "Description of the test suite"
+
+# Package dependencies to import before test execution
+dependencies:
+  - "requests>=2.25.0"
+  - "pandas==1.3.0"
+  - "numpy"
+
+# Local files to import (relative to config file location)
+referenced_files:
+  - "utils/helper.py"
+  - "models/data_processor.py"
+
+# Files that should be fixed if tests fail
+files_to_fix:
+  - "main_code.py"
+  - "utils/helper.py"
+
+# Test configuration
+agent_type: "default"
+auto_fix: true
+create_pr: false
+max_retries: 3
+base_branch: "main"
+pr_strategy: "ANY_IMPROVEMENT"
+
+# Test regions to execute
+regions:
+  - "test_function"
+  - "test_class"
+
+# Test steps
+steps:
   - name: Test Case Name
     input:
-      # Optional: Test a specific code region
-      region: block
       method: run
       input: "test input"
-      
-  - name: Another Test Case
-    input:
-      # Optional: Test a specific file
-      file: path/to/test/file.py
+    description: "Description of the test case"
+    timeout: 30
+    retries: 2
+
+# Evaluation criteria
+evaluation:
+  criteria:
+    - "Function returns expected result"
+    - "Error handling works correctly"
+  llm_provider: "openai"
+  model: "gpt-4"
+  settings:
+    temperature: 0.1
+    max_tokens: 1000
+
+# Metadata
+metadata:
+  version: "1.0.0"
+  author: "Test Author"
+  created_at: "2024-01-01T00:00:00Z"
 ```
 
-Configuration fields:
+### Configuration Fields
+
 - `name`: Name of the test suite
 - `file_path`: Path to the main code file
-- `tests`: List of test cases
-  - `name`: Name of the test case
-  - `input`: Test input configuration
-    - `region`: Optional code region to test
-    - `method`: Optional method to run
-    - `input`: Optional input for the test
-    - `file`: Optional test file path
+- `description`: Description of the test suite
+- `dependencies`: List of package dependencies
+- `referenced_files`: List of local files to import
+- `files_to_fix`: List of files that should be fixed if tests fail
+- `agent_type`: Type of agent to use (default: "default")
+- `auto_fix`: Whether to enable automatic fixing
+- `create_pr`: Whether to create pull requests
+- `max_retries`: Maximum number of fix attempts
+- `base_branch`: Base branch for pull requests
+- `pr_strategy`: Strategy for when to create PRs
+- `regions`: List of code regions to test
+- `steps`: List of test steps
+- `evaluation`: Evaluation criteria and settings
+- `metadata`: Additional metadata
 
 ### Expected Outcomes
 
@@ -193,8 +249,6 @@ You can define expected outcomes for your tests in several ways:
 
 #### 1. Simple Expected Output
 ```yaml
-name: Basic Test
-file_path: calculator.py
 steps:
   - name: Addition Test
     input:
@@ -206,8 +260,6 @@ steps:
 
 #### 2. Structured Expected Output
 ```yaml
-name: API Response Test
-file_path: api_handler.py
 steps:
   - name: User Creation Test
     input:
@@ -222,8 +274,6 @@ steps:
 
 #### 3. Evaluation Criteria
 ```yaml
-name: Quality Test
-file_path: text_processor.py
 evaluation:
   criteria:
     - "Output should be properly formatted"
@@ -232,18 +282,10 @@ evaluation:
   required_fields:
     - "result"
     - "status"
-steps:
-  - name: Text Processing Test
-    input:
-      method: process_text
-      input: "Hello world"
-    description: "Test text processing with quality criteria"
 ```
 
 #### 4. Advanced Evaluation Targets
 ```yaml
-name: Advanced Test
-file_path: data_analyzer.py
 evaluation:
   evaluation_targets:
     - name: summary_text
@@ -256,64 +298,11 @@ evaluation:
       criteria: "Should be a dictionary with 'status' and 'results' keys"
       description: "Return value should have expected structure"
       weight: 1.0
-steps:
-  - name: Data Analysis Test
-    input:
-      method: analyze_data
-      input: [1, 2, 3, 4, 5]
-    description: "Test data analysis with multiple evaluation targets"
-```
-
-#### 5. Complete Example with Expected Outcomes
-```yaml
-name: Calculator Test Suite
-file_path: calculator.py
-description: "Test suite for basic calculator operations"
-
-evaluation:
-  criteria:
-    - "All calculations should be mathematically correct"
-    - "Error handling should work for invalid inputs"
-    - "Results should be properly formatted"
-
-steps:
-  - name: Addition Test
-    input:
-      method: add
-      input: [10, 5]
-    expected_output: 15
-    description: "Test basic addition"
-    
-  - name: Division Test
-    input:
-      method: divide
-      input: [20, 4]
-    expected_output: 5.0
-    description: "Test division with valid input"
-    
-  - name: Division by Zero Test
-    input:
-      method: divide
-      input: [10, 0]
-    expected_output:
-      status: "error"
-      message: "Division by zero is not allowed"
-    description: "Test error handling for division by zero"
-    
-  - name: Complex Calculation Test
-    input:
-      method: calculate
-      input: "2 + 3 * 4"
-    expected_output:
-      result: 14
-      expression: "2 + 3 * 4"
-      steps: ["3 * 4 = 12", "2 + 12 = 14"]
-    description: "Test complex calculation with detailed output"
 ```
 
 ## Multiple Inputs & Outputs
 
-Kaizen now supports advanced multiple inputs and multiple outputs evaluation, making it perfect for complex agent workflows and multi-step processes.
+Kaizen supports advanced multiple inputs and multiple outputs evaluation, making it perfect for complex agent workflows and multi-step processes.
 
 ### Multiple Inputs
 
@@ -321,42 +310,58 @@ Kaizen supports four types of inputs that can be combined in any configuration:
 
 #### 1. String Inputs
 ```yaml
-input:
-  - name: user_query
-    type: string
-    value: "How stable is this compound in ethanol?"
+steps:
+  - name: String Input Test
+    input:
+      method: process_text
+      input:
+        - name: user_query
+          type: string
+          value: "How stable is this compound in ethanol?"
 ```
 
 #### 2. Dictionary Inputs
 ```yaml
-input:
-  - name: experimental_conditions
-    type: dict
-    value:
-      temperature: 25
-      solvent: "ethanol"
-      pressure: 1.0
-      concentration: 0.1
+steps:
+  - name: Dictionary Input Test
+    input:
+      method: analyze_conditions
+      input:
+        - name: experimental_conditions
+          type: dict
+          value:
+            temperature: 25
+            solvent: "ethanol"
+            pressure: 1.0
+            concentration: 0.1
 ```
 
 #### 3. Object Inputs (with dynamic imports)
 ```yaml
-input:
-  - name: chemist_feedback
-    type: object
-    class_path: "input_types.ChemistFeedback"
-    args:
-      text: "Too reactive"
-      tags: ["solubility", "stability"]
-      confidence: 0.9
+steps:
+  - name: Object Input Test
+    input:
+      method: process_feedback
+      input:
+        - name: chemist_feedback
+          type: object
+          class_path: "input_types.ChemistFeedback"
+          args:
+            text: "Too reactive"
+            tags: ["solubility", "stability"]
+            confidence: 0.9
 ```
 
 #### 4. Class Object Inputs
 ```yaml
-input:
-  - name: saved_model
-    type: class_object
-    pickle_path: "trained_model.pkl"
+steps:
+  - name: Model Input Test
+    input:
+      method: predict
+      input:
+        - name: saved_model
+          type: class_object
+          pickle_path: "trained_model.pkl"
 ```
 
 ### Multiple Outputs Evaluation
@@ -616,5 +621,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - Thanks to all our contributors
-- Inspired by [list of inspirations]
-- Built with [list of key technologies]
+- Inspired by modern AI-powered development tools
+- Built with Python, Click, Rich, and Google AI APIs

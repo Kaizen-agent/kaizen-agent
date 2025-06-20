@@ -300,17 +300,33 @@ class DependencyResolver:
         """Resolve all dependencies for a file."""
         logger.info(f"Resolving dependencies: {file_path.name}")
         try:
+            logger.debug(f"DEBUG: Opening file for dependency resolution: {file_path}")
             with open(file_path, 'r') as f:
                 content = f.read()
+            logger.debug(f"DEBUG: Successfully read file for dependency resolution ({len(content)} characters)")
             
+            logger.debug(f"DEBUG: Parsing AST for dependency resolution")
             tree = ast.parse(content)
-            imports = self._extract_imports(tree)
-            logger.debug(f"Imports: {imports}")
+            logger.debug(f"DEBUG: AST parsing completed for dependency resolution")
             
+            logger.debug(f"DEBUG: Extracting imports for dependency resolution")
+            imports = self._extract_imports(tree)
+            logger.debug(f"DEBUG: Found {len(imports)} imports for dependency resolution: {imports}")
+            
+            logger.debug(f"DEBUG: Resetting dependency resolver state")
             self._reset_state()
+            
+            logger.debug(f"DEBUG: Building import graph")
             self._build_import_graph(file_path.name, imports)
+            logger.debug(f"DEBUG: Import graph built")
+            
+            logger.debug(f"DEBUG: Checking for cycles")
             self._check_cycles(file_path.name)
+            logger.debug(f"DEBUG: Cycle check completed")
+            
+            logger.debug(f"DEBUG: Resolving all dependencies")
             dependencies = self._resolve_all_dependencies(imports)
+            logger.debug(f"DEBUG: Dependency resolution completed, found {len(dependencies)} dependencies")
             
             logger.info(f"✓ Dependencies resolved: {len(dependencies)} found")
             return frozenset(dependencies)
@@ -320,6 +336,7 @@ class DependencyResolver:
             raise RegionExtractionError(f"Failed to read or parse file {file_path}: {str(e)}")
         except Exception as e:
             logger.error(f"✗ Dependency resolution failed: {file_path.name}")
+            logger.error(f"DEBUG: Full traceback for dependency resolution error: {traceback.format_exc()}")
             raise DependencyResolutionError(f"Failed to resolve dependencies for {file_path}: {str(e)}")
     
     def _reset_state(self) -> None:
@@ -347,11 +364,17 @@ class DependencyResolver:
         Returns:
             Set of resolved ModuleInfo objects
         """
+        logger.debug(f"DEBUG: Starting to resolve {len(imports)} dependencies")
         dependencies = set()
-        for imp in imports:
+        for i, imp in enumerate(imports):
+            logger.debug(f"DEBUG: Resolving dependency {i+1}/{len(imports)}: {imp}")
             module_info = self._resolve_module(imp)
             if module_info:
+                logger.debug(f"DEBUG: Successfully resolved {imp} -> {module_info.name}")
                 dependencies.add(module_info)
+            else:
+                logger.debug(f"DEBUG: Could not resolve {imp}")
+        logger.debug(f"DEBUG: Completed resolving dependencies, found {len(dependencies)} modules")
         return dependencies
     
     def _resolve_module(self, module_name: str) -> Optional[ModuleInfo]:
@@ -363,16 +386,21 @@ class DependencyResolver:
         Returns:
             ModuleInfo if module is found, None otherwise
         """
+        logger.debug(f"DEBUG: Resolving module: {module_name}")
+        
         if module_name in self._module_cache:
+            logger.debug(f"DEBUG: Found {module_name} in cache")
             return self._module_cache[module_name]
         
         try:
             # Handle typing module specially
             if module_name == 'typing':
+                logger.debug(f"DEBUG: Handling typing module specially")
                 return self._resolve_typing_module()
             
             # Handle standard library modules
             if module_name in STANDARD_MODULES:
+                logger.debug(f"DEBUG: {module_name} is a standard module")
                 module_info = self._resolve_standard_module(module_name)
                 self._module_cache[module_name] = module_info
                 return module_info
@@ -380,14 +408,16 @@ class DependencyResolver:
             # Check if this is a local module that should be skipped
             # (it will be handled by the CLI dependency manager)
             if '.' in module_name and not module_name.startswith(('google', 'openai', 'anthropic', 'click', 'rich', 'yaml')):
-                logger.debug(f"Skipping local module resolution for {module_name} - will be handled by CLI dependency manager")
+                logger.debug(f"DEBUG: Skipping local module resolution for {module_name} - will be handled by CLI dependency manager")
                 return None
             
             # Handle third-party modules
+            logger.debug(f"DEBUG: {module_name} is a third-party module")
             return self._resolve_third_party_module(module_name)
             
         except Exception as e:
             logger.error(f"Failed to resolve module {module_name}: {str(e)}")
+            logger.debug(f"DEBUG: Exception details for {module_name}: {traceback.format_exc()}")
             return None
     
     def _resolve_typing_module(self) -> ModuleInfo:
@@ -1041,31 +1071,38 @@ class CodeRegionExtractor:
         """Extract a code region from a file."""
         logger.info(f"Extracting region '{region_name}' from file: {file_path}")
         try:
+            logger.debug(f"DEBUG: Opening file: {file_path}")
             with open(file_path, 'r') as f:
                 content = f.read()
-            logger.debug(f"Successfully read file: {file_path}")
+            logger.debug(f"DEBUG: Successfully read file: {file_path} ({len(content)} characters)")
             
             # If region_name is 'main', use the entire file
             if region_name == 'main':
                 logger.debug("Using entire file as region (main)")
                 code = content
+                logger.debug(f"DEBUG: About to analyze region (main)")
                 return self._analyze_region(code, region_name, file_path)
             
             # Otherwise look for region markers
             start_marker = f"# kaizen:start:{region_name}"
             end_marker = f"# kaizen:end:{region_name}"
             
+            logger.debug(f"DEBUG: Looking for start marker: {start_marker}")
             start_idx = content.find(start_marker)
             if start_idx == -1:
                 logger.error(f"Start marker not found: {start_marker}")
                 raise ValueError(f"Start marker for region '{region_name}' not found")
             
+            logger.debug(f"DEBUG: Looking for end marker: {end_marker}")
             end_idx = content.find(end_marker)
             if end_idx == -1:
                 logger.error(f"End marker not found: {end_marker}")
                 raise ValueError(f"End marker for region '{region_name}' not found")
             
+            logger.debug(f"DEBUG: Found markers at positions {start_idx} and {end_idx}")
+            
             # Extract imports from the entire file
+            logger.debug(f"DEBUG: Extracting imports from file")
             import_lines = []
             for line in content.split('\n'):
                 line = line.strip()
@@ -1076,9 +1113,12 @@ class CodeRegionExtractor:
                         continue
                     import_lines.append(line)
             
+            logger.debug(f"DEBUG: Found {len(import_lines)} import lines")
+            
             # Extract the region code
             start_idx = content.find('\n', start_idx) + 1
             region_code = content[start_idx:end_idx].strip()
+            logger.debug(f"DEBUG: Extracted region code ({len(region_code)} characters)")
             
             # Combine imports with region code
             if import_lines:
@@ -1088,6 +1128,7 @@ class CodeRegionExtractor:
                 code = region_code
             
             logger.info(f"Extracted code region: {len(code)} characters")
+            logger.debug(f"DEBUG: About to analyze region: {region_name}")
             
             return self._analyze_region(code, region_name, file_path)
             
@@ -1109,25 +1150,27 @@ class CodeRegionExtractor:
         """Analyze the code region to determine its type, structure, and dependencies."""
         logger.info(f"Analyzing region '{region_name}' from file: {file_path}")
         try:
-            logger.debug("Parsing AST")
+            logger.debug("DEBUG: Parsing AST")
             tree = ast.parse(code)
+            logger.debug("DEBUG: AST parsing completed")
             
-            logger.debug("Extracting imports")
+            logger.debug("DEBUG: Extracting imports")
             imports = self._extract_imports(tree)
-            logger.debug(f"Found {len(imports)} imports")
+            logger.debug(f"DEBUG: Found {len(imports)} imports")
             
-            logger.debug("Determining region type")
+            logger.debug("DEBUG: Determining region type")
             region_type, name, methods = self._determine_region_type(tree)
-            logger.debug(f"Region type: {region_type}, name: {name}, methods: {methods}")
+            logger.debug(f"DEBUG: Region type: {region_type}, name: {name}, methods: {methods}")
             
             try:
-                logger.debug("Resolving dependencies")
+                logger.debug("DEBUG: About to resolve dependencies")
                 dependencies = self.dependency_resolver.resolve_dependencies(file_path)
-                logger.debug(f"Found {len(dependencies)} dependencies")
+                logger.debug(f"DEBUG: Found {len(dependencies)} dependencies")
             except ValueError as e:
                 logger.error(f"Failed to resolve dependencies: {str(e)}")
                 raise ValueError(f"Failed to resolve dependencies: {str(e)}")
             
+            logger.debug("DEBUG: Creating RegionInfo object")
             region_info = RegionInfo(
                 type=region_type,
                 name=name or region_name,
@@ -1140,6 +1183,7 @@ class CodeRegionExtractor:
                 file_path=file_path
             )
             logger.info(f"Successfully analyzed region '{region_name}'")
+            logger.debug("DEBUG: _analyze_region completed successfully")
             return region_info
             
         except SyntaxError as e:
@@ -1462,12 +1506,37 @@ class CodeRegionExecutor:
                         logger.debug(f"Executing module function with tracking: {method_name}")
                         result = self._execute_module(namespace, region_info, method_name, parsed_inputs)
                     
-                    # Get tracked values
+                    # Get tracked values during execution
                     tracked_values = tracker.get_all_tracked_values()
+                    
+                    # Additionally capture final state of tracked variables from namespace
+                    # This ensures we get the final values even if they weren't captured during execution
+                    final_tracked_values = {}
+                    for var_name in tracked_variables:
+                        if var_name in namespace:
+                            final_tracked_values[var_name] = namespace[var_name]
+                            logger.debug(f"Captured final state of {var_name}: {namespace[var_name]}")
+                    
+                    # For class methods, also check instance variables
+                    if region_info.type == RegionType.CLASS and isinstance(result, dict) and result.get('status') == 'success':
+                        instance = result.get('instance')
+                        if instance:
+                            logger.debug(f"Checking instance variables for tracked variables: {tracked_variables}")
+                            for var_name in tracked_variables:
+                                if hasattr(instance, var_name):
+                                    instance_value = getattr(instance, var_name)
+                                    final_tracked_values[var_name] = instance_value
+                                    logger.debug(f"Captured instance variable {var_name}: {instance_value}")
+                    
+                    # Merge tracked values, preferring final state over execution-time values
+                    merged_tracked_values = tracked_values.copy()
+                    merged_tracked_values.update(final_tracked_values)
+                    
+                    logger.info(f"Final tracked values: {merged_tracked_values}")
                     
                     return {
                         'result': result,
-                        'tracked_values': tracked_values,
+                        'tracked_values': merged_tracked_values,
                         'tracked_variables': list(tracked_variables)
                     }
                     
@@ -1607,7 +1676,8 @@ class CodeRegionExecutor:
             logger.debug(f"Method execution completed successfully")
             return {
                 'status': 'success',
-                'result': result
+                'result': result,
+                'instance': instance  # Return the instance for variable tracking
             }
             
         except AttributeError as e:

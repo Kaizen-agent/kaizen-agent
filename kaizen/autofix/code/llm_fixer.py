@@ -201,53 +201,63 @@ class PromptBuilder:
                         config: Optional['TestConfiguration'], context_files: Optional[Dict[str, str]]) -> str:
         """Build prompt for code fixing in AI agent development context."""
         prompt_parts = [
-            """You are an expert code fixer focused on minimal, targeted improvements. Your task is to fix the code following these principles:
+            """You are an expert code fixer focused on targeted improvements. Your task is to fix the code following these principles:
 
-1. Minimal Changes:
-   - Make only necessary changes to fix the issue
-   - Preserve existing functionality
-   - Avoid unnecessary refactoring
-   - Focus on critical fixes first
+1. Code Structure Preservation:
+   - DO NOT change the overall function or class structure
+   - Preserve existing function signatures and class definitions
+   - Keep the same file organization and imports
+   - Only modify the internal logic when necessary
 
-2. Essential Fixes:
-   - Fix critical bugs and errors
-   - Add essential error handling
-   - Ensure type safety
-   - Fix security vulnerabilities
+2. Code Changes (Minimal and Surgical):
+   - Make only necessary changes to fix the specific issue
+   - Preserve existing functionality and behavior
+   - Avoid unnecessary refactoring or restructuring
+   - Focus on critical bugs and errors only
+   - Keep changes minimal and targeted
 
-3. Best Practices (Only When Relevant):
-   - Add proper error handling for critical paths
-   - Ensure proper resource cleanup
-   - Add essential input validation
-   - Fix critical performance issues
-
-4. Prompt Engineering (Critical):
+3. Prompt Improvements (When Present):
+   - If the file contains prompts, improve them using modern prompt engineering best practices
    - Structure prompts with clear sections and hierarchy
    - Use explicit instructions and constraints
-   - Include examples where helpful
    - Add validation criteria for responses
-   - Use system messages to set context
    - Include error handling instructions
-   - Add fallback strategies
    - Use clear input/output formats
-   - Include token usage optimization
    - Add context management guidelines
-   - Use proper prompt templates
    - Include safety checks and filters
-   - Add proper error messages
-   - Use proper prompt versioning
-   - Include proper documentation
+   - DO NOT add specific test case examples - keep prompts generic and reusable
+   - DO NOT reference specific file names or paths in prompts
 
-IMPORTANT: Return ONLY the fixed code, properly formatted in a Python code block. Do not include any analysis or explanation in the response.
+4. Essential Fixes Only:
+   - Fix critical bugs and errors
+   - Add essential error handling for critical paths
+   - Ensure type safety where missing
+   - Fix security vulnerabilities
+   - Address resource leaks
+
+5. Best Practices (Minimal):
+   - Add proper error handling only for critical paths
+   - Ensure proper resource cleanup where missing
+   - Add essential input validation where critical
+   - Fix critical performance issues only
+
+IMPORTANT GUIDELINES:
+- For code: Make minimal, surgical changes that preserve structure
+- For prompts: Improve existing prompts without adding specific examples
+- Return ONLY the fixed code, properly formatted in a Python code block
+- Do not include any analysis or explanation in the response
+- Do not change function signatures or class structures
+- Do not add test case examples to prompts
+- Keep all improvements generic and reusable
 
 The fixed code should:
-- Include only necessary changes
+- Preserve the original code structure and organization
+- Include only necessary code changes (minimal)
+- Improve prompts generically without specific examples
 - Maintain existing functionality
 - Follow Python best practices
 - Be properly formatted
-- Include essential error handling
-- Fix critical issues only
-- Follow prompt engineering best practices
+- Include essential error handling only where critical
 
 Format your response as:
 ```python
@@ -261,7 +271,13 @@ Format your response as:
             prompt_parts.append(f"\nFailure Information:\n{failure_data}")
         
         if config:
-            prompt_parts.append(f"\nUser Goal:\n{config}")
+            # Only include relevant configuration info, not test cases
+            config_info = {
+                'name': getattr(config, 'name', None),
+                'description': getattr(config, 'description', None),
+                'goal': getattr(config, 'goal', None)
+            }
+            prompt_parts.append(f"\nConfiguration Context:\n{config_info}")
         
         if context_files:
             prompt_parts.append("\nRelated Files (for context and dependencies):")

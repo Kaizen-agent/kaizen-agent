@@ -7,6 +7,7 @@ import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
+import traceback
 
 # Try to load dotenv for .env file support
 try:
@@ -72,8 +73,9 @@ class TestRunner:
             if field not in self.test_config:
                 raise ValueError(f"Missing required field '{field}' in test configuration")
         
-        if 'tests' not in self.test_config:
-            raise ValueError("Test configuration must contain 'tests' field")
+        # Support both old 'tests' format and new 'steps' format
+        if 'tests' not in self.test_config and 'steps' not in self.test_config:
+            raise ValueError("Test configuration must contain either 'tests' or 'steps' field")
     
     def _find_workspace_root(self) -> Path:
         """Find the workspace root directory.
@@ -85,30 +87,44 @@ class TestRunner:
         """
         original_cwd = Path.cwd()
         
-        print("Starting workspace root detection...")
+        logger.debug("Starting workspace root detection...")
+        
         # Strategy 1: Look for common project root indicators
         current = original_cwd
-        while current.parent != current:
-            print(f"Checking directory: {current}")
-            if any((current / indicator).exists() for indicator in [
+        max_depth = 10  # Prevent infinite loops
+        depth = 0
+        
+        while current.parent != current and depth < max_depth:
+            logger.debug(f"Checking directory: {current}")
+            
+            # Check for project indicators
+            project_indicators = [
                 'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt',
                 'package.json', 'Cargo.toml', 'go.mod', 'composer.json'
-            ]):
-                print(f"Found project indicator in: {current}")
+            ]
+            
+            if any((current / indicator).exists() for indicator in project_indicators):
+                logger.info(f"Found project indicator in: {current}")
                 return current
-            if any((current / dir_name).exists() for dir_name in [
-                'src', 'lib', 'app', 'main', 'tests', 'docs'
-            ]):
-                print(f"Found project directory in: {current}")
+            
+            # Check for project directories
+            project_dirs = ['src', 'lib', 'app', 'main', 'tests', 'docs']
+            if any((current / dir_name).exists() for dir_name in project_dirs):
+                logger.info(f"Found project directory in: {current}")
                 return current
+            
             current = current.parent
-        print("First loop done, proceeding to ancestor check for kaizen-agent...")
+            depth += 1
+        
+        if depth >= max_depth:
+            logger.warning(f"Reached maximum depth ({max_depth}) while searching for workspace root")
 
         # Strategy 2: Look for kaizen-agent directory (for development)
+        logger.debug("Searching for kaizen-agent directory...")
         for ancestor in [original_cwd] + list(original_cwd.parents):
-            print(f"CHECKING ANCESTOR: {ancestor}")
+            logger.debug(f"Checking ancestor: {ancestor}")
             if ancestor.name == 'kaizen-agent':
-                print(f"MATCHED kaizen-agent at: {ancestor}")
+                logger.info(f"Found kaizen-agent directory at: {ancestor}")
                 return ancestor
         
         # Strategy 3: Fallback to current working directory
@@ -132,18 +148,35 @@ class TestRunner:
             # DEBUG: Print the raw test case
             logger.info(f"DEBUG: Raw test case: {test_case}")
             
-            # Convert test case dict to TestCase object
-            test_case_obj = TestCase.from_dict(test_case)
+            # Get evaluation targets from the top-level configuration
+            evaluation_targets = self.test_config.get('evaluation', {}).get('evaluation_targets', [])
+            logger.info(f"DEBUG: Top-level evaluation targets: {evaluation_targets}")
+            
+            # Convert test case dict to TestCase object, passing the evaluation targets
+            test_case_with_evaluation = test_case.copy()
+            test_case_with_evaluation['evaluation_targets'] = evaluation_targets
+            test_case_obj = TestCase.from_dict(test_case_with_evaluation)
             
             # DEBUG: Print the parsed test case input
             logger.info(f"DEBUG: TestCase input: {test_case_obj.input}")
             
+            # Determine region name: use input['region'] if present, else first from top-level 'regions'
+            region_name = test_case_obj.input.get('region')
+            if not region_name:
+                regions = self.test_config.get('regions', [])
+                if not regions:
+                    raise ValueError("No region specified in test step or top-level 'regions' field.")
+                region_name = regions[0]
+                logger.info(f"No region specified in test step; using first region from top-level: {region_name}")
+            
+            logger.info(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
+            
             # Extract and analyze the code region
             region_info = self.code_region_extractor.extract_region(
                 test_file_path, 
-                test_case_obj.input['region']
+                region_name
             )
-            logger.info(f"Region info: {region_info}")
+            logger.info(f"DEBUG: Region extraction completed. Region info: {region_info}")
             
             # Add imports from test case to region info
             if 'imports' in test_case_obj.input:
@@ -162,8 +195,9 @@ class TestRunner:
             
             if input_data is not None:
                 try:
+                    logger.info(f"DEBUG: About to parse inputs...")
                     parsed_inputs = self.input_parser.parse_inputs(input_data)
-                    logger.info(f"Parsed {len(parsed_inputs)} input(s) for test case")
+                    logger.info(f"DEBUG: Input parsing completed. Parsed {len(parsed_inputs)} input(s) for test case")
                     
                     # DEBUG: Print the parsed inputs
                     for i, parsed_input in enumerate(parsed_inputs):
@@ -186,9 +220,12 @@ class TestRunner:
                 if target.get('source') == 'variable':
                     tracked_variables.add(target.get('name'))
             
+            logger.info(f"DEBUG: Evaluation targets: {evaluation_targets}")
+            logger.info(f"DEBUG: Tracked variables: {tracked_variables}")
+            
             # Execute the code region with or without tracking
             if tracked_variables:
-                logger.info(f"Executing with variable tracking for: {tracked_variables}")
+                logger.info(f"DEBUG: About to execute with variable tracking for: {tracked_variables}")
                 execution_result = self.code_region_executor.execute_region_with_tracking(
                     region_info,
                     test_case_obj.input.get('method'),
@@ -197,23 +234,29 @@ class TestRunner:
                 )
                 actual_output = execution_result['result']
                 tracked_values = execution_result['tracked_values']
+                logger.info(f"DEBUG: Execution with tracking completed")
             else:
-                logger.info("Executing without variable tracking")
+                logger.info(f"DEBUG: About to execute without variable tracking")
                 actual_output = self.code_region_executor.execute_region(
                     region_info,
                     test_case_obj.input.get('method'),
                     parsed_inputs
                 )
                 tracked_values = None
+                logger.info(f"DEBUG: Execution without tracking completed")
             
+            logger.info(f"DEBUG: About to run assertions...")
             # Run assertions
             assertion_results = self.assertion_runner.run_assertions(
                 test_case_obj.assertions, 
                 actual_output
             )
+            logger.info(f"DEBUG: Assertions completed")
             
+            logger.info(f"DEBUG: About to evaluate with LLM...")
             # Evaluate with LLM
             llm_evaluation = self.llm_evaluator.evaluate_result(test_case_obj, actual_output, tracked_values)
+            logger.info(f"DEBUG: LLM evaluation completed")
             
             # Determine overall test status
             status = self._determine_test_status(assertion_results, llm_evaluation)
@@ -237,6 +280,7 @@ class TestRunner:
             
         except Exception as e:
             logger.error(f"Error in test case {test_case.get('name', 'Unknown')}: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return {
                 'status': TestStatus.ERROR.value,
                 'error': str(e)
@@ -264,6 +308,7 @@ class TestRunner:
         Returns:
             Dict containing test results
         """
+        logger.info(f"DEBUG: Starting run_tests with file path: {test_file_path}")
         results = self._create_initial_results()
         summary = TestSummary()
         
@@ -274,15 +319,26 @@ class TestRunner:
             else:
                 resolved_path = test_file_path
                 
+            logger.info(f"DEBUG: Resolved file path: {resolved_path}")
+                
             if not resolved_path.exists():
                 raise FileNotFoundError(f"Test file not found: {resolved_path}")
             
-            logger.info(f"Running tests: {self.test_config.get('tests', [])}")
-            for test_case in self.test_config.get('tests', []):
-                logger.info(f"Running test case: {test_case.get('name', 'Unknown')}")
+            # Use 'steps' instead of 'tests' for the new format
+            test_steps = self.test_config.get('steps', [])
+            logger.info(f"DEBUG: Found {len(test_steps)} test steps to run")
+            logger.info(f"Running test steps: {test_steps}")
+            
+            for i, test_case in enumerate(test_steps):
+                logger.info(f"DEBUG: Starting test case {i+1}/{len(test_steps)}: {test_case.get('name', 'Unknown')}")
                 test_name = test_case.get('name', 'Unknown')
+                logger.info(f"Running test case: {test_name}")
+                
+                logger.info(f"DEBUG: About to call _run_test_case for: {test_name}")
                 test_result = self._run_test_case(test_case, resolved_path)
+                logger.info(f"DEBUG: _run_test_case completed for: {test_name}")
                 logger.info(f"Test result: {test_result}")
+                
                 results[test_name] = self._create_test_result(test_result)
                 
                 summary.total_regions += 1
@@ -292,7 +348,10 @@ class TestRunner:
                     summary.failed_regions += 1
                 else:
                     summary.error_regions += 1
+                
+                logger.info(f"DEBUG: Completed test case {i+1}/{len(test_steps)}: {test_name}")
             
+            logger.info(f"DEBUG: All test cases completed, creating final results")
             results['overall_status'] = {
                 'status': TestStatus.COMPLETED.value,
                 'summary': summary.to_dict()
@@ -301,12 +360,14 @@ class TestRunner:
             
         except Exception as e:
             logger.error(f"Error running tests: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             results['overall_status'] = {
                 'status': TestStatus.FAILED.value,
                 'summary': summary.to_dict()
             }
             results['_status'] = TestStatus.ERROR.value
         
+        logger.info(f"DEBUG: run_tests completed, returning results")
         return results
 
     def _create_initial_results(self) -> Dict:

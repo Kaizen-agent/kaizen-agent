@@ -335,8 +335,7 @@ The description should include the following sections in this exact order:
 1. **Summary** - A concise overview of what was accomplished, including agent information if available
 2. **Test Results Summary** - A markdown table showing test case results across all attempts
 3. **Detailed Results** - For each attempt, show detailed input/output/evaluation for each test case
-4. **Code Changes** - Summary of code modifications made
-5. **Additional Summary** - Any additional insights or notes
+4. **Code Changes** - Brief summary of key code modifications made
 
 ## Format Requirements:
 
@@ -363,7 +362,7 @@ For each test case in the attempt:
 - **Reason:** [reason for result if available]
 
 ### Code Changes Section:
-List each file that was modified with a brief description of changes made.
+Provide a concise summary of the most important code changes made. Focus on the key modifications and their purpose.
 
 Here is the data to work with:
 
@@ -384,11 +383,12 @@ Here is the data to work with:
 - Create the exact table format specified above for test results
 - For detailed results, clearly show input, expected output, actual output, and evaluation for each test case in each attempt
 - Highlight any patterns or improvements across attempts
-- Make the code changes section concise but informative
+- Keep the code changes section brief and focused on the most important modifications
 - Ensure all sections are properly formatted with markdown
 - Keep the overall description professional and informative
 - If any data is missing or null, use "N/A" or "Not available"
 - Make sure the input/output/evaluation for each test case is very clear and readable
+- Keep the total description concise to avoid GitHub character limits
 
 Generate the complete PR description now:"""
         
@@ -1114,36 +1114,44 @@ Generate the complete PR description now:"""
                 branch = repo.get_branch(current_branch)
                 logger.info(f"Branch validation successful - Branch: {branch.name}, SHA: {branch.commit.sha}")
             except GithubException as e:
-                logger.error(f"Branch {current_branch} not found on remote", extra={
-                    'error': str(e),
-                    'status_code': e.status
-                })
-                
-                # Check if we have local commits that need to be pushed
-                try:
-                    local_commits = subprocess.check_output(
-                        ["git", "log", "--oneline", f"origin/{self.github_config.base_branch}..HEAD"], 
-                        text=True
-                    ).strip()
+                if e.status == 403:
+                    # User doesn't have permission to read branch info, but can still create PRs
+                    logger.warning(f"Branch validation skipped due to insufficient permissions (403). Proceeding with PR creation.", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    # Continue with PR creation - GitHub will validate the branch exists
+                else:
+                    logger.error(f"Branch {current_branch} not found on remote", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
                     
-                    if local_commits:
-                        commit_count = len(local_commits.split('\n'))
-                        logger.info(f"Found {commit_count} local commit(s) that need to be pushed")
+                    # Check if we have local commits that need to be pushed
+                    try:
+                        local_commits = subprocess.check_output(
+                            ["git", "log", "--oneline", f"origin/{self.github_config.base_branch}..HEAD"], 
+                            text=True
+                        ).strip()
+                        
+                        if local_commits:
+                            commit_count = len(local_commits.split('\n'))
+                            logger.info(f"Found {commit_count} local commit(s) that need to be pushed")
+                            raise GitConfigError(
+                                f"Branch {current_branch} not found on remote repository. "
+                                f"You have {commit_count} local commit(s) that need to be pushed first. "
+                                f"Please run: git push origin {current_branch}"
+                            )
+                        else:
+                            raise GitConfigError(
+                                f"Branch {current_branch} not found on remote repository and no local commits found. "
+                                f"Please ensure you have committed your changes and pushed them to the remote."
+                            )
+                    except subprocess.CalledProcessError:
                         raise GitConfigError(
                             f"Branch {current_branch} not found on remote repository. "
-                            f"You have {commit_count} local commit(s) that need to be pushed first. "
-                            f"Please run: git push origin {current_branch}"
+                            f"Please push your changes first with: git push origin {current_branch}"
                         )
-                    else:
-                        raise GitConfigError(
-                            f"Branch {current_branch} not found on remote repository and no local commits found. "
-                            f"Please ensure you have committed your changes and pushed them to the remote."
-                        )
-                except subprocess.CalledProcessError:
-                    raise GitConfigError(
-                        f"Branch {current_branch} not found on remote repository. "
-                        f"Please push your changes first with: git push origin {current_branch}"
-                    )
             
             # Validate base branch exists
             logger.info(f"Validating base branch: {self.github_config.base_branch}")
@@ -1151,19 +1159,45 @@ Generate the complete PR description now:"""
                 base_branch = repo.get_branch(self.github_config.base_branch)
                 logger.info(f"Base branch validation successful - Branch: {base_branch.name}, SHA: {base_branch.commit.sha}")
             except GithubException as e:
-                logger.error(f"Base branch {self.github_config.base_branch} not found", extra={
-                    'error': str(e),
-                    'status_code': e.status
-                })
-                raise GitHubConfigError(f"Base branch {self.github_config.base_branch} not found in repository.")
+                if e.status == 403:
+                    # User doesn't have permission to read branch info, but can still create PRs
+                    logger.warning(f"Base branch validation skipped due to insufficient permissions (403). Proceeding with PR creation.", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    # Continue with PR creation - GitHub will validate the base branch exists
+                else:
+                    logger.error(f"Base branch {self.github_config.base_branch} not found", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    raise GitHubConfigError(f"Base branch {self.github_config.base_branch} not found in repository.")
             
             # Check if PR already exists (both open and closed)
             logger.info("Checking for existing PRs")
-            existing_open_prs = repo.get_pulls(state='open', head=f"{repo_owner}:{current_branch}")
-            existing_closed_prs = repo.get_pulls(state='closed', head=f"{repo_owner}:{current_branch}")
-            
-            existing_open_list = list(existing_open_prs)
-            existing_closed_list = list(existing_closed_prs)
+            try:
+                existing_open_prs = repo.get_pulls(state='open', head=f"{repo_owner}:{current_branch}")
+                existing_closed_prs = repo.get_pulls(state='closed', head=f"{repo_owner}:{current_branch}")
+                
+                existing_open_list = list(existing_open_prs)
+                existing_closed_list = list(existing_closed_prs)
+            except GithubException as e:
+                if e.status == 403:
+                    # User doesn't have permission to read PRs, but can still create them
+                    logger.warning(f"Existing PR check skipped due to insufficient permissions (403). Proceeding with PR creation.", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    existing_open_list = []
+                    existing_closed_list = []
+                else:
+                    # For other errors, log and continue (don't fail the whole process)
+                    logger.warning(f"Failed to check for existing PRs, proceeding with PR creation", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    existing_open_list = []
+                    existing_closed_list = []
             
             if existing_open_list:
                 logger.info(f"Found {len(existing_open_list)} existing open PR(s) for this branch", extra={
