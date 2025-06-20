@@ -134,6 +134,130 @@ Configuration fields:
     - `input`: Optional input for the test
     - `file`: Optional test file path
 
+### Expected Outcomes
+
+You can define expected outcomes for your tests in several ways:
+
+#### 1. Simple Expected Output
+```yaml
+name: Basic Test
+file_path: calculator.py
+steps:
+  - name: Addition Test
+    input:
+      method: add
+      input: [5, 3]
+    expected_output: 8
+    description: "Test basic addition functionality"
+```
+
+#### 2. Structured Expected Output
+```yaml
+name: API Response Test
+file_path: api_handler.py
+steps:
+  - name: User Creation Test
+    input:
+      method: create_user
+      input: {"name": "John Doe", "email": "john@example.com"}
+    expected_output:
+      status: "success"
+      user_id: "user_123"
+      message: "User created successfully"
+    description: "Test user creation API response"
+```
+
+#### 3. Evaluation Criteria
+```yaml
+name: Quality Test
+file_path: text_processor.py
+evaluation:
+  criteria:
+    - "Output should be properly formatted"
+    - "Result should be meaningful"
+    - "Status should indicate success"
+  required_fields:
+    - "result"
+    - "status"
+steps:
+  - name: Text Processing Test
+    input:
+      method: process_text
+      input: "Hello world"
+    description: "Test text processing with quality criteria"
+```
+
+#### 4. Advanced Evaluation Targets
+```yaml
+name: Advanced Test
+file_path: data_analyzer.py
+evaluation:
+  evaluation_targets:
+    - name: summary_text
+      source: variable
+      criteria: "Should include key insights from the data"
+      description: "Summary should highlight important patterns"
+      weight: 1.0
+    - name: return
+      source: return
+      criteria: "Should be a dictionary with 'status' and 'results' keys"
+      description: "Return value should have expected structure"
+      weight: 1.0
+steps:
+  - name: Data Analysis Test
+    input:
+      method: analyze_data
+      input: [1, 2, 3, 4, 5]
+    description: "Test data analysis with multiple evaluation targets"
+```
+
+#### 5. Complete Example with Expected Outcomes
+```yaml
+name: Calculator Test Suite
+file_path: calculator.py
+description: "Test suite for basic calculator operations"
+
+evaluation:
+  criteria:
+    - "All calculations should be mathematically correct"
+    - "Error handling should work for invalid inputs"
+    - "Results should be properly formatted"
+
+steps:
+  - name: Addition Test
+    input:
+      method: add
+      input: [10, 5]
+    expected_output: 15
+    description: "Test basic addition"
+    
+  - name: Division Test
+    input:
+      method: divide
+      input: [20, 4]
+    expected_output: 5.0
+    description: "Test division with valid input"
+    
+  - name: Division by Zero Test
+    input:
+      method: divide
+      input: [10, 0]
+    expected_output:
+      status: "error"
+      message: "Division by zero is not allowed"
+    description: "Test error handling for division by zero"
+    
+  - name: Complex Calculation Test
+    input:
+      method: calculate
+      input: "2 + 3 * 4"
+    expected_output:
+      result: 14
+      expression: "2 + 3 * 4"
+      steps: ["3 * 4 = 12", "2 + 12 = 14"]
+    description: "Test complex calculation with detailed output"
+```
+
 ## Multiple Inputs & Outputs
 
 Kaizen now supports advanced multiple inputs and multiple outputs evaluation, making it perfect for complex agent workflows and multi-step processes.
