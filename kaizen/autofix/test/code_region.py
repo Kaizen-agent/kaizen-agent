@@ -1065,8 +1065,28 @@ class CodeRegionExtractor:
                 logger.error(f"End marker not found: {end_marker}")
                 raise ValueError(f"End marker for region '{region_name}' not found")
             
+            # Extract imports from the entire file
+            import_lines = []
+            for line in content.split('\n'):
+                line = line.strip()
+                if line.startswith(('import ', 'from ')) and not line.startswith('#'):
+                    # Skip relative imports since dependencies are handled by the dependency manager
+                    if line.startswith('from .'):
+                        logger.info(f"Skipping relative import: {line}")
+                        continue
+                    import_lines.append(line)
+            
+            # Extract the region code
             start_idx = content.find('\n', start_idx) + 1
-            code = content[start_idx:end_idx].strip()
+            region_code = content[start_idx:end_idx].strip()
+            
+            # Combine imports with region code
+            if import_lines:
+                logger.info(f"Including {len(import_lines)} import statements in region")
+                code = '\n'.join(import_lines) + '\n\n' + region_code
+            else:
+                code = region_code
+            
             logger.info(f"Extracted code region: {len(code)} characters")
             
             return self._analyze_region(code, region_name, file_path)
@@ -1179,16 +1199,34 @@ class CodeRegionExtractor:
         logger.debug("Determining region type")
         try:
             methods = []
+            classes = []
+            
+            # First pass: collect all classes
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
-                    methods = [n.name for n in node.body if isinstance(n, ast.FunctionDef)]
-                    logger.debug(f"Found class: {node.name} with methods: {methods}")
-                    return RegionType.CLASS, node.name, methods
-                elif isinstance(node, ast.FunctionDef):
+                    class_methods = [n.name for n in node.body if isinstance(n, ast.FunctionDef)]
+                    classes.append((node.name, class_methods))
+                    logger.debug(f"Found class: {node.name} with methods: {class_methods}")
+            
+            # If we found classes, choose the best one
+            if classes:
+                # Prefer classes with methods over dataclasses/empty classes
+                # Sort by number of methods (descending) and then by name
+                classes.sort(key=lambda x: (len(x[1]), x[0]), reverse=True)
+                best_class_name, best_class_methods = classes[0]
+                
+                logger.debug(f"Selected class '{best_class_name}' with {len(best_class_methods)} methods")
+                return RegionType.CLASS, best_class_name, best_class_methods
+            
+            # Check for functions
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
                     logger.debug(f"Found function: {node.name}")
                     return RegionType.FUNCTION, node.name, []
+            
             logger.debug("No class or function found, treating as module")
             return RegionType.MODULE, "module", []
+            
         except Exception as e:
             logger.error(f"Error determining region type: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -1258,6 +1296,21 @@ class CodeRegionExecutor:
             SyntaxError: If the code contains syntax errors
             ValueError: For other execution errors
         """
+        # Add module globals to support relative imports and other module-level operations
+        if '__name__' not in namespace:
+            namespace['__name__'] = '__main__'
+        if '__file__' not in namespace:
+            namespace['__file__'] = '<exec>'
+        if '__package__' not in namespace:
+            namespace['__package__'] = None
+        if '__builtins__' not in namespace:
+            namespace['__builtins__'] = __builtins__
+        
+        # DEBUG: Log the type and value of 'datetime' in the namespace before execution
+        if 'datetime' in namespace:
+            logger.info(f"DEBUG: 'datetime' in namespace before exec: type={type(namespace['datetime'])}, value={namespace['datetime']}")
+        else:
+            logger.info("DEBUG: 'datetime' not in namespace before exec")
         try:
             exec(code, namespace)
             logger.debug("Code execution completed successfully")
@@ -1448,14 +1501,44 @@ class CodeRegionExecutor:
                     function_names = [name for name, obj in self.namespace.items() if callable(obj) and not name.startswith('_')]
                     if function_names:
                         logger.info(f"Available functions: {function_names}")
+                    
+                    # Log all available names in namespace
+                    all_names = list(self.namespace.keys())
+                    logger.info(f"All available names in namespace: {all_names}")
+                    
+                    # Check for specific imports that might be needed
+                    specific_imports = ['FEEDBACK_EVALUATION_PROMPT', 'prompts', 'utils', 'gemini_utils']
+                    for import_name in specific_imports:
+                        if import_name in self.namespace:
+                            logger.info(f"Found {import_name} in namespace: {type(self.namespace[import_name])}")
+                        else:
+                            logger.warning(f"Missing {import_name} in namespace")
                 
                 # Add standard library modules
-                for module_name in ['os', 'sys', 'pathlib', 'typing', 'logging', 'json', 'datetime', 'time', 're', 'math', 'random']:
+                for module_name in ['os', 'sys', 'pathlib', 'typing', 'logging', 'json', 'datetime', 'time', 're', 'math', 'random', 'dataclasses']:
                     try:
                         module = __import__(module_name)
                         self.namespace[module_name] = module
                     except ImportError:
                         pass
+                
+                # Add commonly used imports directly to namespace
+                try:
+                    import dataclasses
+                    self.namespace['dataclass'] = dataclasses.dataclass
+                    self.namespace['field'] = dataclasses.field
+                except ImportError:
+                    pass
+                
+                try:
+                    import typing
+                    self.namespace['List'] = typing.List
+                    self.namespace['Dict'] = typing.Dict
+                    self.namespace['Optional'] = typing.Optional
+                    self.namespace['Any'] = typing.Any
+                    self.namespace['Union'] = typing.Union
+                except ImportError:
+                    pass
                 
                 return self.namespace
             

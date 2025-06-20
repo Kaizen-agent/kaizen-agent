@@ -31,6 +31,20 @@ class EvaluationTarget:
     description: Optional[str] = None
     weight: Optional[float] = 1.0
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation.
+        
+        Returns:
+            Dictionary representation of the evaluation target
+        """
+        return {
+            'name': self.name,
+            'source': self.source.value,
+            'criteria': self.criteria,
+            'description': self.description,
+            'weight': self.weight
+        }
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'EvaluationTarget':
         """Create EvaluationTarget from dictionary.

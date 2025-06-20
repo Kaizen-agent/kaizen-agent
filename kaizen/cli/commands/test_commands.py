@@ -195,9 +195,10 @@ class TestAllCommand(BaseTestCommand):
                         'input': {
                             'file_path': str(self.config.file_path),
                             'region': region,
-                            'method': step.command if hasattr(step, 'command') else None,
+                            'method': step.command,
                             'input': step.input  # This now supports multiple inputs
                         },
+                        'expected_output': step.expected_output,
                         'evaluation': self.config.evaluation.__dict__ if self.config.evaluation else None
                     }
                     for step in self.config.steps
@@ -209,6 +210,8 @@ class TestAllCommand(BaseTestCommand):
             for i, test in enumerate(config['tests']):
                 self.logger.info(f"DEBUG: Test {i}: {test['name']}")
                 self.logger.info(f"DEBUG: Test {i} input: {test['input']}")
+                self.logger.info(f"DEBUG: Test {i} method: {test['input'].get('method', 'NOT_FOUND')}")
+                self.logger.info(f"DEBUG: Test {i} expected_output: {test.get('expected_output', 'NOT_FOUND')}")
                 self.logger.info(f"DEBUG: Test {i} input type: {type(test['input'])}")
                 if 'input' in test['input']:
                     self.logger.info(f"DEBUG: Test {i} nested input: {test['input']['input']}")

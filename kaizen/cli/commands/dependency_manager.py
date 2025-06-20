@@ -326,13 +326,16 @@ class DependencyManager:
                 module_path = Path(module.__file__)
                 # Check if this is a local module (not in site-packages or similar)
                 if not any(part in str(module_path) for part in ['site-packages', 'dist-packages', 'lib/python']):
-                    # Extract all callable functions from the module
+                    # Extract all attributes from the module (not just callable functions)
                     for attr_name in dir(module):
                         attr = getattr(module, attr_name)
-                        # Only add callable functions that don't start with underscore
-                        if callable(attr) and not attr_name.startswith('_'):
+                        # Add all attributes that don't start with underscore (including constants)
+                        if not attr_name.startswith('_'):
                             namespace[attr_name] = attr
-                            logger.debug(f"Added function {attr_name} from module {module_name}")
+                            if callable(attr):
+                                logger.debug(f"Added function {attr_name} from module {module_name}")
+                            else:
+                                logger.debug(f"Added constant/variable {attr_name} from module {module_name}")
         
         # Add common aliases for better compatibility
         if 'pathlib' in namespace:

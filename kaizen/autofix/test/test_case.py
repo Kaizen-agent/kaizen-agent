@@ -106,8 +106,13 @@ class PromptBuilder:
         if tracked_values and evaluation_targets:
             prompt_parts.append("\nTracked Output Values:")
             for target in evaluation_targets:
-                target_name = target.get('name', 'unknown')
-                source = target.get('source', 'return')
+                # Handle both EvaluationTarget objects and dictionaries
+                if hasattr(target, 'name'):  # EvaluationTarget object
+                    target_name = target.name
+                    source = target.source.value  # Get the enum value
+                else:  # Dictionary format (legacy)
+                    target_name = target.get('name', 'unknown')
+                    source = target.get('source', 'return')
                 
                 if source == 'return' and 'return' in tracked_values:
                     value = tracked_values['return']
@@ -129,9 +134,15 @@ class PromptBuilder:
         if evaluation_targets:
             prompt_parts.append("\nEvaluation Targets:")
             for i, target in enumerate(evaluation_targets, 1):
-                target_name = target.get('name', 'unknown')
-                criteria_text = target.get('criteria', 'No criteria specified')
-                description = target.get('description', '')
+                # Handle both EvaluationTarget objects and dictionaries
+                if hasattr(target, 'name'):  # EvaluationTarget object
+                    target_name = target.name
+                    criteria_text = target.criteria
+                    description = target.description or ''
+                else:  # Dictionary format (legacy)
+                    target_name = target.get('name', 'unknown')
+                    criteria_text = target.get('criteria', 'No criteria specified')
+                    description = target.get('description', '')
                 
                 prompt_parts.append(f"  {i}. {target_name}:")
                 if description:

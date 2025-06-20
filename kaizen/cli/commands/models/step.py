@@ -58,20 +58,25 @@ class TestStep:
         if isinstance(input_data, dict) and 'method' in input_data and 'input' in input_data:
             command = input_data.get('method', '')
             input_value = input_data.get('input', '')
+            # Extract expected_output from nested input structure
+            expected_output = input_data.get('expected_output')
             logger.info(f"DEBUG: TestStep.from_dict using old format - command: {command}, input_value: {input_value}")
+            logger.info(f"DEBUG: TestStep.from_dict expected_output from input: {expected_output}")
         else:
             # New format: input can be directly specified
             command = data.get('command', '')
             input_value = input_data
+            expected_output = data.get('expected_output')
             logger.info(f"DEBUG: TestStep.from_dict using new format - command: {command}, input_value: {input_value}")
         
         logger.info(f"DEBUG: TestStep.from_dict final input_value type: {type(input_value)}")
+        logger.info(f"DEBUG: TestStep.from_dict expected_output: {expected_output}")
         
         return cls(
             name=data.get('name', ''),
             command=command,
             input=input_value,
-            expected_output=data.get('expected_output'),
+            expected_output=expected_output,
             description=data.get('description'),
             timeout=data.get('timeout'),
             retries=data.get('retries'),
