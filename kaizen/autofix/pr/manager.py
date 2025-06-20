@@ -335,8 +335,7 @@ The description should include the following sections in this exact order:
 1. **Summary** - A concise overview of what was accomplished, including agent information if available
 2. **Test Results Summary** - A markdown table showing test case results across all attempts
 3. **Detailed Results** - For each attempt, show detailed input/output/evaluation for each test case
-4. **Code Changes** - Summary of code modifications made
-5. **Additional Summary** - Any additional insights or notes
+4. **Code Changes** - Brief summary of key code modifications made
 
 ## Format Requirements:
 
@@ -363,7 +362,7 @@ For each test case in the attempt:
 - **Reason:** [reason for result if available]
 
 ### Code Changes Section:
-List each file that was modified with a brief description of changes made.
+Provide a concise summary of the most important code changes made. Focus on the key modifications and their purpose.
 
 Here is the data to work with:
 
@@ -384,11 +383,12 @@ Here is the data to work with:
 - Create the exact table format specified above for test results
 - For detailed results, clearly show input, expected output, actual output, and evaluation for each test case in each attempt
 - Highlight any patterns or improvements across attempts
-- Make the code changes section concise but informative
+- Keep the code changes section brief and focused on the most important modifications
 - Ensure all sections are properly formatted with markdown
 - Keep the overall description professional and informative
 - If any data is missing or null, use "N/A" or "Not available"
 - Make sure the input/output/evaluation for each test case is very clear and readable
+- Keep the total description concise to avoid GitHub character limits
 
 Generate the complete PR description now:"""
         
@@ -1114,36 +1114,44 @@ Generate the complete PR description now:"""
                 branch = repo.get_branch(current_branch)
                 logger.info(f"Branch validation successful - Branch: {branch.name}, SHA: {branch.commit.sha}")
             except GithubException as e:
-                logger.error(f"Branch {current_branch} not found on remote", extra={
-                    'error': str(e),
-                    'status_code': e.status
-                })
-                
-                # Check if we have local commits that need to be pushed
-                try:
-                    local_commits = subprocess.check_output(
-                        ["git", "log", "--oneline", f"origin/{self.github_config.base_branch}..HEAD"], 
-                        text=True
-                    ).strip()
+                if e.status == 403:
+                    # User doesn't have permission to read branch info, but can still create PRs
+                    logger.warning(f"Branch validation skipped due to insufficient permissions (403). Proceeding with PR creation.", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    # Continue with PR creation - GitHub will validate the branch exists
+                else:
+                    logger.error(f"Branch {current_branch} not found on remote", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
                     
-                    if local_commits:
-                        commit_count = len(local_commits.split('\n'))
-                        logger.info(f"Found {commit_count} local commit(s) that need to be pushed")
+                    # Check if we have local commits that need to be pushed
+                    try:
+                        local_commits = subprocess.check_output(
+                            ["git", "log", "--oneline", f"origin/{self.github_config.base_branch}..HEAD"], 
+                            text=True
+                        ).strip()
+                        
+                        if local_commits:
+                            commit_count = len(local_commits.split('\n'))
+                            logger.info(f"Found {commit_count} local commit(s) that need to be pushed")
+                            raise GitConfigError(
+                                f"Branch {current_branch} not found on remote repository. "
+                                f"You have {commit_count} local commit(s) that need to be pushed first. "
+                                f"Please run: git push origin {current_branch}"
+                            )
+                        else:
+                            raise GitConfigError(
+                                f"Branch {current_branch} not found on remote repository and no local commits found. "
+                                f"Please ensure you have committed your changes and pushed them to the remote."
+                            )
+                    except subprocess.CalledProcessError:
                         raise GitConfigError(
                             f"Branch {current_branch} not found on remote repository. "
-                            f"You have {commit_count} local commit(s) that need to be pushed first. "
-                            f"Please run: git push origin {current_branch}"
+                            f"Please push your changes first with: git push origin {current_branch}"
                         )
-                    else:
-                        raise GitConfigError(
-                            f"Branch {current_branch} not found on remote repository and no local commits found. "
-                            f"Please ensure you have committed your changes and pushed them to the remote."
-                        )
-                except subprocess.CalledProcessError:
-                    raise GitConfigError(
-                        f"Branch {current_branch} not found on remote repository. "
-                        f"Please push your changes first with: git push origin {current_branch}"
-                    )
             
             # Validate base branch exists
             logger.info(f"Validating base branch: {self.github_config.base_branch}")
@@ -1151,19 +1159,45 @@ Generate the complete PR description now:"""
                 base_branch = repo.get_branch(self.github_config.base_branch)
                 logger.info(f"Base branch validation successful - Branch: {base_branch.name}, SHA: {base_branch.commit.sha}")
             except GithubException as e:
-                logger.error(f"Base branch {self.github_config.base_branch} not found", extra={
-                    'error': str(e),
-                    'status_code': e.status
-                })
-                raise GitHubConfigError(f"Base branch {self.github_config.base_branch} not found in repository.")
+                if e.status == 403:
+                    # User doesn't have permission to read branch info, but can still create PRs
+                    logger.warning(f"Base branch validation skipped due to insufficient permissions (403). Proceeding with PR creation.", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    # Continue with PR creation - GitHub will validate the base branch exists
+                else:
+                    logger.error(f"Base branch {self.github_config.base_branch} not found", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    raise GitHubConfigError(f"Base branch {self.github_config.base_branch} not found in repository.")
             
             # Check if PR already exists (both open and closed)
             logger.info("Checking for existing PRs")
-            existing_open_prs = repo.get_pulls(state='open', head=f"{repo_owner}:{current_branch}")
-            existing_closed_prs = repo.get_pulls(state='closed', head=f"{repo_owner}:{current_branch}")
-            
-            existing_open_list = list(existing_open_prs)
-            existing_closed_list = list(existing_closed_prs)
+            try:
+                existing_open_prs = repo.get_pulls(state='open', head=f"{repo_owner}:{current_branch}")
+                existing_closed_prs = repo.get_pulls(state='closed', head=f"{repo_owner}:{current_branch}")
+                
+                existing_open_list = list(existing_open_prs)
+                existing_closed_list = list(existing_closed_prs)
+            except GithubException as e:
+                if e.status == 403:
+                    # User doesn't have permission to read PRs, but can still create them
+                    logger.warning(f"Existing PR check skipped due to insufficient permissions (403). Proceeding with PR creation.", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    existing_open_list = []
+                    existing_closed_list = []
+                else:
+                    # For other errors, log and continue (don't fail the whole process)
+                    logger.warning(f"Failed to check for existing PRs, proceeding with PR creation", extra={
+                        'error': str(e),
+                        'status_code': e.status
+                    })
+                    existing_open_list = []
+                    existing_closed_list = []
             
             if existing_open_list:
                 logger.info(f"Found {len(existing_open_list)} existing open PR(s) for this branch", extra={
@@ -1295,7 +1329,40 @@ Generate the complete PR description now:"""
                 logger.error(f"Full 422 error data: {e.data}")
                 logger.error(f"Full 422 error message: {e}")
                 
-                raise GitHubConfigError(f"{error_message}. This usually means a PR already exists for this branch or there are validation issues.")
+                # Check for specific private repository issues
+                if "not all refs are readable" in str(e.data):
+                    # Check if this is due to branch access limitations
+                    if "Resource not accessible by personal access token" in str(e.data) or "403" in str(e.data):
+                        error_guidance = (
+                            "Branch access limitation detected. Your token has correct permissions "
+                            "but cannot list branches due to organization restrictions.\n\n"
+                            "This is a common limitation with personal access tokens on private repositories.\n\n"
+                            "Solutions:\n"
+                            "1. Try creating the PR manually in GitHub web interface\n"
+                            "2. Ensure your branch exists and is pushed to remote\n"
+                            "3. Check if you need to enable SSO for your token\n"
+                            "4. Contact organization administrators if the issue persists\n\n"
+                            "Your token has the correct 'repo' scope and should be able to create PRs."
+                        )
+                    else:
+                        # Provide more detailed guidance for this specific error
+                        error_guidance = (
+                            "Private repository access issue detected. "
+                            "This usually means:\n"
+                            "1. Your GitHub token doesn't have 'repo' scope for private repositories\n"
+                            "2. You don't have access to this private repository\n"
+                            "3. The repository requires explicit permission grants\n"
+                            "4. Organization-level restrictions are preventing access\n"
+                            "5. Repository settings require specific branch protection rules\n\n"
+                            "Additional troubleshooting steps:\n"
+                            "- Check if you're a member of the organization that owns the repository\n"
+                            "- Verify your organization role has sufficient permissions\n"
+                            "- Check repository settings for branch protection rules\n"
+                            "- Ensure the repository allows PR creation from your account\n"
+                            "- Try creating a PR manually in the GitHub web interface\n\n"
+                            "Please ensure your GITHUB_TOKEN has 'repo' scope and you have access to the repository."
+                        )
+                    raise GitHubConfigError(error_guidance)
             elif e.status == 404:
                 logger.error("404 error - repository or branch not found")
                 raise GitHubConfigError(f"Repository or branch not found: {str(e)}")
@@ -1541,4 +1608,307 @@ Generate the complete PR description now:"""
             logger.warning("Failed to generate commit message, using fallback", extra={
                 'error': str(e)
             })
-            return f"Auto-commit: Update {len(modified_files)} files" 
+            return f"Auto-commit: Update {len(modified_files)} files"
+    
+    def test_github_access(self) -> Dict[str, Any]:
+        """
+        Test GitHub token permissions and repository access.
+        
+        Returns:
+            Dict containing access test results
+        """
+        try:
+            logger.info("Testing GitHub access and permissions")
+            
+            # Get repository information
+            repo_owner, repo_name = self._get_repository_info()
+            repo_full_name = f"{repo_owner}/{repo_name}"
+            
+            # Test basic repository access
+            try:
+                repo = self.github.get_repo(repo_full_name)
+                repo_access = {
+                    'accessible': True,
+                    'name': repo.name,
+                    'full_name': repo.full_name,
+                    'private': repo.private,
+                    'permissions': getattr(repo, 'permissions', {})
+                }
+                logger.info(f"Repository access successful: {repo_full_name} (private: {repo.private})")
+            except GithubException as e:
+                repo_access = {
+                    'accessible': False,
+                    'error': str(e),
+                    'status_code': e.status
+                }
+                logger.error(f"Repository access failed: {str(e)}")
+            
+            # Test organization access (if repository belongs to an organization)
+            org_access = None
+            if repo_access.get('accessible') and '/' in repo_full_name:
+                try:
+                    # Check if owner is an organization
+                    org = self.github.get_organization(repo_owner)
+                    org_access = {
+                        'is_organization': True,
+                        'org_name': org.name,
+                        'org_login': org.login
+                    }
+                    logger.info(f"Organization access confirmed: {org.login}")
+                    
+                    # Test organization membership
+                    try:
+                        user = self.github.get_user()
+                        membership = org.get_membership(user.login)
+                        org_access.update({
+                            'is_member': True,
+                            'role': membership.role,
+                            'state': membership.state
+                        })
+                        logger.info(f"Organization membership confirmed: {membership.role} ({membership.state})")
+                    except GithubException as e:
+                        org_access.update({
+                            'is_member': False,
+                            'membership_error': str(e),
+                            'membership_status_code': e.status
+                        })
+                        logger.warning(f"Organization membership check failed: {str(e)}")
+                        
+                except GithubException as e:
+                    if e.status == 404:
+                        # Owner is not an organization (likely a user)
+                        org_access = {
+                            'is_organization': False,
+                            'owner_type': 'user'
+                        }
+                        logger.info(f"Repository owner is a user, not an organization")
+                    else:
+                        org_access = {
+                            'is_organization': True,
+                            'org_access_error': str(e),
+                            'org_status_code': e.status
+                        }
+                        logger.warning(f"Organization access check failed: {str(e)}")
+            
+            # Test branch access
+            try:
+                current_branch = self._get_current_branch()
+                branch = repo.get_branch(current_branch)
+                branch_access = {
+                    'accessible': True,
+                    'branch_name': branch.name,
+                    'sha': branch.commit.sha
+                }
+                logger.info(f"Branch access successful: {current_branch}")
+            except GithubException as e:
+                if e.status == 403 and "Resource not accessible by personal access token" in str(e):
+                    # This is a common limitation with personal access tokens on private repositories
+                    branch_access = {
+                        'accessible': False,
+                        'error': str(e),
+                        'status_code': e.status,
+                        'limitation_type': 'branch_listing_restricted',
+                        'note': 'Common limitation with personal access tokens on private repositories'
+                    }
+                    logger.warning(f"Branch access limited (expected for personal access tokens): {str(e)}")
+                else:
+                    branch_access = {
+                        'accessible': False,
+                        'error': str(e),
+                        'status_code': e.status
+                    }
+                    logger.warning(f"Branch access failed: {str(e)}")
+            
+            # Test base branch access
+            try:
+                base_branch = repo.get_branch(self.github_config.base_branch)
+                base_branch_access = {
+                    'accessible': True,
+                    'branch_name': base_branch.name,
+                    'sha': base_branch.commit.sha
+                }
+                logger.info(f"Base branch access successful: {self.github_config.base_branch}")
+            except GithubException as e:
+                if e.status == 403 and "Resource not accessible by personal access token" in str(e):
+                    # This is a common limitation with personal access tokens on private repositories
+                    base_branch_access = {
+                        'accessible': False,
+                        'error': str(e),
+                        'status_code': e.status,
+                        'limitation_type': 'branch_listing_restricted',
+                        'note': 'Common limitation with personal access tokens on private repositories'
+                    }
+                    logger.warning(f"Base branch access limited (expected for personal access tokens): {str(e)}")
+                else:
+                    base_branch_access = {
+                        'accessible': False,
+                        'error': str(e),
+                        'status_code': e.status
+                    }
+                    logger.warning(f"Base branch access failed: {str(e)}")
+            
+            # Test PR creation permissions
+            try:
+                # Try to list PRs (this tests read permissions)
+                prs = repo.get_pulls(state='open')
+                # Just get the first PR to test access (don't use per_page parameter)
+                first_pr = next(iter(prs), None)
+                pr_permissions = {
+                    'can_read': True,
+                    'can_write': True  # Assume write if we can read (will be tested during actual PR creation)
+                }
+                logger.info("PR permissions test successful")
+            except GithubException as e:
+                pr_permissions = {
+                    'can_read': False,
+                    'can_write': False,
+                    'error': str(e),
+                    'status_code': e.status
+                }
+                logger.warning(f"PR permissions test failed: {str(e)}")
+            
+            # Test collaborator status
+            collaborator_status = None
+            if repo_access.get('accessible'):
+                try:
+                    user = self.github.get_user()
+                    collaborator = repo.get_collaborator(user.login)
+                    collaborator_status = {
+                        'is_collaborator': True,
+                        'permission': collaborator.permissions
+                    }
+                    logger.info(f"Collaborator status confirmed: {collaborator.permissions}")
+                except GithubException as e:
+                    if e.status == 404:
+                        collaborator_status = {
+                            'is_collaborator': False,
+                            'reason': 'Not a collaborator'
+                        }
+                        logger.info("Not a collaborator on this repository")
+                    else:
+                        collaborator_status = {
+                            'is_collaborator': False,
+                            'error': str(e),
+                            'status_code': e.status
+                        }
+                        logger.warning(f"Collaborator status check failed: {str(e)}")
+            
+            # Determine overall access status
+            overall_status = 'full_access'
+            if not repo_access.get('accessible'):
+                overall_status = 'no_repo_access'
+            elif not pr_permissions.get('can_read'):
+                overall_status = 'no_pr_access'
+            elif not branch_access.get('accessible') or not base_branch_access.get('accessible'):
+                # Check if this is the specific branch listing limitation
+                if (branch_access.get('limitation_type') == 'branch_listing_restricted' or 
+                    base_branch_access.get('limitation_type') == 'branch_listing_restricted'):
+                    overall_status = 'branch_listing_limited'
+                # For private repositories, 403 on branch access is often normal
+                # and doesn't prevent PR creation
+                elif repo_access.get('private', False):
+                    overall_status = 'limited_branch_access_private'
+                else:
+                    overall_status = 'limited_branch_access'
+            
+            # Check for organization-specific issues
+            if org_access and org_access.get('is_organization'):
+                if not org_access.get('is_member', False):
+                    overall_status = 'org_membership_required'
+                elif org_access.get('role') == 'outside_collaborator':
+                    overall_status = 'org_limited_access'
+            
+            result = {
+                'overall_status': overall_status,
+                'repository': repo_access,
+                'organization': org_access,
+                'current_branch': branch_access,
+                'base_branch': base_branch_access,
+                'pr_permissions': pr_permissions,
+                'collaborator_status': collaborator_status,
+                'recommendations': self._get_access_recommendations(overall_status, repo_access, org_access)
+            }
+            
+            logger.info(f"GitHub access test completed with status: {overall_status}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"GitHub access test failed: {str(e)}")
+            return {
+                'overall_status': 'test_failed',
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+    
+    def _get_access_recommendations(self, status: str, repo_access: Dict, org_access: Dict) -> List[str]:
+        """Get recommendations based on access status."""
+        recommendations = []
+        
+        if status == 'no_repo_access':
+            recommendations.extend([
+                "Ensure your GITHUB_TOKEN has the 'repo' scope (not just 'public_repo')",
+                "Verify you have access to the private repository",
+                "Check if the repository requires explicit permission grants"
+            ])
+        elif status == 'limited_branch_access':
+            recommendations.extend([
+                "Your token can access the repository but not all branches",
+                "Ensure you have 'Contents' read permission on the repository",
+                "Check if the branches exist and you have access to them"
+            ])
+        elif status == 'limited_branch_access_private':
+            recommendations.extend([
+                "Your token can access the repository but branch-level access is limited",
+                "This is often normal for private repositories and may not prevent PR creation",
+                "The system will attempt to create PRs and validate access during the process",
+                "If PR creation fails, you may need additional repository permissions"
+            ])
+        elif status == 'branch_listing_limited':
+            recommendations.extend([
+                "Your token has correct permissions but cannot list branches",
+                "This is a common limitation with personal access tokens on private repositories",
+                "PR creation should still work despite this limitation",
+                "The system will attempt to create PRs without branch validation",
+                "If PR creation fails, try creating the PR manually in GitHub web interface"
+            ])
+        elif status == 'no_pr_access':
+            recommendations.extend([
+                "Your token cannot create pull requests",
+                "Ensure you have 'Pull requests' write permission",
+                "Check if the repository allows PR creation from your account"
+            ])
+        elif status == 'org_membership_required':
+            recommendations.extend([
+                "You are not a member of the organization that owns the repository",
+                "Request organization membership from the organization administrators",
+                "Alternatively, ask to be added as a collaborator to the specific repository",
+                "Check if the organization requires SSO authentication for your token"
+            ])
+        elif status == 'org_limited_access':
+            recommendations.extend([
+                "You are an outside collaborator on the organization repository",
+                "Outside collaborators have limited access and may not be able to create PRs",
+                "Request full organization membership or repository collaborator access",
+                "Check organization settings for restrictions on outside collaborators"
+            ])
+        elif status == 'full_access':
+            recommendations.append("All permissions appear to be correct")
+        
+        if repo_access.get('private', False):
+            recommendations.append("Note: This is a private repository - ensure your token has 'repo' scope")
+        
+        if org_access and org_access.get('is_organization'):
+            if not org_access.get('is_member', False):
+                recommendations.extend([
+                    "Organization membership required for this repository",
+                    "Contact organization administrators to request access",
+                    "Check if your token needs SSO authorization for the organization"
+                ])
+            elif org_access.get('role') == 'outside_collaborator':
+                recommendations.extend([
+                    "You are an outside collaborator with limited permissions",
+                    "Consider requesting full organization membership",
+                    "Check if your role allows PR creation on this repository"
+                ])
+        
+        return recommendations 

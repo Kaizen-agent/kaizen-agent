@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Protocol, runtime_checkable
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from ...autofix.test.runner import TestRunner
 from ...utils.test_utils import collect_failed_tests
@@ -18,6 +19,7 @@ from .errors import TestExecutionError, AutoFixError, DependencyError
 from .types import TestStatus, PRStrategy
 from ...autofix.main import AutoFix, FixStatus
 from .dependency_manager import DependencyManager, ImportResult
+from kaizen.cli.utils.env_setup import check_environment_setup, get_missing_variables
 
 @runtime_checkable
 class TestCommand(Protocol):
@@ -76,6 +78,9 @@ class TestAllCommand(BaseTestCommand):
             if self.config.description:
                 self.logger.info(f"Description: {self.config.description}")
             
+            # Validate environment before proceeding
+            self._validate_environment()
+            
             # Import dependencies and referenced files first
             import_result = self._import_dependencies()
             if not import_result.is_success:
@@ -103,21 +108,25 @@ class TestAllCommand(BaseTestCommand):
                 self.logger.info(f"Found {len(failed_tests)} failed tests")
                 test_attempts = self._handle_auto_fix(failed_tests, self.config, runner_config)
             
-            # result = TestResult(
-            #     name=self.config.name,
-            #     file_path=self.config.file_path,
-            #     config_path=self.config.config_path,
-            #     results=results,
-            #     failed_tests=failed_tests,
-            #     test_attempts=test_attempts
-            # )
+            # Create TestResult object
+            now = datetime.now()
             
-            # validation_result = result.validate()
-            # if not validation_result.is_success:
-            #     return Result.failure(validation_result.error)
+            # Determine overall status
+            overall_status = 'passed' if not failed_tests else 'failed'
             
-            # return 
-            return "test"
+            result = TestResult(
+                name=self.config.name,
+                file_path=self.config.file_path,
+                config_path=self.config.config_path,
+                start_time=now,
+                end_time=now,
+                status=overall_status,
+                results=results,
+                error=None if not failed_tests else f"{len(failed_tests)} tests failed",
+                steps=[]  # TODO: Add step results if available
+            )
+            
+            return Result.success(result)
             
         except Exception as e:
             self.logger.error(f"Error executing tests: {str(e)}")
@@ -125,6 +134,26 @@ class TestAllCommand(BaseTestCommand):
         finally:
             # Clean up dependency manager
             self.dependency_manager.cleanup()
+    
+    def _validate_environment(self) -> None:
+        """Validate environment setup before proceeding.
+        
+        Raises:
+            TestExecutionError: If environment is not properly configured
+        """
+        # Determine required features based on configuration
+        required_features = ['core']  # Core is always required
+        
+        if self.config.create_pr:
+            required_features.append('github')
+        
+        # Check environment setup
+        if not check_environment_setup(required_features=required_features):
+            missing_vars = get_missing_variables(required_features)
+            error_msg = f"Environment is not properly configured. Missing variables: {', '.join(missing_vars)}"
+            error_msg += "\n\nRun 'kaizen setup check-env' to see detailed status and setup instructions."
+            error_msg += "\nRun 'kaizen setup create-env-example' to create a .env.example file."
+            raise TestExecutionError(error_msg)
     
     def _import_dependencies(self) -> Result[ImportResult]:
         """Import dependencies and referenced files.
@@ -185,10 +214,10 @@ class TestAllCommand(BaseTestCommand):
         if self.config.regions:
             config['regions'] = self.config.regions
             
-            # Create tests for each region
-            config_tests_temp = []
+            # Create steps for each region
+            config_steps_temp = []
             for region in self.config.regions:
-                config_tests_temp.append([
+                config_steps_temp.append([
                     {
                         'name': step.name,
                         'description': step.description,
@@ -203,11 +232,11 @@ class TestAllCommand(BaseTestCommand):
                     }
                     for step in self.config.steps
                 ])
-            config['tests'] = [item for sublist in config_tests_temp for item in sublist]
+            config['steps'] = [item for sublist in config_steps_temp for item in sublist]
             
             # DEBUG: Print the test configuration being created
-            self.logger.info(f"DEBUG: Created {len(config['tests'])} test(s) for runner")
-            for i, test in enumerate(config['tests']):
+            self.logger.info(f"DEBUG: Created {len(config['steps'])} test step(s) for runner")
+            for i, test in enumerate(config['steps']):
                 self.logger.info(f"DEBUG: Test {i}: {test['name']}")
                 self.logger.info(f"DEBUG: Test {i} input: {test['input']}")
                 self.logger.info(f"DEBUG: Test {i} method: {test['input'].get('method', 'NOT_FOUND')}")

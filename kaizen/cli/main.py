@@ -13,6 +13,8 @@ from enum import Enum
 from kaizen.autofix.test.runner import TestRunner
 from kaizen.autofix.pr.manager import PRManager
 from kaizen.autofix.main import AutoFix
+from .utils.env_setup import check_environment_setup, display_environment_status
+from .commands.setup import setup
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +30,7 @@ class ExitCode(Enum):
     TEST_ERROR = 2
     FIX_ERROR = 3
     PR_ERROR = 4
+    ENV_ERROR = 5
     UNKNOWN_ERROR = 255
 
 @dataclass
@@ -63,9 +66,10 @@ def load_config(config_path: Path) -> Dict:
         for field in required_fields:
             if field not in config:
                 raise click.ClickException(f"Missing required field '{field}' in config")
-                
-        if 'tests' not in config:
-            raise click.ClickException("Config must contain 'tests' section")
+        
+        # Support both old 'tests' format and new 'steps' format
+        if 'tests' not in config and 'steps' not in config:
+            raise click.ClickException("Config must contain either 'tests' or 'steps' section")
             
         return config
         
@@ -93,6 +97,30 @@ def setup_logging(debug: bool) -> None:
         file_handler.setFormatter(formatter)
         logging.getLogger().addHandler(file_handler)
 
+def validate_environment(auto_fix: bool, create_pr: bool) -> None:
+    """
+    Validate environment setup before running commands.
+    
+    Args:
+        auto_fix: Whether auto-fix is enabled
+        create_pr: Whether PR creation is enabled
+        
+    Raises:
+        click.ClickException: If environment is not properly configured
+    """
+    # Determine required features based on command options
+    required_features = ['core']  # Core is always required
+    
+    if create_pr:
+        required_features.append('github')
+    
+    # Check environment setup
+    if not check_environment_setup(required_features=required_features):
+        click.echo("❌ Environment is not properly configured.")
+        click.echo("\nRun 'kaizen setup check-env' to see detailed status and setup instructions.")
+        click.echo("Run 'kaizen setup create-env-example' to create a .env.example file.")
+        raise click.ClickException("Environment validation failed")
+
 @click.group()
 @click.option('--debug', is_flag=True, help='Enable debug logging')
 @click.option('--config', type=click.Path(exists=True), help='Path to config file')
@@ -118,9 +146,10 @@ def cli(ctx: click.Context, debug: bool, config: Optional[str]) -> None:
 @click.option('--create-pr', is_flag=True, help='Create pull request with fixes')
 @click.option('--max-retries', type=int, default=1, help='Maximum number of fix attempts')
 @click.option('--base-branch', type=str, default='main', help='Base branch for pull request')
+@click.option('--skip-env-check', is_flag=True, help='Skip environment validation')
 @click.pass_context
 def test_all(ctx: click.Context, config: str, auto_fix: bool, create_pr: bool, 
-             max_retries: int, base_branch: str) -> None:
+             max_retries: int, base_branch: str, skip_env_check: bool) -> None:
     """Run all tests in the configuration."""
     try:
         # Update context
@@ -130,8 +159,15 @@ def test_all(ctx: click.Context, config: str, auto_fix: bool, create_pr: bool,
         ctx.obj.max_retries = max_retries
         ctx.obj.base_branch = base_branch
         
+        # Validate environment unless skipped
+        if not skip_env_check:
+            validate_environment(auto_fix, create_pr)
+        
         # Load config
         ctx.obj.config = load_config(ctx.obj.config_path)
+        
+        # Add config file path to config for proper file resolution
+        ctx.obj.config['config_file'] = str(ctx.obj.config_path)
         
         # Run tests
         test_file_path = Path(ctx.obj.config['file_path'])
@@ -166,46 +202,41 @@ def test_all(ctx: click.Context, config: str, auto_fix: bool, create_pr: bool,
         sys.exit(ExitCode.UNKNOWN_ERROR.value)
 
 @cli.command()
-@click.argument('test_files', nargs=-1, type=click.Path(exists=True))
-@click.option('--project', type=click.Path(exists=True), required=True, help='Project root directory')
-@click.option('--make-pr', is_flag=True, help='Create pull request with fixes')
-@click.option('--max-retries', type=int, default=1, help='Maximum number of fix attempts')
-@click.option('--base-branch', type=str, default='main', help='Base branch for pull request')
-@click.pass_context
-def fix_tests(ctx: click.Context, test_files: tuple, project: str, make_pr: bool,
-              max_retries: int, base_branch: str) -> None:
-    """Fix specific test files."""
+@click.option('--config', type=click.Path(exists=True), help='Path to test config file (optional)')
+@click.option('--repo', help='Repository name (owner/repo)')
+@click.option('--base-branch', type=str, default='main', help='Base branch for testing')
+def test_github_access(ctx: click.Context, config: Optional[str], repo: Optional[str], base_branch: str) -> None:
+    """Test GitHub access and permissions for private repositories."""
     try:
-        # Update context
-        ctx.obj.config = {
-            'name': 'Fix Tests',
-            'file_path': project,
-            'tests': [{'name': Path(f).stem, 'input': {'file': f}} for f in test_files]
-        }
-        ctx.obj.auto_fix = True
-        ctx.obj.create_pr = make_pr
-        ctx.obj.max_retries = max_retries
-        ctx.obj.base_branch = base_branch
+        from .commands.test_github_access import test_github_access as test_access
         
-        # Run fixer
-        fixer = AutoFix(ctx.obj.config)
-        results = fixer.fix_issues({}, max_retries)
-        
-        if make_pr and results.get('fixed'):
-            pr_creator = PRManager(ctx.obj.config)
-            pr_url = pr_creator.create_pr(base_branch)
-            click.echo(f"Created pull request: {pr_url}")
-            
-        if not results.get('fixed'):
-            sys.exit(ExitCode.FIX_ERROR.value)
-            
-        click.echo("All tests fixed!")
-        sys.exit(ExitCode.SUCCESS.value)
+        # Call the test function with the provided arguments
+        test_access.callback(config=config, repo=repo, base_branch=base_branch)
         
     except Exception as e:
-        logger.exception("Unexpected error")
-        click.echo(f"Unexpected error: {str(e)}", err=True)
-        sys.exit(ExitCode.UNKNOWN_ERROR.value)
+        logger.exception("GitHub access test failed")
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(ExitCode.PR_ERROR.value)
+
+@cli.command()
+@click.option('--config', type=click.Path(exists=True), help='Test configuration file (optional)')
+@click.option('--repo', help='Repository name (owner/repo)')
+@click.option('--token', help='GitHub token to test (optional, uses GITHUB_TOKEN env var if not provided)')
+def diagnose_github_access(ctx: click.Context, config: Optional[str], repo: Optional[str], token: Optional[str]) -> None:
+    """Comprehensive GitHub access diagnostic for troubleshooting organization and repository issues."""
+    try:
+        from .commands.diagnose_github_access import diagnose_github_access as diagnose_access
+        
+        # Call the diagnostic function with the provided arguments
+        diagnose_access.callback(config=config, repo=repo, token=token)
+        
+    except Exception as e:
+        logger.exception("GitHub diagnostic failed")
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(ExitCode.PR_ERROR.value)
+
+# Add setup commands
+cli.add_command(setup)
 
 def main() -> None:
     """Main entry point."""
