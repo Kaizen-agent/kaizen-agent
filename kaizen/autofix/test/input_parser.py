@@ -20,6 +20,7 @@ class InputDefinition:
     Attributes:
         name: Optional name for the input (for internal use)
         type: Type of input ('string', 'dict', 'object', 'class_object', 'inline_object')
+              Note: 'str' is supported as an alias for 'string' for backward compatibility
         value: Direct value for string/dict types
         class_path: Python import path for object types
         args: Arguments for object instantiation
@@ -41,11 +42,23 @@ class InputParsingError(Exception):
     pass
 
 class InputParser:
-    """Parser for multiple input definitions from YAML configuration."""
+    """Parser for multiple input definitions from YAML configuration.
+    
+    Supports the following input types:
+    - 'string' (or 'str' as alias): String values
+    - 'dict': Dictionary values  
+    - 'object': Objects instantiated from class paths
+    - 'class_object': Objects loaded from pickle files or imported from modules
+    - 'inline_object': Objects with attributes specified directly in YAML
+    
+    Provides backward compatibility for type aliases (e.g., 'str' -> 'string').
+    """
     
     def __init__(self):
         """Initialize the input parser."""
         self.supported_types = {'string', 'dict', 'object', 'class_object', 'inline_object'}
+        # Add backward compatibility for 'str' type
+        self.type_aliases = {'str': 'string'}
     
     def parse_inputs(self, input_config: Union[List[Dict[str, Any]], Dict[str, Any], Any]) -> List[Any]:
         """Parse input configuration into a list of input objects.
@@ -70,6 +83,13 @@ class InputParser:
             
             # If it's a dict with a 'type' key, treat as input definition (even if type is invalid)
             if isinstance(input_config, dict) and 'type' in input_config:
+                # Handle type aliases for backward compatibility
+                input_type = input_config['type']
+                if input_type in self.type_aliases:
+                    logger.debug(f"Converting type alias '{input_type}' to '{self.type_aliases[input_type]}'")
+                    input_config = input_config.copy()
+                    input_config['type'] = self.type_aliases[input_type]
+                
                 if input_config['type'] not in self.supported_types:
                     raise InputParsingError(f"Unsupported input type: {input_config['type']}. Supported types: {self.supported_types}")
                 logger.debug(f"Single input definition detected: {input_config}")
@@ -104,7 +124,7 @@ class InputParser:
         return (
             isinstance(config, dict) and
             'type' in config and
-            config['type'] in self.supported_types
+            (config['type'] in self.supported_types or config['type'] in self.type_aliases)
         )
     
     def _parse_input_list(self, input_list: List[Dict[str, Any]]) -> List[Any]:
@@ -148,6 +168,14 @@ class InputParser:
             raise InputParsingError("Input definition must contain 'type' field")
         
         input_type = input_def['type']
+        
+        # Handle type aliases for backward compatibility
+        if input_type in self.type_aliases:
+            logger.debug(f"Converting type alias '{input_type}' to '{self.type_aliases[input_type]}'")
+            input_type = self.type_aliases[input_type]
+            input_def = input_def.copy()
+            input_def['type'] = input_type
+        
         if input_type not in self.supported_types:
             raise InputParsingError(f"Unsupported input type: {input_type}. Supported types: {self.supported_types}")
         
