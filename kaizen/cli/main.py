@@ -201,6 +201,40 @@ def test_all(ctx: click.Context, config: str, auto_fix: bool, create_pr: bool,
         click.echo(f"Unexpected error: {str(e)}", err=True)
         sys.exit(ExitCode.UNKNOWN_ERROR.value)
 
+@cli.command()
+@click.option('--config', type=click.Path(exists=True), help='Path to test config file (optional)')
+@click.option('--repo', help='Repository name (owner/repo)')
+@click.option('--base-branch', type=str, default='main', help='Base branch for testing')
+def test_github_access(ctx: click.Context, config: Optional[str], repo: Optional[str], base_branch: str) -> None:
+    """Test GitHub access and permissions for private repositories."""
+    try:
+        from .commands.test_github_access import test_github_access as test_access
+        
+        # Call the test function with the provided arguments
+        test_access.callback(config=config, repo=repo, base_branch=base_branch)
+        
+    except Exception as e:
+        logger.exception("GitHub access test failed")
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(ExitCode.PR_ERROR.value)
+
+@cli.command()
+@click.option('--config', type=click.Path(exists=True), help='Test configuration file (optional)')
+@click.option('--repo', help='Repository name (owner/repo)')
+@click.option('--token', help='GitHub token to test (optional, uses GITHUB_TOKEN env var if not provided)')
+def diagnose_github_access(ctx: click.Context, config: Optional[str], repo: Optional[str], token: Optional[str]) -> None:
+    """Comprehensive GitHub access diagnostic for troubleshooting organization and repository issues."""
+    try:
+        from .commands.diagnose_github_access import diagnose_github_access as diagnose_access
+        
+        # Call the diagnostic function with the provided arguments
+        diagnose_access.callback(config=config, repo=repo, token=token)
+        
+    except Exception as e:
+        logger.exception("GitHub diagnostic failed")
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(ExitCode.PR_ERROR.value)
+
 # Add setup commands
 cli.add_command(setup)
 

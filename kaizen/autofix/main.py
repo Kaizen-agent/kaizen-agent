@@ -1440,9 +1440,22 @@ class AutoFix:
                                 'improvement_summary': improvement_summary
                             }
                     except Exception as e:
-                        logger.info("No tests were fixed, reverting changes")
-                        subprocess.run(["git", "checkout", original_branch], check=True)
-                        raise PRCreationError(f"Failed to create PR: {str(e)}")
+                        logger.error(f"PR creation failed: {str(e)}")
+                        # Check if this is a private repository access issue
+                        if "Private repository access issue" in str(e) or "not all refs are readable" in str(e):
+                            logger.error("Private repository access issue detected. Changes were made but PR creation failed due to repository permissions.")
+                            # Don't revert changes for permission issues - let user handle manually
+                            return {
+                                'status': 'partial_success',
+                                'message': 'Code changes were made successfully, but PR creation failed due to private repository access issues. Please check your GitHub token permissions.',
+                                'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                                'error': str(e),
+                                'changes_made': True
+                            }
+                        else:
+                            logger.info("PR creation failed for other reasons, reverting changes")
+                            subprocess.run(["git", "checkout", original_branch], check=True)
+                            raise PRCreationError(f"Failed to create PR: {str(e)}")
                 
                 
                 logger.info("No tests were fixed, reverting changes")

@@ -124,13 +124,15 @@ def _display_test_summary(console: Console, test_result: TestResult, rich_format
 @click.option('--base-branch', default=DEFAULT_BASE_BRANCH, help=f'Base branch for pull request (default: {DEFAULT_BASE_BRANCH})')
 @click.option('--pr-strategy', type=click.Choice([s.value for s in PRStrategy]), 
               default=PRStrategy.ANY_IMPROVEMENT.value, help='Strategy for when to create PRs (default: ANY_IMPROVEMENT)')
+@click.option('--test-github-access', is_flag=True, help='Test GitHub access and permissions before running tests')
 def test_all(
     config: str,
     auto_fix: bool,
     create_pr: bool,
     max_retries: int,
     base_branch: str,
-    pr_strategy: str
+    pr_strategy: str,
+    test_github_access: bool
 ) -> None:
     """Run all tests specified in the configuration file.
     
@@ -141,6 +143,7 @@ def test_all(
         max_retries: Maximum number of retry attempts for auto-fix
         base_branch: Base branch for pull request
         pr_strategy: Strategy for when to create PRs
+        test_github_access: Whether to test GitHub access and permissions before running tests
         
     Example:
         >>> test_all(
@@ -149,7 +152,8 @@ def test_all(
         ...     create_pr=True,
         ...     max_retries=2,
         ...     base_branch="main",
-        ...     pr_strategy="ANY_IMPROVEMENT"
+        ...     pr_strategy="ANY_IMPROVEMENT",
+        ...     test_github_access=True
         ... )
     """
     console = Console()
@@ -170,6 +174,110 @@ def test_all(
             _handle_error(config_result.error, "Configuration error")
         
         config = config_result.value
+        
+        # Load environment variables before testing GitHub access
+        if test_github_access or create_pr:
+            from ..utils.env_setup import load_environment_variables
+            console.print("[dim]Loading environment variables...[/dim]")
+            loaded_files = load_environment_variables()
+            if loaded_files:
+                console.print(f"[dim]Loaded environment from: {', '.join(loaded_files.keys())}[/dim]")
+            else:
+                console.print("[dim]No .env files found, using system environment variables[/dim]")
+        
+        # Test GitHub access if requested
+        if test_github_access or create_pr:
+            console.print("\n[bold blue]Testing GitHub Access...[/bold blue]")
+            
+            # Check if GITHUB_TOKEN is available
+            import os
+            github_token = os.environ.get('GITHUB_TOKEN')
+            if not github_token:
+                console.print("\n[bold red]GITHUB_TOKEN not found in environment variables[/bold red]")
+                console.print("\n[bold]Possible solutions:[/bold]")
+                console.print("1. Create a .env file in your project root with:")
+                console.print("   GITHUB_TOKEN=your_github_token_here")
+                console.print("2. Set the environment variable directly:")
+                console.print("   export GITHUB_TOKEN=your_github_token_here")
+                console.print("3. Check if your .env file is in the correct location")
+                console.print("4. Restart your terminal after creating/modifying .env files")
+                console.print("\n[bold]For more help, run:[/bold]")
+                console.print("   kaizen setup check-env --features github")
+                if create_pr:
+                    console.print("\n[bold yellow]Warning: PR creation will fail without GITHUB_TOKEN[/bold yellow]")
+                    if not click.confirm("Continue with test execution?"):
+                        return
+                else:
+                    return
+            
+            # Show token status (without exposing the actual token)
+            token_preview = github_token[:8] + "..." if len(github_token) > 8 else "***"
+            console.print(f"[dim]GitHub token found: {token_preview}[/dim]")
+            
+            try:
+                from kaizen.autofix.pr.manager import PRManager
+                pr_manager = PRManager(config.__dict__)
+                access_result = pr_manager.test_github_access()
+                
+                if access_result['overall_status'] == 'full_access':
+                    console.print("[bold green]✓ GitHub access test passed[/bold green]")
+                elif access_result['overall_status'] == 'limited_branch_access_private':
+                    console.print("[bold yellow]⚠ GitHub access test: Partial access (Private Repository)[/bold yellow]")
+                    console.print("Branch-level access is limited, but PR creation may still work.")
+                else:
+                    console.print(f"[bold red]✗ GitHub access test failed: {access_result['overall_status']}[/bold red]")
+                    
+                    # Display detailed results
+                    console.print("\n[bold]Access Test Results:[/bold]")
+                    
+                    # Repository access
+                    repo = access_result['repository']
+                    if repo.get('accessible'):
+                        console.print(f"  [green]✓ Repository: {repo.get('full_name', 'Unknown')} (Private: {repo.get('private', False)})[/green]")
+                    else:
+                        console.print(f"  [red]✗ Repository: {repo.get('error', 'Unknown error')}[/red]")
+                    
+                    # Branch access
+                    current_branch = access_result['current_branch']
+                    if current_branch.get('accessible'):
+                        console.print(f"  [green]✓ Current branch: {current_branch.get('branch_name', 'Unknown')}[/green]")
+                    else:
+                        console.print(f"  [red]✗ Current branch: {current_branch.get('error', 'Unknown error')}[/red]")
+                    
+                    base_branch = access_result['base_branch']
+                    if base_branch.get('accessible'):
+                        console.print(f"  [green]✓ Base branch: {base_branch.get('branch_name', 'Unknown')}[/green]")
+                    else:
+                        console.print(f"  [red]✗ Base branch: {base_branch.get('error', 'Unknown error')}[/red]")
+                    
+                    # PR permissions
+                    pr_perms = access_result['pr_permissions']
+                    if pr_perms.get('can_read'):
+                        console.print("  [green]✓ PR permissions: Read access confirmed[/green]")
+                    else:
+                        console.print(f"  [red]✗ PR permissions: {pr_perms.get('error', 'Unknown error')}[/red]")
+                    
+                    # Display recommendations
+                    console.print("\n[bold]Recommendations:[/bold]")
+                    for rec in access_result.get('recommendations', []):
+                        console.print(f"  • {rec}")
+                    
+                    if create_pr:
+                        if access_result['overall_status'] == 'limited_branch_access_private':
+                            console.print("\n[bold yellow]Note: Limited branch access detected for private repository. PR creation will be attempted but may fail.[/bold yellow]")
+                            if not click.confirm("Continue with test execution?"):
+                                return
+                        else:
+                            console.print("\n[bold yellow]Warning: PR creation may fail due to access issues.[/bold yellow]")
+                            if not click.confirm("Continue with test execution?"):
+                                return
+                            
+            except Exception as e:
+                console.print(f"[bold red]GitHub access test failed: {str(e)}[/bold red]")
+                if create_pr:
+                    console.print("[bold yellow]Warning: PR creation may fail due to access issues.[/bold yellow]")
+                    if not click.confirm("Continue with test execution?"):
+                        return
         
         # Execute tests
         command = TestAllCommand(config, logger)
