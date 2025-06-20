@@ -26,6 +26,76 @@ class TestStatus(Enum):
     COMPLETED = 'completed'
     UNKNOWN = 'unknown'
 
+def safe_serialize_evaluation_targets(evaluation_targets: Optional[List[Any]]) -> List[Dict[str, Any]]:
+    """Safely serialize evaluation targets for logging.
+    
+    Args:
+        evaluation_targets: List of evaluation targets (can be EvaluationTarget objects or dicts)
+        
+    Returns:
+        List of serializable dictionaries
+    """
+    if not evaluation_targets:
+        return []
+    
+    serialized = []
+    for i, target in enumerate(evaluation_targets):
+        try:
+            if hasattr(target, 'to_dict'):  # EvaluationTarget object with to_dict method
+                serialized.append(target.to_dict())
+            elif hasattr(target, 'name'):  # EvaluationTarget object without to_dict method
+                # Safely extract attributes with fallbacks
+                name = getattr(target, 'name', f'target_{i}')
+                source_obj = getattr(target, 'source', None)
+                source = getattr(source_obj, 'value', 'unknown') if source_obj else 'unknown'
+                criteria = getattr(target, 'criteria', '')
+                description = getattr(target, 'description', '')
+                weight = getattr(target, 'weight', 1.0)
+                
+                serialized.append({
+                    'name': name,
+                    'source': source,
+                    'criteria': criteria,
+                    'description': description,
+                    'weight': weight
+                })
+            elif isinstance(target, dict):  # Dictionary format
+                serialized.append(target)
+            else:
+                # Fallback: convert to string representation
+                serialized.append({'raw_target': str(target)})
+        except Exception as e:
+            logger.warning(f"Failed to serialize evaluation target {i}: {e}")
+            serialized.append({
+                'error': f'Serialization failed: {str(e)}',
+                'target_index': i,
+                'target_type': type(target).__name__
+            })
+    
+    return serialized
+
+def safe_serialize_criteria(criteria: Any) -> Any:
+    """Safely serialize criteria for logging.
+    
+    Args:
+        criteria: Criteria object or value
+        
+    Returns:
+        Serializable representation of criteria
+    """
+    try:
+        if isinstance(criteria, dict):
+            return criteria
+        elif isinstance(criteria, list):
+            return [str(item) if not isinstance(item, (dict, str, int, float, bool)) else item for item in criteria]
+        elif hasattr(criteria, '__dict__'):
+            return str(criteria)
+        else:
+            return criteria
+    except Exception as e:
+        logger.warning(f"Failed to serialize criteria: {e}")
+        return f"<Serialization error: {str(e)}>"
+
 @dataclass
 class TestCase:
     """Test case configuration."""
@@ -39,13 +109,42 @@ class TestCase:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TestCase':
         """Create a TestCase instance from a dictionary."""
+        # Handle backward compatibility: convert old evaluation.criteria to evaluation_targets
+        evaluation_targets = data.get('evaluation_targets', [])
+        llm_evaluation = data.get('evaluation', {})
+        
+        # If using old format with evaluation.criteria, convert to evaluation_targets
+        if not evaluation_targets and 'evaluation' in data and 'criteria' in data['evaluation']:
+            logger.info("Converting old evaluation.criteria format to evaluation_targets")
+            criteria_list = data['evaluation']['criteria']
+            if isinstance(criteria_list, list):
+                evaluation_targets = []
+                for i, criteria in enumerate(criteria_list):
+                    if isinstance(criteria, dict):
+                        evaluation_targets.append({
+                            'name': criteria.get('name', f'criteria_{i}'),
+                            'criteria': criteria.get('description', ''),
+                            'description': criteria.get('description', ''),
+                            'source': 'return',
+                            'weight': criteria.get('weight', 1.0)
+                        })
+                    else:
+                        evaluation_targets.append({
+                            'name': f'criteria_{i}',
+                            'criteria': str(criteria),
+                            'description': str(criteria),
+                            'source': 'return',
+                            'weight': 1.0
+                        })
+                logger.info(f"Converted {len(evaluation_targets)} evaluation targets from old format")
+        
         return cls(
             name=data['name'],
             input=data['input'],
             expected_output=data.get('expected_output'),
             assertions=data.get('assertions', []),
-            llm_evaluation=data.get('evaluation', {}),
-            evaluation_targets=data.get('evaluation_targets', [])
+            llm_evaluation=llm_evaluation,
+            evaluation_targets=evaluation_targets
         )
 
 class EvaluationResponse(BaseModel):
@@ -94,8 +193,12 @@ class PromptBuilder:
         """
         criteria = test_case.llm_evaluation
         evaluation_targets = test_case.evaluation_targets or []
-        logger.info(f"EVALUATION CRITERIA: {criteria}")
-        logger.info(f"EVALUATION TARGETS: {evaluation_targets}")
+        
+        # Safely serialize for logging
+        serialized_criteria = safe_serialize_criteria(criteria)
+        serialized_targets = safe_serialize_evaluation_targets(evaluation_targets)
+        logger.info(f"EVALUATION CRITERIA: {serialized_criteria}")
+        logger.info(f"EVALUATION TARGETS: {serialized_targets}")
         
         prompt_parts = [
             "You are an expert test evaluator. Please evaluate the following test result:",
@@ -106,53 +209,73 @@ class PromptBuilder:
         if tracked_values and evaluation_targets:
             prompt_parts.append("\nTracked Output Values:")
             for target in evaluation_targets:
-                # Handle both EvaluationTarget objects and dictionaries
-                if hasattr(target, 'name'):  # EvaluationTarget object
-                    target_name = target.name
-                    source = target.source.value  # Get the enum value
-                else:  # Dictionary format (legacy)
-                    target_name = target.get('name', 'unknown')
-                    source = target.get('source', 'return')
-                
-                if source == 'return' and 'return' in tracked_values:
-                    value = tracked_values['return']
-                elif source == 'variable' and target_name in tracked_values:
-                    value = tracked_values[target_name]
-                else:
-                    value = "Not found"
-                
-                serialized_value = safe_serialize_value(value)
-                prompt_parts.append(f"  {target_name} ({source}): {serialized_value}")
+                try:
+                    # Handle both EvaluationTarget objects and dictionaries
+                    if hasattr(target, 'name'):  # EvaluationTarget object
+                        target_name = target.name
+                        source = target.source.value  # Get the enum value
+                    else:  # Dictionary format (legacy)
+                        target_name = target.get('name', 'unknown')
+                        source = target.get('source', 'return')
+                    
+                    if source == 'return' and 'return' in tracked_values:
+                        value = tracked_values['return']
+                    elif source == 'variable' and target_name in tracked_values:
+                        value = tracked_values[target_name]
+                    else:
+                        value = "Not found"
+                    
+                    serialized_value = safe_serialize_value(value)
+                    prompt_parts.append(f"  {target_name} ({source}): {serialized_value}")
+                except Exception as e:
+                    logger.warning(f"Failed to process tracked value for target: {e}")
+                    prompt_parts.append(f"  <Error processing target>: {str(e)}")
         else:
             # Fallback to legacy format
-            prompt_parts.append(f"\nActual Output: {json.dumps(actual_output, indent=2)}")
+            serialized_output = safe_serialize_value(actual_output)
+            prompt_parts.append(f"\nActual Output: {serialized_output}")
         
         if test_case.expected_output is not None:
-            prompt_parts.append(f"\nExpected Output: {json.dumps(test_case.expected_output, indent=2)}")
+            try:
+                expected_output_json = json.dumps(test_case.expected_output, indent=2)
+                prompt_parts.append(f"\nExpected Output: {expected_output_json}")
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Failed to serialize expected output: {e}")
+                prompt_parts.append(f"\nExpected Output: {str(test_case.expected_output)}")
         
         # Add evaluation targets if present
         if evaluation_targets:
             prompt_parts.append("\nEvaluation Targets:")
             for i, target in enumerate(evaluation_targets, 1):
-                # Handle both EvaluationTarget objects and dictionaries
-                if hasattr(target, 'name'):  # EvaluationTarget object
-                    target_name = target.name
-                    criteria_text = target.criteria
-                    description = target.description or ''
-                else:  # Dictionary format (legacy)
-                    target_name = target.get('name', 'unknown')
-                    criteria_text = target.get('criteria', 'No criteria specified')
-                    description = target.get('description', '')
-                
-                prompt_parts.append(f"  {i}. {target_name}:")
-                if description:
-                    prompt_parts.append(f"     Description: {description}")
-                prompt_parts.append(f"     Criteria: {criteria_text}")
+                try:
+                    # Handle both EvaluationTarget objects and dictionaries
+                    if hasattr(target, 'name'):  # EvaluationTarget object
+                        target_name = target.name
+                        criteria_text = target.criteria
+                        description = target.description or ''
+                    else:  # Dictionary format (legacy)
+                        target_name = target.get('name', 'unknown')
+                        criteria_text = target.get('criteria', 'No criteria specified')
+                        description = target.get('description', '')
+                    
+                    prompt_parts.append(f"  {i}. {target_name}:")
+                    if description:
+                        prompt_parts.append(f"     Description: {description}")
+                    prompt_parts.append(f"     Criteria: {criteria_text}")
+                except Exception as e:
+                    logger.warning(f"Failed to process evaluation target {i}: {e}")
+                    prompt_parts.append(f"  {i}. <Error processing target>: {str(e)}")
         else:
             # Legacy format
+            try:
+                serialized_criteria_for_prompt = json.dumps(criteria, indent=2)
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Failed to serialize criteria for prompt: {e}")
+                serialized_criteria_for_prompt = str(criteria)
+            
             prompt_parts.extend([
                 f"\nEvaluation Criteria:",
-                f"{json.dumps(criteria, indent=2)}"
+                f"{serialized_criteria_for_prompt}"
             ])
         
         prompt_parts.extend([

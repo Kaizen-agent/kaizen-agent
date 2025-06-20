@@ -205,7 +205,15 @@ def safe_serialize_value(value: Any) -> str:
         elif isinstance(value, dict):
             return json.dumps(value, default=str, indent=2)
         else:
-            # For complex objects, try to get a meaningful representation
+            # For dataclass objects, convert to dict first
+            if hasattr(value, '__dataclass_fields__'):
+                try:
+                    from dataclasses import asdict
+                    return json.dumps(asdict(value), default=str, indent=2)
+                except Exception as e:
+                    logger.warning(f"Error converting dataclass to dict: {str(e)}")
+                    return str(value)
+            # For other complex objects, try to get a meaningful representation
             try:
                 return str(value)
             except:
