@@ -8,6 +8,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 
+# Try to load dotenv for .env file support
+try:
+    from dotenv import load_dotenv
+    DOTENV_AVAILABLE = True
+except ImportError:
+    DOTENV_AVAILABLE = False
+
 from .test_case import TestCase, TestStatus, LLMEvaluator, AssertionRunner
 from .code_region import CodeRegionExtractor, CodeRegionExecutor
 from .input_parser import InputParser, InputParsingError
@@ -46,6 +53,9 @@ class TestRunner:
         self.workspace_root = self._find_workspace_root()
         self.config_file_path = Path(test_config.get('config_file', ''))
         
+        # Load environment variables BEFORE initializing other components
+        self._load_environment_variables()
+        
         # Get imported dependencies from config
         imported_dependencies = test_config.get('imported_dependencies', {})
         
@@ -66,13 +76,44 @@ class TestRunner:
             raise ValueError("Test configuration must contain 'tests' field")
     
     def _find_workspace_root(self) -> Path:
-        """Find the workspace root directory."""
-        current = Path.cwd()
-        while current.name != 'kaizen-agent' and current.parent != current:
+        """Find the workspace root directory.
+        
+        This method tries multiple strategies to find the workspace root:
+        1. Look for common project root indicators (pyproject.toml, setup.py, etc.)
+        2. Look for the kaizen-agent directory (for development)
+        3. Use the current working directory as fallback
+        """
+        original_cwd = Path.cwd()
+        
+        print("Starting workspace root detection...")
+        # Strategy 1: Look for common project root indicators
+        current = original_cwd
+        while current.parent != current:
+            print(f"Checking directory: {current}")
+            if any((current / indicator).exists() for indicator in [
+                'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt',
+                'package.json', 'Cargo.toml', 'go.mod', 'composer.json'
+            ]):
+                print(f"Found project indicator in: {current}")
+                return current
+            if any((current / dir_name).exists() for dir_name in [
+                'src', 'lib', 'app', 'main', 'tests', 'docs'
+            ]):
+                print(f"Found project directory in: {current}")
+                return current
             current = current.parent
-        if current.name != 'kaizen-agent':
-            raise ValueError("Could not find workspace root directory")
-        return current
+        print("First loop done, proceeding to ancestor check for kaizen-agent...")
+
+        # Strategy 2: Look for kaizen-agent directory (for development)
+        for ancestor in [original_cwd] + list(original_cwd.parents):
+            print(f"CHECKING ANCESTOR: {ancestor}")
+            if ancestor.name == 'kaizen-agent':
+                print(f"MATCHED kaizen-agent at: {ancestor}")
+                return ancestor
+        
+        # Strategy 3: Fallback to current working directory
+        logger.warning("Could not determine workspace root, using current working directory")
+        return original_cwd
     
     def _run_test_case(self, test_case: Dict, test_file_path: Path) -> Dict:
         """
@@ -287,4 +328,46 @@ class TestRunner:
                 'failed': 1 if test_result['status'] == TestStatus.FAILED.value else 0,
                 'error': 1 if test_result['status'] == TestStatus.ERROR.value else 0
             }
-        } 
+        }
+
+    def _load_environment_variables(self) -> None:
+        """Load environment variables from .env files and user's environment.
+        
+        This function looks for .env files in the workspace root and loads them
+        into the current process environment. This ensures that environment variables
+        like GOOGLE_API_KEY are available for the test runner.
+        
+        Args:
+            workspace_root: Root directory of the workspace to search for .env files
+        """
+        if not DOTENV_AVAILABLE:
+            logger.warning("python-dotenv not available. Install with: pip install python-dotenv")
+            return
+        
+        # Look for .env files in the workspace root
+        env_files = [
+            self.workspace_root / ".env",
+            self.workspace_root / ".env.local",
+            self.workspace_root / ".env.test"
+        ]
+        
+        loaded_files = []
+        for env_file in env_files:
+            if env_file.exists():
+                try:
+                    load_dotenv(env_file, override=True)
+                    loaded_files.append(str(env_file))
+                    logger.info(f"Loaded environment variables from: {env_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to load {env_file}: {str(e)}")
+        
+        if not loaded_files:
+            logger.info("No .env files found in workspace root")
+        
+        # Log important environment variables (without exposing sensitive values)
+        important_vars = ['GOOGLE_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']
+        for var in important_vars:
+            if os.getenv(var):
+                logger.info(f"Found {var} in environment")
+            else:
+                logger.warning(f"Missing {var} in environment") 
