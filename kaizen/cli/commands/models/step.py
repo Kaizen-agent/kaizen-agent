@@ -5,7 +5,8 @@ in the test configuration.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
+import logging
 
 @dataclass
 class TestStep:
@@ -14,7 +15,7 @@ class TestStep:
     Attributes:
         name: Step name
         command: Command to execute
-        input: Input configuration for the agent
+        input: Input configuration for the agent (supports multiple inputs)
         expected_output: Expected output configuration
         description: Step description
         timeout: Step timeout in seconds
@@ -25,7 +26,7 @@ class TestStep:
     """
     name: str
     command: str
-    input: str
+    input: Union[str, Dict[str, Any], List[Dict[str, Any]]]
     expected_output: Optional[Dict[str, Any]] = None
     description: Optional[str] = None
     timeout: Optional[int] = None
@@ -44,11 +45,38 @@ class TestStep:
         Returns:
             TestStep instance
         """
+        # DEBUG: Print the raw step data
+        logger = logging.getLogger(__name__)
+        logger.info(f"DEBUG: TestStep.from_dict raw data: {data}")
+        
+        # Handle input parsing with backward compatibility
+        input_data = data.get('input', {})
+        logger.info(f"DEBUG: TestStep.from_dict input_data: {input_data}")
+        logger.info(f"DEBUG: TestStep.from_dict input_data type: {type(input_data)}")
+        
+        # If input is a dict with 'method' and 'input' keys (old format)
+        if isinstance(input_data, dict) and 'method' in input_data and 'input' in input_data:
+            command = input_data.get('method', '')
+            input_value = input_data.get('input', '')
+            # Extract expected_output from nested input structure
+            expected_output = input_data.get('expected_output')
+            logger.info(f"DEBUG: TestStep.from_dict using old format - command: {command}, input_value: {input_value}")
+            logger.info(f"DEBUG: TestStep.from_dict expected_output from input: {expected_output}")
+        else:
+            # New format: input can be directly specified
+            command = data.get('command', '')
+            input_value = input_data
+            expected_output = data.get('expected_output')
+            logger.info(f"DEBUG: TestStep.from_dict using new format - command: {command}, input_value: {input_value}")
+        
+        logger.info(f"DEBUG: TestStep.from_dict final input_value type: {type(input_value)}")
+        logger.info(f"DEBUG: TestStep.from_dict expected_output: {expected_output}")
+        
         return cls(
             name=data.get('name', ''),
-            command=data.get('input', {}).get('method', ''),
-            input=data.get('input', {}).get('input', {}),
-            expected_output=data.get('expected_output'),
+            command=command,
+            input=input_value,
+            expected_output=expected_output,
             description=data.get('description'),
             timeout=data.get('timeout'),
             retries=data.get('retries'),

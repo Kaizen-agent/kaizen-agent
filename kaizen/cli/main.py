@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from kaizen.autofix.test.runner import TestRunner
-from kaizen.autofix.pr.creator import PRCreator
-from kaizen.autofix.main import AutoFixer
+from kaizen.autofix.pr.manager import PRManager
+from kaizen.autofix.main import AutoFix
 
 # Configure logging
 logging.basicConfig(
@@ -141,11 +141,11 @@ def test_all(ctx: click.Context, config: str, auto_fix: bool, create_pr: bool,
         # Handle results
         if results['_status'] == 'error':
             if auto_fix:
-                fixer = AutoFixer(ctx.obj.config)
+                fixer = AutoFix(ctx.obj.config)
                 fix_results = fixer.fix_issues(results, max_retries)
                 
                 if create_pr and fix_results.get('fixed'):
-                    pr_creator = PRCreator(ctx.obj.config)
+                    pr_creator = PRManager(ctx.obj.config)
                     pr_url = pr_creator.create_pr(base_branch)
                     click.echo(f"Created pull request: {pr_url}")
                     
@@ -188,11 +188,11 @@ def fix_tests(ctx: click.Context, test_files: tuple, project: str, make_pr: bool
         ctx.obj.base_branch = base_branch
         
         # Run fixer
-        fixer = AutoFixer(ctx.obj.config)
+        fixer = AutoFix(ctx.obj.config)
         results = fixer.fix_issues({}, max_retries)
         
         if make_pr and results.get('fixed'):
-            pr_creator = PRCreator(ctx.obj.config)
+            pr_creator = PRManager(ctx.obj.config)
             pr_url = pr_creator.create_pr(base_branch)
             click.echo(f"Created pull request: {pr_url}")
             

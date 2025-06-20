@@ -8,8 +8,16 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 
+# Try to load dotenv for .env file support
+try:
+    from dotenv import load_dotenv
+    DOTENV_AVAILABLE = True
+except ImportError:
+    DOTENV_AVAILABLE = False
+
 from .test_case import TestCase, TestStatus, LLMEvaluator, AssertionRunner
 from .code_region import CodeRegionExtractor, CodeRegionExecutor
+from .input_parser import InputParser, InputParsingError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -32,7 +40,7 @@ class TestSummary:
         }
 
 class TestRunner:
-    """Runs tests using the code region execution system."""
+    """Runs tests using the code region execution system with support for multiple inputs."""
     
     def __init__(self, test_config: Dict):
         """Initialize the test runner.
@@ -45,6 +53,9 @@ class TestRunner:
         self.workspace_root = self._find_workspace_root()
         self.config_file_path = Path(test_config.get('config_file', ''))
         
+        # Load environment variables BEFORE initializing other components
+        self._load_environment_variables()
+        
         # Get imported dependencies from config
         imported_dependencies = test_config.get('imported_dependencies', {})
         
@@ -52,9 +63,8 @@ class TestRunner:
         self.code_region_executor = CodeRegionExecutor(self.workspace_root, imported_dependencies)
         self.llm_evaluator = LLMEvaluator()
         self.assertion_runner = AssertionRunner()
+        self.input_parser = InputParser()
         
-    
-    
     def _validate_config(self) -> None:
         """Validate the test configuration structure."""
         required_fields = ['name', 'file_path']
@@ -66,13 +76,44 @@ class TestRunner:
             raise ValueError("Test configuration must contain 'tests' field")
     
     def _find_workspace_root(self) -> Path:
-        """Find the workspace root directory."""
-        current = Path.cwd()
-        while current.name != 'kaizen-agent' and current.parent != current:
+        """Find the workspace root directory.
+        
+        This method tries multiple strategies to find the workspace root:
+        1. Look for common project root indicators (pyproject.toml, setup.py, etc.)
+        2. Look for the kaizen-agent directory (for development)
+        3. Use the current working directory as fallback
+        """
+        original_cwd = Path.cwd()
+        
+        print("Starting workspace root detection...")
+        # Strategy 1: Look for common project root indicators
+        current = original_cwd
+        while current.parent != current:
+            print(f"Checking directory: {current}")
+            if any((current / indicator).exists() for indicator in [
+                'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt',
+                'package.json', 'Cargo.toml', 'go.mod', 'composer.json'
+            ]):
+                print(f"Found project indicator in: {current}")
+                return current
+            if any((current / dir_name).exists() for dir_name in [
+                'src', 'lib', 'app', 'main', 'tests', 'docs'
+            ]):
+                print(f"Found project directory in: {current}")
+                return current
             current = current.parent
-        if current.name != 'kaizen-agent':
-            raise ValueError("Could not find workspace root directory")
-        return current
+        print("First loop done, proceeding to ancestor check for kaizen-agent...")
+
+        # Strategy 2: Look for kaizen-agent directory (for development)
+        for ancestor in [original_cwd] + list(original_cwd.parents):
+            print(f"CHECKING ANCESTOR: {ancestor}")
+            if ancestor.name == 'kaizen-agent':
+                print(f"MATCHED kaizen-agent at: {ancestor}")
+                return ancestor
+        
+        # Strategy 3: Fallback to current working directory
+        logger.warning("Could not determine workspace root, using current working directory")
+        return original_cwd
     
     def _run_test_case(self, test_case: Dict, test_file_path: Path) -> Dict:
         """
@@ -87,8 +128,15 @@ class TestRunner:
         """
         try:
             logger.info(f"Running test case: {test_case.get('name', 'Unknown')}")
+            
+            # DEBUG: Print the raw test case
+            logger.info(f"DEBUG: Raw test case: {test_case}")
+            
             # Convert test case dict to TestCase object
             test_case_obj = TestCase.from_dict(test_case)
+            
+            # DEBUG: Print the parsed test case input
+            logger.info(f"DEBUG: TestCase input: {test_case_obj.input}")
             
             # Extract and analyze the code region
             region_info = self.code_region_extractor.extract_region(
@@ -101,12 +149,62 @@ class TestRunner:
             if 'imports' in test_case_obj.input:
                 region_info.imports.extend(test_case_obj.input['imports'])
             
-            # Execute the code region
-            actual_output = self.code_region_executor.execute_region(
-                region_info,
-                test_case_obj.input.get('method'),
-                test_case_obj.input.get('input')
-            )
+            # Parse input data using the new input parser
+            input_data = test_case_obj.input.get('input')
+            
+            # DEBUG: Print the input data before parsing
+            logger.info(f"DEBUG: Input data before parsing: {input_data}")
+            logger.info(f"DEBUG: Input data type: {type(input_data)}")
+            if isinstance(input_data, list):
+                logger.info(f"DEBUG: Input data length: {len(input_data)}")
+                for i, item in enumerate(input_data):
+                    logger.info(f"DEBUG: Input item {i}: {item} (type: {type(item)})")
+            
+            if input_data is not None:
+                try:
+                    parsed_inputs = self.input_parser.parse_inputs(input_data)
+                    logger.info(f"Parsed {len(parsed_inputs)} input(s) for test case")
+                    
+                    # DEBUG: Print the parsed inputs
+                    for i, parsed_input in enumerate(parsed_inputs):
+                        logger.info(f"DEBUG: Parsed input {i}: {parsed_input} (type: {type(parsed_input)})")
+                        
+                except InputParsingError as e:
+                    logger.error(f"Failed to parse inputs: {str(e)}")
+                    return {
+                        'status': TestStatus.ERROR.value,
+                        'error': f"Input parsing error: {str(e)}"
+                    }
+            else:
+                parsed_inputs = []
+            
+            # Determine if we need variable tracking
+            evaluation_targets = test_case_obj.evaluation_targets or []
+            tracked_variables = set()
+            
+            for target in evaluation_targets:
+                if target.get('source') == 'variable':
+                    tracked_variables.add(target.get('name'))
+            
+            # Execute the code region with or without tracking
+            if tracked_variables:
+                logger.info(f"Executing with variable tracking for: {tracked_variables}")
+                execution_result = self.code_region_executor.execute_region_with_tracking(
+                    region_info,
+                    test_case_obj.input.get('method'),
+                    parsed_inputs,
+                    tracked_variables
+                )
+                actual_output = execution_result['result']
+                tracked_values = execution_result['tracked_values']
+            else:
+                logger.info("Executing without variable tracking")
+                actual_output = self.code_region_executor.execute_region(
+                    region_info,
+                    test_case_obj.input.get('method'),
+                    parsed_inputs
+                )
+                tracked_values = None
             
             # Run assertions
             assertion_results = self.assertion_runner.run_assertions(
@@ -115,7 +213,7 @@ class TestRunner:
             )
             
             # Evaluate with LLM
-            llm_evaluation = self.llm_evaluator.evaluate_result(test_case_obj, actual_output)
+            llm_evaluation = self.llm_evaluator.evaluate_result(test_case_obj, actual_output, tracked_values)
             
             # Determine overall test status
             status = self._determine_test_status(assertion_results, llm_evaluation)
@@ -124,7 +222,9 @@ class TestRunner:
             return {
                 'status': status,
                 'input': test_case_obj.input,
+                'parsed_inputs': parsed_inputs,
                 'output': actual_output,
+                'tracked_values': tracked_values,
                 'assertions': assertion_results,
                 'llm_evaluation': llm_evaluation,
                 'expected_output': test_case_obj.expected_output,
@@ -234,7 +334,9 @@ class TestRunner:
             'test_cases': [{
                 'status': test_result['status'],
                 'input': test_result.get('input'),
+                'parsed_inputs': test_result.get('parsed_inputs', []),
                 'output': test_result.get('output'),
+                'tracked_values': test_result.get('tracked_values', []),
                 'assertions': test_result.get('assertions', []),
                 'llm_evaluation': test_result.get('llm_evaluation', {}),
                 'expected_output': test_result.get('expected_output'),
@@ -247,4 +349,46 @@ class TestRunner:
                 'failed': 1 if test_result['status'] == TestStatus.FAILED.value else 0,
                 'error': 1 if test_result['status'] == TestStatus.ERROR.value else 0
             }
-        } 
+        }
+
+    def _load_environment_variables(self) -> None:
+        """Load environment variables from .env files and user's environment.
+        
+        This function looks for .env files in the workspace root and loads them
+        into the current process environment. This ensures that environment variables
+        like GOOGLE_API_KEY are available for the test runner.
+        
+        Args:
+            workspace_root: Root directory of the workspace to search for .env files
+        """
+        if not DOTENV_AVAILABLE:
+            logger.warning("python-dotenv not available. Install with: pip install python-dotenv")
+            return
+        
+        # Look for .env files in the workspace root
+        env_files = [
+            self.workspace_root / ".env",
+            self.workspace_root / ".env.local",
+            self.workspace_root / ".env.test"
+        ]
+        
+        loaded_files = []
+        for env_file in env_files:
+            if env_file.exists():
+                try:
+                    load_dotenv(env_file, override=True)
+                    loaded_files.append(str(env_file))
+                    logger.info(f"Loaded environment variables from: {env_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to load {env_file}: {str(e)}")
+        
+        if not loaded_files:
+            logger.info("No .env files found in workspace root")
+        
+        # Log important environment variables (without exposing sensitive values)
+        important_vars = ['GOOGLE_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']
+        for var in important_vars:
+            if os.getenv(var):
+                logger.info(f"Found {var} in environment")
+            else:
+                logger.warning(f"Missing {var} in environment") 
