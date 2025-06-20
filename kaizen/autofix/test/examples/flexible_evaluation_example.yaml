@@ -1,0 +1,54 @@
+name: "Flexible Evaluation Example"
+agent_type: dynamic_region
+file_path: example_agent.py
+description: |
+  Example test demonstrating flexible output evaluation with multiple targets.
+  This test shows how to evaluate return values, specific variables, and
+  multiple outputs from a single test execution.
+
+evaluation:
+  evaluation_targets:
+    - name: summary_text
+      source: variable
+      criteria: "Should include clarification about the compound's instability"
+      description: "The summary text should explain stability concerns"
+      weight: 1.0
+
+    - name: recommended_action
+      source: variable
+      criteria: "Should suggest an experiment or alternative solvent"
+      description: "The recommendation should be actionable"
+      weight: 1.0
+
+    - name: return
+      source: return
+      criteria: "Should be a dictionary with 'status' and 'summary' keys"
+      description: "The return value should have the expected structure"
+      weight: 1.0
+
+regions:
+  - example_agent
+
+max_retries: 2
+
+files_to_fix:
+  - example_agent.py
+
+steps:
+  - name: Compound Stability Analysis
+    description: Test compound stability analysis with multiple outputs
+    input:
+      file_path: example_agent.py
+      method: analyze_compound
+      input: "How stable is this compound in ethanol?"
+    evaluation:
+      type: llm
+
+  - name: Alternative Solvent Recommendation
+    description: Test alternative solvent recommendation
+    input:
+      file_path: example_agent.py
+      method: suggest_alternatives
+      input: "This compound is unstable in ethanol, what should I use instead?"
+    evaluation:
+      type: llm 

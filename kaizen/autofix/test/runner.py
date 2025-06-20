@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from .test_case import TestCase, TestStatus, LLMEvaluator, AssertionRunner
 from .code_region import CodeRegionExtractor, CodeRegionExecutor
+from .input_parser import InputParser, InputParsingError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ class TestSummary:
         }
 
 class TestRunner:
-    """Runs tests using the code region execution system."""
+    """Runs tests using the code region execution system with support for multiple inputs."""
     
     def __init__(self, test_config: Dict):
         """Initialize the test runner.
@@ -52,9 +53,8 @@ class TestRunner:
         self.code_region_executor = CodeRegionExecutor(self.workspace_root, imported_dependencies)
         self.llm_evaluator = LLMEvaluator()
         self.assertion_runner = AssertionRunner()
+        self.input_parser = InputParser()
         
-    
-    
     def _validate_config(self) -> None:
         """Validate the test configuration structure."""
         required_fields = ['name', 'file_path']
@@ -101,12 +101,48 @@ class TestRunner:
             if 'imports' in test_case_obj.input:
                 region_info.imports.extend(test_case_obj.input['imports'])
             
-            # Execute the code region
-            actual_output = self.code_region_executor.execute_region(
-                region_info,
-                test_case_obj.input.get('method'),
-                test_case_obj.input.get('input')
-            )
+            # Parse input data using the new input parser
+            input_data = test_case_obj.input.get('input')
+            if input_data is not None:
+                try:
+                    parsed_inputs = self.input_parser.parse_inputs(input_data)
+                    logger.info(f"Parsed {len(parsed_inputs)} input(s) for test case")
+                except InputParsingError as e:
+                    logger.error(f"Failed to parse inputs: {str(e)}")
+                    return {
+                        'status': TestStatus.ERROR.value,
+                        'error': f"Input parsing error: {str(e)}"
+                    }
+            else:
+                parsed_inputs = []
+            
+            # Determine if we need variable tracking
+            evaluation_targets = test_case_obj.evaluation_targets or []
+            tracked_variables = set()
+            
+            for target in evaluation_targets:
+                if target.get('source') == 'variable':
+                    tracked_variables.add(target.get('name'))
+            
+            # Execute the code region with or without tracking
+            if tracked_variables:
+                logger.info(f"Executing with variable tracking for: {tracked_variables}")
+                execution_result = self.code_region_executor.execute_region_with_tracking(
+                    region_info,
+                    test_case_obj.input.get('method'),
+                    parsed_inputs,
+                    tracked_variables
+                )
+                actual_output = execution_result['result']
+                tracked_values = execution_result['tracked_values']
+            else:
+                logger.info("Executing without variable tracking")
+                actual_output = self.code_region_executor.execute_region(
+                    region_info,
+                    test_case_obj.input.get('method'),
+                    parsed_inputs
+                )
+                tracked_values = None
             
             # Run assertions
             assertion_results = self.assertion_runner.run_assertions(
@@ -115,7 +151,7 @@ class TestRunner:
             )
             
             # Evaluate with LLM
-            llm_evaluation = self.llm_evaluator.evaluate_result(test_case_obj, actual_output)
+            llm_evaluation = self.llm_evaluator.evaluate_result(test_case_obj, actual_output, tracked_values)
             
             # Determine overall test status
             status = self._determine_test_status(assertion_results, llm_evaluation)
@@ -124,7 +160,9 @@ class TestRunner:
             return {
                 'status': status,
                 'input': test_case_obj.input,
+                'parsed_inputs': parsed_inputs,
                 'output': actual_output,
+                'tracked_values': tracked_values,
                 'assertions': assertion_results,
                 'llm_evaluation': llm_evaluation,
                 'expected_output': test_case_obj.expected_output,
@@ -234,7 +272,9 @@ class TestRunner:
             'test_cases': [{
                 'status': test_result['status'],
                 'input': test_result.get('input'),
+                'parsed_inputs': test_result.get('parsed_inputs', []),
                 'output': test_result.get('output'),
+                'tracked_values': test_result.get('tracked_values', []),
                 'assertions': test_result.get('assertions', []),
                 'llm_evaluation': test_result.get('llm_evaluation', {}),
                 'expected_output': test_result.get('expected_output'),

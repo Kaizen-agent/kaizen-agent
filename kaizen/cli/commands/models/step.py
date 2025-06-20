@@ -5,7 +5,7 @@ in the test configuration.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 
 @dataclass
 class TestStep:
@@ -14,7 +14,7 @@ class TestStep:
     Attributes:
         name: Step name
         command: Command to execute
-        input: Input configuration for the agent
+        input: Input configuration for the agent (supports multiple inputs)
         expected_output: Expected output configuration
         description: Step description
         timeout: Step timeout in seconds
@@ -25,7 +25,7 @@ class TestStep:
     """
     name: str
     command: str
-    input: str
+    input: Union[str, Dict[str, Any], List[Dict[str, Any]]]
     expected_output: Optional[Dict[str, Any]] = None
     description: Optional[str] = None
     timeout: Optional[int] = None
@@ -44,10 +44,22 @@ class TestStep:
         Returns:
             TestStep instance
         """
+        # Handle input parsing with backward compatibility
+        input_data = data.get('input', {})
+        
+        # If input is a dict with 'method' and 'input' keys (old format)
+        if isinstance(input_data, dict) and 'method' in input_data and 'input' in input_data:
+            command = input_data.get('method', '')
+            input_value = input_data.get('input', '')
+        else:
+            # New format: input can be directly specified
+            command = data.get('command', '')
+            input_value = input_data
+        
         return cls(
             name=data.get('name', ''),
-            command=data.get('input', {}).get('method', ''),
-            input=data.get('input', {}).get('input', {}),
+            command=command,
+            input=input_value,
             expected_output=data.get('expected_output'),
             description=data.get('description'),
             timeout=data.get('timeout'),

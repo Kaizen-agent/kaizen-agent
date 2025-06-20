@@ -21,7 +21,8 @@ import typing
 # (none in this file)
 
 # Local application imports
-# (none in this file)
+from .input_parser import InputParser, InputParsingError
+from .variable_tracker import VariableTracker, track_variables, safe_serialize_value
 
 # Configure colored logging
 class ColoredFormatter(logging.Formatter):
@@ -1194,18 +1195,19 @@ class CodeRegionExtractor:
             raise ValueError(f"Failed to determine region type: {str(e)}")
 
 class CodeRegionExecutor:
-    """Executes code regions with proper import management."""
+    """Executes code regions with support for multiple inputs."""
     
     def __init__(self, workspace_root: Path, imported_dependencies: Optional[Dict[str, Any]] = None):
         """Initialize the code region executor.
         
         Args:
             workspace_root: Root directory of the workspace
-            imported_dependencies: Optional dictionary containing pre-imported dependencies
+            imported_dependencies: Pre-imported dependencies to make available
         """
         self.workspace_root = workspace_root
-        self.import_manager = ImportManager(workspace_root)
         self.imported_dependencies = imported_dependencies or {}
+        self.input_parser = InputParser()
+        self.import_manager = ImportManager(workspace_root)
     
     def _ensure_standard_imports(self, namespace: Dict[str, Any]) -> None:
         """Ensure all standard library imports are available in the namespace.
@@ -1273,7 +1275,7 @@ class CodeRegionExecutor:
         Args:
             region_info: Information about the code region to execute
             method_name: Optional name of the method to call
-            input_data: Optional input data for the execution
+            input_data: Optional input data for the execution (supports multiple inputs)
             
         Returns:
             The result of executing the region
@@ -1284,6 +1286,16 @@ class CodeRegionExecutor:
         logger.info(f"Executing region: {region_info.name}")
         
         try:
+            # Parse inputs if provided
+            parsed_inputs = []
+            if input_data is not None:
+                try:
+                    parsed_inputs = self.input_parser.parse_inputs(input_data)
+                    logger.info(f"Parsed {len(parsed_inputs)} input(s) for region execution")
+                except InputParsingError as e:
+                    logger.error(f"Failed to parse inputs: {str(e)}")
+                    raise ValueError(f"Input parsing error: {str(e)}")
+            
             # Create a custom import manager that uses pre-imported dependencies
             with self._create_custom_import_manager(region_info) as namespace:
                 # Ensure standard library imports are available
@@ -1295,19 +1307,86 @@ class CodeRegionExecutor:
                 # Execute based on region type
                 if region_info.type == RegionType.CLASS:
                     logger.debug(f"Executing class method: {method_name}")
-                    return self._execute_class_method(namespace, region_info, method_name, input_data)
+                    return self._execute_class_method(namespace, region_info, method_name, parsed_inputs)
                 elif region_info.type == RegionType.FUNCTION:
                     logger.debug(f"Executing function: {region_info.name}")
-                    return self._execute_function(namespace, region_info, input_data)
+                    return self._execute_function(namespace, region_info, parsed_inputs)
                 else:
                     logger.debug(f"Executing module function: {method_name}")
-                    return self._execute_module(namespace, region_info, method_name, input_data)
+                    return self._execute_module(namespace, region_info, method_name, parsed_inputs)
                     
         except Exception as e:
             logger.error(f"Failed to execute region '{region_info.name}': {str(e)}")
             logger.debug("Full traceback:", exc_info=True)
             raise ValueError(f"Error executing region '{region_info.name}': {str(e)}")
-    
+
+    def execute_region_with_tracking(self, region_info: RegionInfo, method_name: Optional[str] = None, 
+                                   input_data: Any = None, tracked_variables: Optional[Set[str]] = None) -> Dict[str, Any]:
+        """Execute a code region with variable tracking and return results.
+        
+        Args:
+            region_info: Information about the code region to execute
+            method_name: Optional name of the method to call
+            input_data: Optional input data for the execution (supports multiple inputs)
+            tracked_variables: Set of variable names to track during execution
+            
+        Returns:
+            Dictionary containing execution result and tracked variables
+            
+        Raises:
+            ValueError: If execution fails
+        """
+        logger.info(f"Executing region with tracking: {region_info.name}")
+        
+        if tracked_variables is None:
+            tracked_variables = set()
+        
+        try:
+            # Parse inputs if provided
+            parsed_inputs = []
+            if input_data is not None:
+                try:
+                    parsed_inputs = self.input_parser.parse_inputs(input_data)
+                    logger.info(f"Parsed {len(parsed_inputs)} input(s) for region execution")
+                except InputParsingError as e:
+                    logger.error(f"Failed to parse inputs: {str(e)}")
+                    raise ValueError(f"Input parsing error: {str(e)}")
+            
+            # Create a custom import manager that uses pre-imported dependencies
+            with self._create_custom_import_manager(region_info) as namespace:
+                # Ensure standard library imports are available
+                self._ensure_standard_imports(namespace)
+                
+                # Execute the code
+                self._execute_code(region_info.code, namespace)
+                
+                # Execute with variable tracking
+                with track_variables(tracked_variables) as tracker:
+                    # Execute based on region type
+                    if region_info.type == RegionType.CLASS:
+                        logger.debug(f"Executing class method with tracking: {method_name}")
+                        result = self._execute_class_method(namespace, region_info, method_name, parsed_inputs)
+                    elif region_info.type == RegionType.FUNCTION:
+                        logger.debug(f"Executing function with tracking: {region_info.name}")
+                        result = self._execute_function(namespace, region_info, parsed_inputs)
+                    else:
+                        logger.debug(f"Executing module function with tracking: {method_name}")
+                        result = self._execute_module(namespace, region_info, method_name, parsed_inputs)
+                    
+                    # Get tracked values
+                    tracked_values = tracker.get_all_tracked_values()
+                    
+                    return {
+                        'result': result,
+                        'tracked_values': tracked_values,
+                        'tracked_variables': list(tracked_variables)
+                    }
+                    
+        except Exception as e:
+            logger.error(f"Failed to execute region '{region_info.name}' with tracking: {str(e)}")
+            logger.debug("Full traceback:", exc_info=True)
+            raise ValueError(f"Error executing region '{region_info.name}' with tracking: {str(e)}")
+
     def _create_custom_import_manager(self, region_info: RegionInfo):
         """Create a custom import manager that uses pre-imported dependencies.
         
@@ -1351,14 +1430,14 @@ class CodeRegionExecutor:
         return CustomImportManager(self, region_info)
     
     def _execute_class_method(self, namespace: Dict[str, Any], region_info: RegionInfo, 
-                            method_name: str, input_data: Any) -> Any:
-        """Execute a method from a class.
+                            method_name: str, input_data: List[Any]) -> Any:
+        """Execute a method from a class with multiple inputs.
         
         Args:
             namespace: Dictionary containing the execution namespace
             region_info: Information about the code region
             method_name: Name of the method to call
-            input_data: Input data for the method
+            input_data: List of input data for the method
             
         Returns:
             The result of the method execution or error information if execution fails
@@ -1388,7 +1467,8 @@ class CodeRegionExecutor:
             
             # Validate input data
             try:
-                self._validate_input_data(input_data, f"method '{method_name}'")
+                for i, input_item in enumerate(input_data):
+                    self._validate_input_data(input_item, f"method '{method_name}' input {i}")
             except ValueError as e:
                 logger.error(f"Input validation failed: {str(e)}")
                 return {
@@ -1397,8 +1477,14 @@ class CodeRegionExecutor:
                     'type': 'ValueError'
                 }
             
-            logger.debug(f"Executing method with input data")
-            result = method(input_data)
+            logger.debug(f"Executing method with {len(input_data)} input(s)")
+            
+            # Call method with unpacked inputs
+            if input_data:
+                result = method(*input_data)
+            else:
+                result = method()
+                
             logger.debug(f"Method execution completed successfully")
             return {
                 'status': 'success',
@@ -1423,21 +1509,27 @@ class CodeRegionExecutor:
             }
     
     def _execute_function(self, namespace: Dict[str, Any], region_info: RegionInfo, 
-                         input_data: Any) -> Any:
-        """Execute a function."""
+                         input_data: List[Any]) -> Any:
+        """Execute a function with multiple inputs."""
         try:
             func = namespace[region_info.name]
             
             # Validate input data
-            self._validate_input_data(input_data, f"function '{region_info.name}'")
+            for i, input_item in enumerate(input_data):
+                self._validate_input_data(input_item, f"function '{region_info.name}' input {i}")
             
-            return func(input_data)
+            # Call function with unpacked inputs
+            if input_data:
+                return func(*input_data)
+            else:
+                return func()
+                
         except Exception as e:
             raise ValueError(f"Error executing function '{region_info.name}': {str(e)}")
     
     def _execute_module(self, namespace: Dict[str, Any], region_info: RegionInfo, 
-                       method_name: str, input_data: Any) -> Any:
-        """Execute a module-level function."""
+                       method_name: str, input_data: List[Any]) -> Any:
+        """Execute a module-level function with multiple inputs."""
         if not method_name:
             raise ValueError(f"Method name required for module region '{region_info.name}'")
         
@@ -1448,8 +1540,14 @@ class CodeRegionExecutor:
             func = namespace[method_name]
             
             # Validate input data
-            self._validate_input_data(input_data, f"function '{method_name}'")
+            for i, input_item in enumerate(input_data):
+                self._validate_input_data(input_item, f"function '{method_name}' input {i}")
             
-            return func(input_data)
+            # Call function with unpacked inputs
+            if input_data:
+                return func(*input_data)
+            else:
+                return func()
+                
         except Exception as e:
             raise ValueError(f"Error executing function '{method_name}': {str(e)}")

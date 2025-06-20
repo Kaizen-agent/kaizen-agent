@@ -164,12 +164,7 @@ class ConfigurationParser:
             if not isinstance(evaluation_data, dict):
                 return Result.failure("Invalid evaluation format: expected a dictionary")
             
-            evaluation = TestEvaluation(
-                criteria=evaluation_data.get('criteria', []),
-                llm_provider=evaluation_data.get('llm_provider'),
-                model=evaluation_data.get('model'),
-                settings=evaluation_data.get('settings', {})
-            )
+            evaluation = TestEvaluation.from_dict(evaluation_data)
             
             return Result.success(evaluation)
             

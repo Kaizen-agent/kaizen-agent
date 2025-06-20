@@ -196,7 +196,7 @@ class TestAllCommand(BaseTestCommand):
                             'file_path': str(self.config.file_path),
                             'region': region,
                             'method': step.command if hasattr(step, 'command') else None,
-                            'input': step.input
+                            'input': step.input  # This now supports multiple inputs
                         },
                         'evaluation': self.config.evaluation.__dict__ if self.config.evaluation else None
                     }
