@@ -13,6 +13,7 @@ Kaizen is a powerful CLI tool that automates test execution, failure analysis, a
 
 - [Features](#features)
 - [Installation](#installation)
+- [Environment Setup](#environment-setup)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
 - [Configuration](#configuration)
@@ -49,6 +50,58 @@ git clone https://github.com/yourusername/kaizen.git
 cd kaizen
 pip install -e ".[dev]"
 ```
+
+## Environment Setup
+
+Before using Kaizen, you need to set up your environment variables for API access.
+
+### Quick Setup
+
+1. **Check your current setup:**
+   ```bash
+   kaizen setup check-env
+   ```
+
+2. **Create a template .env file:**
+   ```bash
+   kaizen setup create-env-example
+   ```
+
+3. **Configure your API keys:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your actual API keys
+   ```
+
+### Required Environment Variables
+
+- **`GOOGLE_API_KEY`** (Required): Your Google AI API key for LLM operations
+  - Get it from: https://makersuite.google.com/app/apikey
+
+- **`GITHUB_TOKEN`** (Required for PR creation): Your GitHub personal access token
+  - Create it at: https://github.com/settings/tokens
+  - Required scopes: `repo`, `workflow`
+
+### Optional Environment Variables
+
+- **`OPENAI_API_KEY`**: Alternative LLM provider
+- **`ANTHROPIC_API_KEY`**: Alternative LLM provider
+- **`LLM_MODEL_NAME`**: Custom LLM model name (default: `gemini-2.5-flash-preview-05-20`)
+
+### Setup Commands
+
+```bash
+# Check environment status
+kaizen setup check-env
+
+# Create .env.example template
+kaizen setup create-env-example
+
+# Validate environment (for CI/CD)
+kaizen setup validate-env
+```
+
+For detailed setup instructions, see the [Environment Setup Guide](docs/environment-setup.md).
 
 ## Quick Start
 

@@ -18,6 +18,7 @@ from .errors import TestExecutionError, AutoFixError, DependencyError
 from .types import TestStatus, PRStrategy
 from ...autofix.main import AutoFix, FixStatus
 from .dependency_manager import DependencyManager, ImportResult
+from kaizen.cli.utils.env_setup import check_environment_setup, get_missing_variables
 
 @runtime_checkable
 class TestCommand(Protocol):
@@ -76,6 +77,9 @@ class TestAllCommand(BaseTestCommand):
             if self.config.description:
                 self.logger.info(f"Description: {self.config.description}")
             
+            # Validate environment before proceeding
+            self._validate_environment()
+            
             # Import dependencies and referenced files first
             import_result = self._import_dependencies()
             if not import_result.is_success:
@@ -125,6 +129,26 @@ class TestAllCommand(BaseTestCommand):
         finally:
             # Clean up dependency manager
             self.dependency_manager.cleanup()
+    
+    def _validate_environment(self) -> None:
+        """Validate environment setup before proceeding.
+        
+        Raises:
+            TestExecutionError: If environment is not properly configured
+        """
+        # Determine required features based on configuration
+        required_features = ['core']  # Core is always required
+        
+        if self.config.create_pr:
+            required_features.append('github')
+        
+        # Check environment setup
+        if not check_environment_setup(required_features=required_features):
+            missing_vars = get_missing_variables(required_features)
+            error_msg = f"Environment is not properly configured. Missing variables: {', '.join(missing_vars)}"
+            error_msg += "\n\nRun 'kaizen setup check-env' to see detailed status and setup instructions."
+            error_msg += "\nRun 'kaizen setup create-env-example' to create a .env.example file."
+            raise TestExecutionError(error_msg)
     
     def _import_dependencies(self) -> Result[ImportResult]:
         """Import dependencies and referenced files.

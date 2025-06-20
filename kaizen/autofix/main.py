@@ -965,7 +965,7 @@ class AutoFix:
                 config = self._convert_test_config_to_dict(config)
             self.config = FixConfig.from_dict(config)
             self.test_runner = TestRunner(runner_config)
-            self.pr_manager = PRManager(config)
+            self.pr_manager = None  # Initialize lazily when needed
             self.llm_fixer = LLMCodeFixer(config)  # Initialize LLM fixer
             logger.info("AutoFix initialized", extra={
                 'config': vars(self.config)
@@ -1290,8 +1290,24 @@ class AutoFix:
     def _create_pr_if_needed(self, results: Dict) -> None:
         """Create PR if changes were made."""
         if results['changes']:
-            pr_data = self.pr_manager.create_pr(results['changes'], results['test_results'])
+            pr_data = self._get_pr_manager().create_pr(results['changes'], results['test_results'])
             results['pr'] = pr_data
+    
+    def _get_pr_manager(self) -> PRManager:
+        """Get or create PRManager instance.
+        
+        Returns:
+            PRManager instance
+            
+        Raises:
+            ConfigurationError: If PRManager creation fails
+        """
+        if self.pr_manager is None:
+            try:
+                self.pr_manager = PRManager(self.config.__dict__)
+            except Exception as e:
+                raise ConfigurationError(f"Failed to initialize PRManager: {str(e)}")
+        return self.pr_manager
     
     def fix_code(self, file_path: str, failure_data: List[Dict[str, Any]] = None, 
                 config: Optional['TestConfiguration'] = None, files_to_fix: List[str] = None) -> Dict:
@@ -1413,7 +1429,7 @@ class AutoFix:
                             improvement_summary = TestResultAnalyzer.get_improvement_summary(best_attempt.test_results)
                             best_attempt.test_results['improvement_summary'] = improvement_summary
                             logger.info(f"start creating pr")
-                            pr_data = self.pr_manager.create_pr(
+                            pr_data = self._get_pr_manager().create_pr(
                                 best_attempt.changes,
                                 best_attempt.test_results
                             )
@@ -1514,7 +1530,7 @@ class AutoFix:
                 if file_results.get('changes')
             }
             if changes:
-                pr_data = self.pr_manager.create_pr(changes, results['test_results'])
+                pr_data = self._get_pr_manager().create_pr(changes, results['test_results'])
                 results['pr'] = pr_data
             
             logger.info("Directory fix completed", extra={
