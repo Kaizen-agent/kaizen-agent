@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # GitHub API limits
 GITHUB_PR_TITLE_MAX_LENGTH = 256
-GITHUB_PR_BODY_MAX_LENGTH = 65536
+GITHUB_PR_BODY_MAX_LENGTH = 50000
 
 class PRCreationError(Exception):
     """Error raised when PR creation fails."""
@@ -327,21 +327,39 @@ class PRManager:
         Returns:
             str: Formatted prompt for LLM
         """
-        prompt = """You are an expert software developer creating a pull request description. 
+        # Determine the number of attempts dynamically
+        attempts = test_results.get('attempts', [])
+        num_attempts = len(attempts)
+        
+        # Find the best attempt (the one with the most passed tests)
+        best_attempt_index = self._find_best_attempt(attempts)
+        
+        # Build dynamic table header
+        header_parts = ["Test Case", "Baseline"]
+        for i in range(1, num_attempts):
+            header_parts.append(f"Attempt {i}")
+        header_parts.extend(["Final Status", "Improvement"])
+        
+        # Create the table format string
+        table_header = "| " + " | ".join(header_parts) + " |"
+        table_separator = "|" + "|".join(["---" for _ in header_parts]) + "|"
+        
+        prompt = f"""You are an expert software developer creating a pull request description. 
 Generate a comprehensive, well-structured PR description based on the provided test results and code changes.
 
 The description should include the following sections in this exact order:
 
 1. **Summary** - A concise overview of what was accomplished, including agent information if available
 2. **Test Results Summary** - A markdown table showing test case results across all attempts
-3. **Detailed Results** - For each attempt, show detailed input/output/evaluation for each test case
+3. **Detailed Results** - Show detailed input/output/evaluation for baseline and best attempt only
 4. **Code Changes** - Brief summary of key code modifications made
 
 ## Format Requirements:
 
 ### Test Results Summary Table:
 Create a markdown table with these exact columns:
-| Test Case | Baseline | Attempt 1 | Attempt 2 | Final Status | Improvement |
+{table_header}
+{table_separator}
 
 - Use the status values from the test data (PASS, FAIL, ERROR, etc.)
 - Show "N/A" for attempts that don't exist
@@ -350,7 +368,11 @@ Create a markdown table with these exact columns:
 - The Improvement column should show "Yes" if the test improved from baseline, "No" if it stayed the same or got worse
 
 ### Detailed Results Section:
-For each attempt, create subsections like:
+Show detailed results for ONLY two attempts:
+1. **Baseline (Before Fixes)** - Always show this
+2. **Best Attempt** - Show the attempt with the most passed tests (Attempt {best_attempt_index if best_attempt_index > 0 else 'Baseline'})
+
+For each of these attempts, create subsections like:
 #### Baseline (Before Fixes)
 **Status:** [overall status]
 
@@ -362,11 +384,17 @@ For each test case in the attempt:
 - **Result:** [PASS/FAIL/ERROR]
 - **Evaluation:** [evaluation details if available]
 
-#### Attempt 1
+"""
+        
+        # Add best attempt section if it's different from baseline
+        if best_attempt_index > 0:
+            prompt += f"""#### Best Attempt (Attempt {best_attempt_index})
 **Status:** [overall status]
 [Same format as above]
 
-### Code Changes Section:
+"""
+        
+        prompt += """### Code Changes Section:
 Provide a concise summary of the most important code changes made. Focus on the key modifications and their purpose.
 
 Here is the data to work with:
@@ -386,7 +414,7 @@ Here is the data to work with:
 ## Instructions:
 - Make the summary clear and actionable, mentioning the agent if available
 - Create the exact table format specified above for test results
-- For detailed results, clearly show input, expected output, actual output, and evaluation for each test case in each attempt
+- For detailed results, ONLY show baseline and best attempt to keep the description concise
 - Highlight any patterns or improvements across attempts
 - Keep the code changes section brief and focused on the most important modifications
 - Ensure all sections are properly formatted with markdown
@@ -504,14 +532,32 @@ Generate the complete PR description now:"""
             description.append("\nNo test results available")
             return description
         
-        # Create table header
+        attempts = test_results['attempts']
+        if not attempts:
+            description.append("\nNo attempts available")
+            return description
+        
+        # Create dynamic table header based on number of attempts
+        header_parts = ["Test Case", "Baseline"]
+        
+        # Add attempt columns (skip baseline which is index 0)
+        for i in range(1, len(attempts)):
+            header_parts.append(f"Attempt {i}")
+        
+        # Add final columns
+        header_parts.extend(["Final Status", "Improvement"])
+        
+        # Create header row
+        header_row = "| " + " | ".join(header_parts) + " |"
+        separator_row = "|" + "|".join(["---" for _ in header_parts]) + "|"
+        
         description.extend([
-            "\n| Test Case | Baseline | Attempt 1 | Attempt 2 | Final Status | Improvement |",
-            "|-----------|----------|-----------|-----------|--------------|-------------|"
+            f"\n{header_row}",
+            separator_row
         ])
         
         # Get all test case names from the first attempt (baseline)
-        baseline_attempt = test_results['attempts'][0]
+        baseline_attempt = attempts[0]
         test_case_names = [tc['name'] for tc in baseline_attempt['test_cases']]
         
         # Add test cases
@@ -519,13 +565,13 @@ Generate the complete PR description now:"""
             row = [case_name]
             
             # Add results for each attempt
-            for attempt in test_results['attempts']:
+            for attempt in attempts:
                 result = next((tc['status'] for tc in attempt['test_cases'] if tc['name'] == case_name), 'N/A')
                 row.append(result)
             
             # Calculate improvement
             baseline_status = next((tc['status'] for tc in baseline_attempt['test_cases'] if tc['name'] == case_name), 'unknown')
-            final_status = next((tc['status'] for tc in test_results['attempts'][-1]['test_cases'] if tc['name'] == case_name), 'unknown')
+            final_status = next((tc['status'] for tc in attempts[-1]['test_cases'] if tc['name'] == case_name), 'unknown')
             
             # Determine if there was improvement
             if baseline_status == 'failed' and final_status == 'passed':
@@ -543,26 +589,70 @@ Generate the complete PR description now:"""
         
         return description
     
+    def _find_best_attempt(self, attempts: List[Attempt]) -> int:
+        """
+        Find the attempt with the most passed tests.
+        
+        Args:
+            attempts: List of attempts
+            
+        Returns:
+            int: Index of the best attempt (0 for baseline if it's the best)
+        """
+        if not attempts:
+            return 0
+        
+        best_attempt_index = 0
+        best_passed_count = 0
+        
+        for i, attempt in enumerate(attempts):
+            passed_count = sum(1 for test_case in attempt['test_cases'] 
+                             if test_case['status'].lower() == 'passed')
+            
+            if passed_count > best_passed_count:
+                best_passed_count = passed_count
+                best_attempt_index = i
+        
+        return best_attempt_index
+
     def _generate_detailed_results(self, test_results: TestResults) -> List[str]:
-        """Generate detailed test results for each attempt."""
+        """Generate detailed test results for baseline and best attempt only."""
         description = ["\n## Detailed Results"]
         
         if not test_results.get('attempts'):
             return description
         
-        for i, attempt in enumerate(test_results['attempts']):
-            # Label the first attempt as baseline
-            if i == 0:
-                attempt_label = "Baseline (Before Fixes)"
-            else:
-                attempt_label = f"Attempt {i}"
-                
+        attempts = test_results['attempts']
+        
+        # Find the best attempt
+        best_attempt_index = self._find_best_attempt(attempts)
+        
+        # Always show baseline (index 0)
+        baseline_attempt = attempts[0]
+        description.extend([
+            f"\n### Baseline (Before Fixes)",
+            f"Status: {baseline_attempt['status']}"
+        ])
+        
+        for test_case in baseline_attempt['test_cases']:
             description.extend([
-                f"\n### {attempt_label}",
-                f"Status: {attempt['status']}"
+                f"\n#### {test_case['name']}",
+                f"Input: {test_case.get('input', 'N/A')}",
+                f"Expected Output: {test_case.get('expected_output', 'N/A')}",
+                f"Actual Output: {test_case.get('actual_output', 'N/A')}",
+                f"Result: {test_case['status']}",
+                f"Evaluation: {test_case.get('evaluation', 'N/A')}"
+            ])
+        
+        # Show best attempt if it's different from baseline
+        if best_attempt_index > 0:
+            best_attempt = attempts[best_attempt_index]
+            description.extend([
+                f"\n### Best Attempt (Attempt {best_attempt_index})",
+                f"Status: {best_attempt['status']}"
             ])
             
-            for test_case in attempt['test_cases']:
+            for test_case in best_attempt['test_cases']:
                 description.extend([
                     f"\n#### {test_case['name']}",
                     f"Input: {test_case.get('input', 'N/A')}",
@@ -712,7 +802,7 @@ Generate the complete PR description now:"""
             if self.pr_data['status'] not in valid_statuses:
                 raise ValueError(f"Invalid status: {self.pr_data['status']}")
             
-            # Validate description length (GitHub limit is 65536 characters)
+            # Validate description length (GitHub limit is 50000 characters)
             max_description_length = GITHUB_PR_BODY_MAX_LENGTH
             if len(self.pr_data['description']) > max_description_length:
                 logger.warning(f"PR description is too long ({len(self.pr_data['description'])} chars), truncating to {max_description_length}")
@@ -727,7 +817,7 @@ Generate the complete PR description now:"""
     
     def _truncate_description(self, description: str, max_length: int) -> str:
         """
-        Truncate the PR description to fit within GitHub's character limit while preserving important sections.
+        Truncate the PR description to fit within GitHub's character limit.
         
         Args:
             description: The full PR description
@@ -747,114 +837,11 @@ Generate the complete PR description now:"""
             reserved_length = len(truncation_notice)
             available_length = max_length - reserved_length
             
-            # Define priority sections in order of importance
-            priority_sections = [
-                "## Summary",
-                "## Test Results Summary", 
-                "## Code Changes",
-                "## Detailed Results",
-                "## Additional Summary"
-            ]
-            
-            # Try to preserve sections in priority order
-            truncated_parts = []
-            current_length = 0
-            
-            # Always include the beginning (before first section)
-            lines = description.split('\n')
-            section_start = -1
-            
-            # Find where the first section starts
-            for i, line in enumerate(lines):
-                if line.startswith('## '):
-                    section_start = i
-                    break
-            
-            if section_start > 0:
-                # Include everything before the first section
-                intro_lines = lines[:section_start]
-                intro_text = '\n'.join(intro_lines)
-                if len(intro_text) <= available_length:
-                    truncated_parts.append(intro_text)
-                    current_length += len(intro_text) + 1  # +1 for newline
-                else:
-                    # Even the intro is too long, truncate it
-                    truncated_parts.append(intro_text[:available_length-3] + "...")
-                    current_length = available_length
-            
-            # Process sections in priority order
-            for section_name in priority_sections:
-                if current_length >= available_length:
-                    break
-                
-                # Find the section
-                section_start = -1
-                section_end = -1
-                
-                for i, line in enumerate(lines):
-                    if line.strip() == section_name:
-                        section_start = i
-                        # Find the end of this section (next section or end of file)
-                        for j in range(i + 1, len(lines)):
-                            if lines[j].startswith('## ') and lines[j] != section_name:
-                                section_end = j
-                                break
-                        if section_end == -1:
-                            section_end = len(lines)
-                        break
-                
-                if section_start != -1:
-                    section_lines = lines[section_start:section_end]
-                    section_text = '\n'.join(section_lines)
-                    
-                    # Check if we can fit this section
-                    remaining_length = available_length - current_length
-                    
-                    if len(section_text) <= remaining_length:
-                        # Can fit the entire section
-                        if truncated_parts:
-                            truncated_parts.append('')  # Add blank line between sections
-                            current_length += 1
-                        truncated_parts.append(section_text)
-                        current_length += len(section_text)
-                    else:
-                        # Can't fit the entire section, try to fit a truncated version
-                        if truncated_parts:
-                            truncated_parts.append('')  # Add blank line between sections
-                            current_length += 1
-                        
-                        # For summary sections, try to fit at least the header and some content
-                        if section_name in ["## Summary", "## Test Results Summary", "## Code Changes"]:
-                            # Try to fit header + some content
-                            header_line = section_lines[0]
-                            truncated_parts.append(header_line)
-                            current_length += len(header_line) + 1
-                            
-                            # Try to add some content lines
-                            remaining_length = available_length - current_length
-                            content_lines = section_lines[1:]
-                            content_text = '\n'.join(content_lines)
-                            
-                            if len(content_text) <= remaining_length:
-                                truncated_parts.append(content_text)
-                                current_length += len(content_text)
-                            else:
-                                # Truncate content
-                                truncated_content = content_text[:remaining_length-3] + "..."
-                                truncated_parts.append(truncated_content)
-                                current_length += len(truncated_content)
-                        else:
-                            # For less critical sections, just add header if possible
-                            header_line = section_lines[0]
-                            if len(header_line) <= remaining_length:
-                                truncated_parts.append(header_line)
-                                current_length += len(header_line)
-            
-            # Combine all parts
-            final_description = '\n'.join(truncated_parts)
+            # Take the first available_length characters
+            truncated_description = description[:available_length]
             
             # Add truncation notice
-            final_description += truncation_notice
+            final_description = truncated_description + truncation_notice
             
             # Final safety check
             if len(final_description) > max_length:
@@ -1302,7 +1289,7 @@ Generate the complete PR description now:"""
                 logger.warning(f"PR title is too long ({len(self.pr_data['title'])} chars), truncating to {GITHUB_PR_TITLE_MAX_LENGTH}")
                 self.pr_data['title'] = self.pr_data['title'][:GITHUB_PR_TITLE_MAX_LENGTH-3] + "..."
             
-            # Final validation of description length (GitHub limit is 65536 characters)
+            # Final validation of description length (GitHub limit is 50000 characters)
             max_description_length = GITHUB_PR_BODY_MAX_LENGTH
             if len(self.pr_data['description']) > max_description_length:
                 logger.warning(f"PR description is too long ({len(self.pr_data['description'])} chars), truncating to {max_description_length}")

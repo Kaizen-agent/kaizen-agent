@@ -21,7 +21,7 @@ from .file.dependency import collect_referenced_files, analyze_failure_dependenc
 from .code.fixer import fix_common_syntax_issues, fix_aggressive_syntax_issues, apply_code_changes
 from .code.llm_fixer import LLMCodeFixer
 from .test.runner import TestRunner
-from .pr.manager import PRManager
+from .pr.manager import PRManager, TestCase, Attempt, AgentInfo, TestResults
 from .types import FixStatus, CompatibilityIssue
 
 # Configure logging
