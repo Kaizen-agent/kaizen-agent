@@ -341,15 +341,17 @@ The description should include the following sections in this exact order:
 
 ### Test Results Summary Table:
 Create a markdown table with these exact columns:
-| Test Case | Attempt 1 | Attempt 2 | Attempt 3 | Final Status | Reason |
+| Test Case | Baseline | Attempt 1 | Attempt 2 | Final Status | Improvement |
 
 - Use the status values from the test data (PASS, FAIL, ERROR, etc.)
 - Show "N/A" for attempts that don't exist
-- Use the reason from the final attempt for each test case
+- The Baseline column shows the initial state before any fixes
+- The Final Status column shows the status after all attempts
+- The Improvement column should show "Yes" if the test improved from baseline, "No" if it stayed the same or got worse
 
 ### Detailed Results Section:
 For each attempt, create subsections like:
-#### Attempt 1
+#### Baseline (Before Fixes)
 **Status:** [overall status]
 
 For each test case in the attempt:
@@ -359,7 +361,10 @@ For each test case in the attempt:
 - **Actual Output:** [actual output]
 - **Result:** [PASS/FAIL/ERROR]
 - **Evaluation:** [evaluation details if available]
-- **Reason:** [reason for result if available]
+
+#### Attempt 1
+**Status:** [overall status]
+[Same format as above]
 
 ### Code Changes Section:
 Provide a concise summary of the most important code changes made. Focus on the key modifications and their purpose.
@@ -501,13 +506,16 @@ Generate the complete PR description now:"""
         
         # Create table header
         description.extend([
-            "\n| Test Case | Attempt 1 | Attempt 2 | Attempt 3 | Reason |",
-            "|-----------|-----------|-----------|-----------|--------|"
+            "\n| Test Case | Baseline | Attempt 1 | Attempt 2 | Final Status | Improvement |",
+            "|-----------|----------|-----------|-----------|--------------|-------------|"
         ])
         
+        # Get all test case names from the first attempt (baseline)
+        baseline_attempt = test_results['attempts'][0]
+        test_case_names = [tc['name'] for tc in baseline_attempt['test_cases']]
+        
         # Add test cases
-        for test_case in test_results['attempts'][0]['test_cases']:
-            case_name = test_case['name']
+        for case_name in test_case_names:
             row = [case_name]
             
             # Add results for each attempt
@@ -515,9 +523,21 @@ Generate the complete PR description now:"""
                 result = next((tc['status'] for tc in attempt['test_cases'] if tc['name'] == case_name), 'N/A')
                 row.append(result)
             
-            # Add reason from the last attempt
-            reason = next((tc['reason'] for tc in test_results['attempts'][-1]['test_cases'] if tc['name'] == case_name), 'N/A')
-            row.append(reason)
+            # Calculate improvement
+            baseline_status = next((tc['status'] for tc in baseline_attempt['test_cases'] if tc['name'] == case_name), 'unknown')
+            final_status = next((tc['status'] for tc in test_results['attempts'][-1]['test_cases'] if tc['name'] == case_name), 'unknown')
+            
+            # Determine if there was improvement
+            if baseline_status == 'failed' and final_status == 'passed':
+                improvement = 'Yes'
+            elif baseline_status == 'error' and final_status in ['passed', 'failed']:
+                improvement = 'Yes'
+            elif baseline_status == final_status:
+                improvement = 'No'
+            else:
+                improvement = 'No'  # If it got worse or unclear
+            
+            row.append(improvement)
             
             description.append(f"| {' | '.join(row)} |")
         
@@ -530,9 +550,15 @@ Generate the complete PR description now:"""
         if not test_results.get('attempts'):
             return description
         
-        for i, attempt in enumerate(test_results['attempts'], 1):
+        for i, attempt in enumerate(test_results['attempts']):
+            # Label the first attempt as baseline
+            if i == 0:
+                attempt_label = "Baseline (Before Fixes)"
+            else:
+                attempt_label = f"Attempt {i}"
+                
             description.extend([
-                f"\n### Attempt {i}",
+                f"\n### {attempt_label}",
                 f"Status: {attempt['status']}"
             ])
             

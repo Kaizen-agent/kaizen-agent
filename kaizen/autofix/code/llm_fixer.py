@@ -267,8 +267,82 @@ Format your response as:
             f"Content:\n{content}"
         ]
         
+        # Handle enhanced failure data with learning context
         if failure_data:
-            prompt_parts.append(f"\nFailure Information:\n{failure_data}")
+            if isinstance(failure_data, dict) and 'learning_context' in failure_data:
+                # Enhanced failure data with learning
+                original_failures = failure_data.get('original_failures', {})
+                learning_context = failure_data.get('learning_context', {})
+                previous_analysis = failure_data.get('previous_attempt_analysis', {})
+                
+                # Add original failure information
+                if original_failures:
+                    prompt_parts.append(f"\nOriginal Failure Information:\n{original_failures}")
+                
+                # Add learning context from previous attempts
+                if learning_context:
+                    current_attempt = learning_context.get('current_attempt', 1)
+                    total_attempts = learning_context.get('total_attempts', 0)
+                    
+                    learning_guidance = f"\nLEARNING FROM PREVIOUS ATTEMPTS (Attempt {current_attempt} of {total_attempts}):"
+                    
+                    # Add successful patterns
+                    successful_patterns = learning_context.get('successful_patterns', [])
+                    if successful_patterns:
+                        learning_guidance += f"\n- What worked in previous attempts: {', '.join(successful_patterns)}"
+                        learning_guidance += "\n- Focus on similar approaches that were successful"
+                    
+                    # Add failed approaches
+                    failed_approaches = learning_context.get('failed_approaches', [])
+                    if failed_approaches:
+                        learning_guidance += f"\n- What didn't work: {', '.join(failed_approaches)}"
+                        learning_guidance += "\n- Avoid repeating these failed approaches"
+                    
+                    # Add common errors
+                    common_errors = learning_context.get('common_errors', [])
+                    if common_errors:
+                        learning_guidance += f"\n- Common error patterns: {', '.join(common_errors)}"
+                        learning_guidance += "\n- Pay special attention to these error types"
+                    
+                    # Add improvement insights
+                    improvement_insights = learning_context.get('improvement_insights', [])
+                    if improvement_insights:
+                        learning_guidance += f"\n- Recent improvements: {', '.join(improvement_insights)}"
+                        learning_guidance += "\n- Build on these successful improvements"
+                    
+                    prompt_parts.append(learning_guidance)
+                
+                # Add specific analysis from previous attempts
+                if previous_analysis:
+                    analysis_guidance = "\nPREVIOUS ATTEMPT ANALYSIS:"
+                    
+                    what_worked = previous_analysis.get('what_worked', [])
+                    if what_worked:
+                        analysis_guidance += f"\n- Successful strategies: {', '.join(what_worked)}"
+                    
+                    what_didnt_work = previous_analysis.get('what_didnt_work', [])
+                    if what_didnt_work:
+                        analysis_guidance += f"\n- Failed strategies: {', '.join(what_didnt_work)}"
+                    
+                    recommendations = previous_analysis.get('recommendations', [])
+                    if recommendations:
+                        analysis_guidance += f"\n- Recommendations: {', '.join(recommendations)}"
+                    
+                    prompt_parts.append(analysis_guidance)
+                
+                # Add strategic guidance for subsequent attempts
+                if current_attempt > 1:
+                    strategic_guidance = f"\nSTRATEGIC GUIDANCE FOR ATTEMPT {current_attempt}:"
+                    strategic_guidance += "\n- Learn from previous attempts and avoid repeating failed approaches"
+                    strategic_guidance += "\n- Focus on patterns that showed improvement"
+                    strategic_guidance += "\n- Be more targeted and specific in your fixes"
+                    strategic_guidance += "\n- Consider different approaches if previous ones didn't work"
+                    
+                    prompt_parts.append(strategic_guidance)
+                
+            else:
+                # Standard failure data (backward compatibility)
+                prompt_parts.append(f"\nFailure Information:\n{failure_data}")
         
         if config:
             # Only include relevant configuration info, not test cases
@@ -277,6 +351,31 @@ Format your response as:
                 'description': getattr(config, 'description', None),
                 'goal': getattr(config, 'goal', None)
             }
+            
+            # Add evaluation criteria if available
+            if hasattr(config, 'evaluation') and config.evaluation:
+                evaluation_info = {}
+                
+                # Add legacy criteria
+                if hasattr(config.evaluation, 'criteria') and config.evaluation.criteria:
+                    evaluation_info['criteria'] = config.evaluation.criteria
+                
+                # Add new evaluation targets
+                if hasattr(config.evaluation, 'evaluation_targets') and config.evaluation.evaluation_targets:
+                    evaluation_info['evaluation_targets'] = [
+                        target.to_dict() if hasattr(target, 'to_dict') else {
+                            'name': getattr(target, 'name', None),
+                            'source': getattr(target, 'source', None),
+                            'criteria': getattr(target, 'criteria', None),
+                            'description': getattr(target, 'description', None),
+                            'weight': getattr(target, 'weight', None)
+                        }
+                        for target in config.evaluation.evaluation_targets
+                    ]
+                
+                if evaluation_info:
+                    config_info['evaluation'] = evaluation_info
+            
             prompt_parts.append(f"\nConfiguration Context:\n{config_info}")
         
         if context_files:
@@ -339,8 +438,82 @@ Remember: Focus on minimal, necessary changes that follow best practices. Avoid 
             f"Content:\n{content}"
         ]
         
+        # Handle enhanced failure data with learning context
         if failure_data:
-            prompt_parts.append(f"\nFailure Information:\n{failure_data}")
+            if isinstance(failure_data, dict) and 'learning_context' in failure_data:
+                # Enhanced failure data with learning
+                original_failures = failure_data.get('original_failures', {})
+                learning_context = failure_data.get('learning_context', {})
+                previous_analysis = failure_data.get('previous_attempt_analysis', {})
+                
+                # Add original failure information
+                if original_failures:
+                    prompt_parts.append(f"\nOriginal Failure Information:\n{original_failures}")
+                
+                # Add learning context from previous attempts
+                if learning_context:
+                    current_attempt = learning_context.get('current_attempt', 1)
+                    total_attempts = learning_context.get('total_attempts', 0)
+                    
+                    learning_guidance = f"\nLEARNING FROM PREVIOUS ATTEMPTS (Attempt {current_attempt} of {total_attempts}):"
+                    
+                    # Add successful patterns
+                    successful_patterns = learning_context.get('successful_patterns', [])
+                    if successful_patterns:
+                        learning_guidance += f"\n- What worked in previous attempts: {', '.join(successful_patterns)}"
+                        learning_guidance += "\n- Focus on similar approaches that were successful"
+                    
+                    # Add failed approaches
+                    failed_approaches = learning_context.get('failed_approaches', [])
+                    if failed_approaches:
+                        learning_guidance += f"\n- What didn't work: {', '.join(failed_approaches)}"
+                        learning_guidance += "\n- Avoid repeating these failed approaches"
+                    
+                    # Add common errors
+                    common_errors = learning_context.get('common_errors', [])
+                    if common_errors:
+                        learning_guidance += f"\n- Common error patterns: {', '.join(common_errors)}"
+                        learning_guidance += "\n- Pay special attention to these error types"
+                    
+                    # Add improvement insights
+                    improvement_insights = learning_context.get('improvement_insights', [])
+                    if improvement_insights:
+                        learning_guidance += f"\n- Recent improvements: {', '.join(improvement_insights)}"
+                        learning_guidance += "\n- Build on these successful improvements"
+                    
+                    prompt_parts.append(learning_guidance)
+                
+                # Add specific analysis from previous attempts
+                if previous_analysis:
+                    analysis_guidance = "\nPREVIOUS ATTEMPT ANALYSIS:"
+                    
+                    what_worked = previous_analysis.get('what_worked', [])
+                    if what_worked:
+                        analysis_guidance += f"\n- Successful strategies: {', '.join(what_worked)}"
+                    
+                    what_didnt_work = previous_analysis.get('what_didnt_work', [])
+                    if what_didnt_work:
+                        analysis_guidance += f"\n- Failed strategies: {', '.join(what_didnt_work)}"
+                    
+                    recommendations = previous_analysis.get('recommendations', [])
+                    if recommendations:
+                        analysis_guidance += f"\n- Recommendations: {', '.join(recommendations)}"
+                    
+                    prompt_parts.append(analysis_guidance)
+                
+                # Add strategic guidance for subsequent attempts
+                if current_attempt > 1:
+                    strategic_guidance = f"\nSTRATEGIC GUIDANCE FOR ATTEMPT {current_attempt}:"
+                    strategic_guidance += "\n- Learn from previous attempts and avoid repeating failed approaches"
+                    strategic_guidance += "\n- Focus on patterns that showed improvement"
+                    strategic_guidance += "\n- Be more targeted and specific in your analysis"
+                    strategic_guidance += "\n- Consider different approaches if previous ones didn't work"
+                    
+                    prompt_parts.append(strategic_guidance)
+                
+            else:
+                # Standard failure data (backward compatibility)
+                prompt_parts.append(f"\nFailure Information:\n{failure_data}")
         
         if user_goal:
             prompt_parts.append(f"\nUser Goal:\n{user_goal}")

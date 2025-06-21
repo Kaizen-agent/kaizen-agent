@@ -27,22 +27,6 @@ from .types import FixStatus, CompatibilityIssue
 # Configure logging
 logger = logging.getLogger(__name__)
 
-class CompatibilityIssue(NamedTuple):
-    """Represents a compatibility issue found during code analysis."""
-    file_path: str
-    issue_type: str
-    description: str
-    line_number: Optional[int] = None
-
-class FixStatus(Enum):
-    """Status of a code fix operation."""
-    SUCCESS = auto()
-    ERROR = auto()
-    COMPATIBILITY_ISSUE = auto()
-    PENDING = auto()
-    RETRY = auto()
-    FAILED = auto()
-
 @dataclass
 class FixResult:
     """Result of a code fix operation."""
@@ -295,6 +279,265 @@ class TestResultAnalyzer:
             'total': total_tests,
             'passed': passed_tests,
             'improved': passed_tests > 0
+        }
+
+class LearningManager:
+    """Manages learning between fix attempts to improve subsequent fixes."""
+    
+    def __init__(self):
+        self.attempt_history: List[Dict[str, Any]] = []
+        self.learned_patterns: Dict[str, List[str]] = {
+            'successful_fixes': [],
+            'failed_approaches': [],
+            'common_errors': [],
+            'improvement_insights': []
+        }
+        self.baseline_failures: Optional[Dict] = None
+    
+    def set_baseline_failures(self, failure_data: Optional[Dict]) -> None:
+        """Set the baseline failure data from the initial test run."""
+        self.baseline_failures = failure_data
+        logger.info("Set baseline failures for learning", extra={
+            'has_failures': bool(failure_data)
+        })
+    
+    def record_attempt(self, attempt_number: int, changes: Dict[str, Any], 
+                      test_results: Dict[str, Any], status: FixStatus) -> None:
+        """Record an attempt and its results for learning."""
+        attempt_record = {
+            'attempt_number': attempt_number,
+            'changes': changes,
+            'test_results': test_results,
+            'status': status,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        self.attempt_history.append(attempt_record)
+        self._analyze_attempt_for_learning(attempt_record)
+        
+        logger.info(f"Recorded attempt {attempt_number} for learning", extra={
+            'status': status,
+            'has_changes': bool(changes)
+        })
+    
+    def _analyze_attempt_for_learning(self, attempt_record: Dict[str, Any]) -> None:
+        """Analyze an attempt to extract learning patterns."""
+        changes = attempt_record.get('changes', {})
+        test_results = attempt_record.get('test_results', {})
+        status = attempt_record.get('status')
+        
+        # Analyze what worked
+        if status == FixStatus.SUCCESS:
+            self._extract_successful_patterns(changes, test_results)
+        else:
+            self._extract_failure_patterns(changes, test_results)
+        
+        # Analyze improvements even if not fully successful
+        if TestResultAnalyzer.has_improvements(test_results):
+            self._extract_improvement_insights(changes, test_results)
+    
+    def _extract_successful_patterns(self, changes: Dict[str, Any], test_results: Dict[str, Any]) -> None:
+        """Extract patterns from successful fixes."""
+        for file_path, file_changes in changes.items():
+            if isinstance(file_changes, dict) and 'fixed_code' in file_changes:
+                # Analyze the type of fix that worked
+                fix_type = self._classify_fix_type(file_changes)
+                if fix_type:
+                    self.learned_patterns['successful_fixes'].append(fix_type)
+    
+    def _extract_failure_patterns(self, changes: Dict[str, Any], test_results: Dict[str, Any]) -> None:
+        """Extract patterns from failed attempts."""
+        for file_path, file_changes in changes.items():
+            if isinstance(file_changes, dict) and 'fixed_code' in file_changes:
+                # Analyze what didn't work
+                failed_approach = self._classify_failed_approach(file_changes, test_results)
+                if failed_approach:
+                    self.learned_patterns['failed_approaches'].append(failed_approach)
+        
+        # Extract common errors from test results
+        common_errors = self._extract_common_errors(test_results)
+        self.learned_patterns['common_errors'].extend(common_errors)
+    
+    def _extract_improvement_insights(self, changes: Dict[str, Any], test_results: Dict[str, Any]) -> None:
+        """Extract insights from partial improvements."""
+        improvement_summary = TestResultAnalyzer.get_improvement_summary(test_results)
+        if improvement_summary['improved']:
+            insight = f"Attempt improved {improvement_summary['passed']}/{improvement_summary['total']} tests"
+            self.learned_patterns['improvement_insights'].append(insight)
+    
+    def _classify_fix_type(self, file_changes: Dict[str, Any]) -> Optional[str]:
+        """Classify the type of fix that was applied."""
+        fixed_code = file_changes.get('fixed_code', '')
+        if not fixed_code:
+            return None
+        
+        # Simple heuristics to classify fix types
+        if 'try:' in fixed_code and 'except' in fixed_code:
+            return 'error_handling_added'
+        elif 'if ' in fixed_code and 'is None' in fixed_code:
+            return 'null_check_added'
+        elif 'import ' in fixed_code:
+            return 'import_fixed'
+        elif 'def ' in fixed_code and '->' in fixed_code:
+            return 'type_hints_added'
+        elif 'class ' in fixed_code:
+            return 'class_structure_fixed'
+        
+        return 'general_code_fix'
+    
+    def _classify_failed_approach(self, file_changes: Dict[str, Any], test_results: Dict[str, Any]) -> Optional[str]:
+        """Classify what approach failed."""
+        # Analyze test results to understand what failed
+        failed_tests = []
+        for region, result in test_results.items():
+            if region == 'overall_status':
+                continue
+            if isinstance(result, dict):
+                test_cases = result.get('test_cases', [])
+                for tc in test_cases:
+                    if tc.get('status') == 'failed':
+                        failed_tests.append(tc.get('name', 'Unknown'))
+        
+        if failed_tests:
+            return f"failed_to_fix_tests: {', '.join(failed_tests[:3])}"  # Limit to first 3
+        
+        return 'general_fix_failed'
+    
+    def _extract_common_errors(self, test_results: Dict[str, Any]) -> List[str]:
+        """Extract common error patterns from test results."""
+        errors = []
+        for region, result in test_results.items():
+            if region == 'overall_status':
+                continue
+            if isinstance(result, dict):
+                test_cases = result.get('test_cases', [])
+                for tc in test_cases:
+                    if tc.get('status') == 'failed':
+                        error_msg = tc.get('details', '')
+                        if error_msg:
+                            # Extract error type
+                            if 'SyntaxError' in error_msg:
+                                errors.append('syntax_error')
+                            elif 'ImportError' in error_msg:
+                                errors.append('import_error')
+                            elif 'AttributeError' in error_msg:
+                                errors.append('attribute_error')
+                            elif 'TypeError' in error_msg:
+                                errors.append('type_error')
+                            elif 'NameError' in error_msg:
+                                errors.append('name_error')
+        
+        return list(set(errors))  # Remove duplicates
+    
+    def get_enhanced_failure_data(self, current_attempt: int) -> Dict[str, Any]:
+        """Get enhanced failure data that includes learning from previous attempts."""
+        if not self.baseline_failures:
+            return {}
+        
+        enhanced_data = {
+            'original_failures': self.baseline_failures,
+            'learning_context': {
+                'current_attempt': current_attempt,
+                'total_attempts': len(self.attempt_history),
+                'successful_patterns': self.learned_patterns['successful_fixes'][-3:],  # Last 3
+                'failed_approaches': self.learned_patterns['failed_approaches'][-3:],  # Last 3
+                'common_errors': list(set(self.learned_patterns['common_errors'])),  # Unique
+                'improvement_insights': self.learned_patterns['improvement_insights'][-2:]  # Last 2
+            }
+        }
+        
+        # Add specific guidance based on previous attempts
+        if current_attempt > 1:
+            enhanced_data['previous_attempt_analysis'] = self._analyze_previous_attempts()
+        
+        logger.info(f"Generated enhanced failure data for attempt {current_attempt}", extra={
+            'has_learning_context': bool(enhanced_data['learning_context']),
+            'successful_patterns_count': len(enhanced_data['learning_context']['successful_patterns']),
+            'failed_approaches_count': len(enhanced_data['learning_context']['failed_approaches'])
+        })
+        
+        return enhanced_data
+    
+    def _analyze_previous_attempts(self) -> Dict[str, Any]:
+        """Analyze previous attempts to provide specific guidance."""
+        if len(self.attempt_history) < 2:
+            return {}
+        
+        analysis = {
+            'what_worked': [],
+            'what_didnt_work': [],
+            'recommendations': []
+        }
+        
+        # Analyze recent attempts
+        recent_attempts = self.attempt_history[-3:]  # Last 3 attempts
+        
+        for attempt in recent_attempts:
+            if attempt['status'] == FixStatus.SUCCESS:
+                analysis['what_worked'].append(f"Attempt {attempt['attempt_number']}: Complete success")
+            elif TestResultAnalyzer.has_improvements(attempt['test_results']):
+                improvement = TestResultAnalyzer.get_improvement_summary(attempt['test_results'])
+                analysis['what_worked'].append(
+                    f"Attempt {attempt['attempt_number']}: Improved {improvement['passed']}/{improvement['total']} tests"
+                )
+            else:
+                analysis['what_didnt_work'].append(f"Attempt {attempt['attempt_number']}: No improvement")
+        
+        # Generate recommendations based on patterns
+        if self.learned_patterns['successful_fixes']:
+            analysis['recommendations'].append(
+                f"Focus on: {', '.join(set(self.learned_patterns['successful_fixes']))}"
+            )
+        
+        if self.learned_patterns['failed_approaches']:
+            analysis['recommendations'].append(
+                f"Avoid: {', '.join(set(self.learned_patterns['failed_approaches']))}"
+            )
+        
+        return analysis
+    
+    def get_learning_summary(self) -> Dict[str, Any]:
+        """Get a summary of all learning accumulated."""
+        return {
+            'total_attempts': len(self.attempt_history),
+            'successful_patterns': list(set(self.learned_patterns['successful_fixes'])),
+            'failed_approaches': list(set(self.learned_patterns['failed_approaches'])),
+            'common_errors': list(set(self.learned_patterns['common_errors'])),
+            'improvement_insights': self.learned_patterns['improvement_insights'],
+            'learning_progress': self._calculate_learning_progress()
+        }
+    
+    def _calculate_learning_progress(self) -> Dict[str, Any]:
+        """Calculate learning progress metrics."""
+        if not self.attempt_history:
+            return {'progress': 0, 'trend': 'no_data'}
+        
+        # Calculate success rate trend
+        recent_attempts = self.attempt_history[-3:]
+        success_count = sum(1 for a in recent_attempts if a['status'] == FixStatus.SUCCESS)
+        success_rate = success_count / len(recent_attempts)
+        
+        # Determine trend
+        if len(self.attempt_history) >= 2:
+            first_half = self.attempt_history[:len(self.attempt_history)//2]
+            second_half = self.attempt_history[len(self.attempt_history)//2:]
+            
+            first_success_rate = sum(1 for a in first_half if a['status'] == FixStatus.SUCCESS) / len(first_half)
+            second_success_rate = sum(1 for a in second_half if a['status'] == FixStatus.SUCCESS) / len(second_half)
+            
+            if second_success_rate > first_success_rate:
+                trend = 'improving'
+            elif second_success_rate < first_success_rate:
+                trend = 'declining'
+            else:
+                trend = 'stable'
+        else:
+            trend = 'insufficient_data'
+        
+        return {
+            'recent_success_rate': success_rate,
+            'trend': trend,
+            'patterns_learned': len(set(self.learned_patterns['successful_fixes']))
         }
 
 class FixAttemptTracker:
@@ -1333,11 +1576,16 @@ class AutoFix:
                 return {'status': 'error', 'error': 'No files to fix provided'}
             
             # Initialize components
-            
             state_manager = CodeStateManager(set(files_to_fix))
             logger.info(f"State manager: {state_manager}")
             attempt_tracker = FixAttemptTracker(self.config.max_retries)
             logger.info(f"Attempt tracker: {attempt_tracker}")
+            
+            # Initialize learning manager
+            learning_manager = LearningManager()
+            learning_manager.set_baseline_failures(failure_data)
+            logger.info("Learning manager initialized")
+            
             results = {'status': 'pending', 'changes': {}, 'processed_files': []}
             
             # Store the original branch
@@ -1347,6 +1595,11 @@ class AutoFix:
             # Initialize branch_name with a default value
             branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
             subprocess.run(["git", "checkout", "-b", branch_name], check=True)
+            
+            # Run baseline test before any fixes
+            logger.info("Running baseline test before any fixes")
+            baseline_test_results = self.test_runner.run_tests(Path(file_path))
+            logger.info(f"Baseline test results: {baseline_test_results}")
             
             try:
                 logger.info(f"Attempt tracker should continue check")
@@ -1362,6 +1615,13 @@ class AutoFix:
                             for path in files_to_fix
                         }
                         
+                        # Get enhanced failure data with learning from previous attempts
+                        enhanced_failure_data = learning_manager.get_enhanced_failure_data(attempt.attempt_number)
+                        logger.info(f"Using enhanced failure data for attempt {attempt.attempt_number}", extra={
+                            'has_learning_context': bool(enhanced_failure_data.get('learning_context')),
+                            'has_previous_analysis': bool(enhanced_failure_data.get('previous_attempt_analysis'))
+                        })
+                        
                         # Process each file individually
                         for current_file in files_to_fix:
                             try:
@@ -1373,7 +1633,7 @@ class AutoFix:
                                 }
                                 
                                 fix_result = self._process_file_with_llm(
-                                    current_file, file_content, context_files, failure_data, config
+                                    current_file, file_content, context_files, enhanced_failure_data, config
                                 )
                                 logger.info(f"fix result: {fix_result}")
                                 if fix_result.status == FixStatus.SUCCESS:
@@ -1408,6 +1668,15 @@ class AutoFix:
                             attempt, status, results, test_results
                         )
                         
+                        # Record attempt for learning
+                        learning_manager.record_attempt(
+                            attempt.attempt_number, 
+                            results['changes'], 
+                            test_results, 
+                            status
+                        )
+                        logger.info(f"Recorded attempt {attempt.attempt_number} for learning")
+                        
                         if status == FixStatus.SUCCESS:
                             logger.info("All tests passed!")
                             break
@@ -1419,6 +1688,14 @@ class AutoFix:
                         )
                         state_manager.restore_files()
                 
+                # Add learning summary to results
+                learning_summary = learning_manager.get_learning_summary()
+                results['learning_summary'] = learning_summary
+                logger.info("Learning summary added to results", extra={
+                    'total_attempts': learning_summary['total_attempts'],
+                    'patterns_learned': len(learning_summary['successful_patterns'])
+                })
+                
                 # Create PR if needed
                 if self.config.create_pr:
                     logger.info(f"start creating pr")
@@ -1429,15 +1706,22 @@ class AutoFix:
                             improvement_summary = TestResultAnalyzer.get_improvement_summary(best_attempt.test_results)
                             best_attempt.test_results['improvement_summary'] = improvement_summary
                             logger.info(f"start creating pr")
+                            
+                            # Transform all attempts into the expected TestResults format
+                            test_results_for_pr = self._create_test_results_for_pr(
+                                baseline_test_results, attempt_tracker.attempts
+                            )
+                            
                             pr_data = self._get_pr_manager().create_pr(
                                 best_attempt.changes,
-                                best_attempt.test_results
+                                test_results_for_pr
                             )
                             return {
                                 'status': 'success' if best_attempt.status == FixStatus.SUCCESS else 'improved',
                                 'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
                                 'pr': pr_data,
-                                'improvement_summary': improvement_summary
+                                'improvement_summary': improvement_summary,
+                                'learning_summary': learning_summary
                             }
                     except Exception as e:
                         logger.error(f"PR creation failed: {str(e)}")
@@ -1450,7 +1734,8 @@ class AutoFix:
                                 'message': 'Code changes were made successfully, but PR creation failed due to private repository access issues. Please check your GitHub token permissions.',
                                 'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
                                 'error': str(e),
-                                'changes_made': True
+                                'changes_made': True,
+                                'learning_summary': learning_summary
                             }
                         else:
                             logger.info("PR creation failed for other reasons, reverting changes")
@@ -1464,7 +1749,8 @@ class AutoFix:
                     'status': 'success' if attempt_tracker.get_successful_attempt() else 'failed',
                     'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
                     'changes': results['changes'],
-                    'processed_files': results['processed_files']
+                    'processed_files': results['processed_files'],
+                    'learning_summary': learning_summary
                 }
                 
             finally:
@@ -1559,3 +1845,89 @@ class AutoFix:
                 'error_type': type(e).__name__
             })
             return {'status': 'error', 'error': str(e)} 
+    
+    def _create_test_results_for_pr(self, baseline_results: Dict, attempts: List[FixAttempt]) -> Dict:
+        """Create TestResults structure for PR manager with all attempts including baseline.
+        
+        Args:
+            baseline_results: Test results before any fixes
+            attempts: List of fix attempts with their test results
+            
+        Returns:
+            Dict in TestResults format expected by PR manager
+        """
+        
+        # Create agent info
+        agent_info: AgentInfo = {
+            'name': 'Kaizen AutoFix Agent',
+            'version': '1.0.0',
+            'description': 'Automated code fixing agent using LLM-based analysis'
+        }
+        
+        # Convert baseline results to Attempt format
+        baseline_attempt = self._convert_test_results_to_attempt(baseline_results, "Baseline (Before Fixes)")
+        
+        # Convert all fix attempts to Attempt format
+        fix_attempts = []
+        for i, attempt in enumerate(attempts, 1):
+            if attempt.test_results:
+                attempt_data = self._convert_test_results_to_attempt(
+                    attempt.test_results, f"Attempt {i}"
+                )
+                fix_attempts.append(attempt_data)
+        
+        # Combine baseline and fix attempts
+        all_attempts = [baseline_attempt] + fix_attempts
+        
+        # Create TestResults structure
+        test_results: TestResults = {
+            'agent_info': agent_info,
+            'attempts': all_attempts,
+            'additional_summary': f"Total attempts: {len(all_attempts)} (1 baseline + {len(fix_attempts)} fixes)"
+        }
+        
+        return test_results
+    
+    def _convert_test_results_to_attempt(self, test_results: Dict, attempt_name: str) -> Dict:
+        """Convert test results to Attempt format expected by PR manager.
+        
+        Args:
+            test_results: Test results from TestRunner
+            attempt_name: Name of the attempt
+            
+        Returns:
+            Dict in Attempt format
+        """
+        
+        # Get overall status
+        overall_status = test_results.get('overall_status', {})
+        status = overall_status.get('status', 'unknown')
+        
+        # Convert test cases
+        test_cases = []
+        for region_name, region_data in test_results.items():
+            if region_name in ('overall_status', '_status'):
+                continue
+                
+            if isinstance(region_data, dict):
+                region_test_cases = region_data.get('test_cases', [])
+                for tc in region_test_cases:
+                    if isinstance(tc, dict):
+                        test_case: TestCase = {
+                            'name': f"{region_name}: {tc.get('name', 'Unknown')}",
+                            'status': tc.get('status', 'unknown'),
+                            'input': tc.get('input'),
+                            'expected_output': tc.get('expected_output'),
+                            'actual_output': tc.get('output'),
+                            'evaluation': tc.get('evaluation'),
+                            'reason': tc.get('error') or tc.get('details')
+                        }
+                        test_cases.append(test_case)
+        
+        # Create Attempt structure
+        attempt: Attempt = {
+            'status': status,
+            'test_cases': test_cases
+        }
+        
+        return attempt 
