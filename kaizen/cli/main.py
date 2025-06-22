@@ -15,6 +15,7 @@ from kaizen.autofix.pr.manager import PRManager
 from kaizen.autofix.main import AutoFix
 from .utils.env_setup import check_environment_setup, display_environment_status
 from .commands.setup import setup
+from kaizen.cli.commands.models.test_execution_result import TestStatus
 
 # Configure logging
 logging.basicConfig(
@@ -175,7 +176,7 @@ def test_all(ctx: click.Context, config: str, auto_fix: bool, create_pr: bool,
         results = runner.run_tests(test_file_path)
         
         # Handle results
-        if results['_status'] == 'error':
+        if results.status == TestStatus.ERROR:
             if auto_fix:
                 fixer = AutoFix(ctx.obj.config)
                 fix_results = fixer.fix_issues(results, max_retries)

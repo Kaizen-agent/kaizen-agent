@@ -13,11 +13,10 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 
 from ...autofix.test.runner import TestRunner
-from ...utils.test_utils import collect_failed_tests
-from .models import TestConfiguration, TestResult, Result
+from ...utils.test_utils import get_failed_tests_dict_from_unified
+from .models import TestConfiguration, TestResult, Result, TestExecutionResult, TestStatus
 from .errors import TestExecutionError, AutoFixError, DependencyError
-from .types import TestStatus, PRStrategy
-from ...autofix.main import AutoFix, FixStatus
+from .types import TestStatus as LegacyTestStatus, PRStrategy
 from .dependency_manager import DependencyManager, ImportResult
 from kaizen.cli.utils.env_setup import check_environment_setup, get_missing_variables
 
@@ -92,27 +91,26 @@ class TestAllCommand(BaseTestCommand):
             runner_config = self._create_runner_config(import_result.value.namespace if import_result.value else {})
             self.logger.info("Starting test execution...")
             
-            # Execute tests
+            # Execute tests - now returns unified TestExecutionResult
             runner = TestRunner(runner_config)
-            results = runner.run_tests(self.config.file_path)
+            test_execution_result = runner.run_tests(self.config.file_path)
             
-            if not results:
+            if not test_execution_result:
                 return Result.failure(TestExecutionError("No test results returned from runner"))
             
             self.logger.info("Test execution completed")
-            failed_tests = collect_failed_tests(results)
             
-            # Handle auto-fix if enabled
+            # Handle auto-fix if enabled and tests failed
             test_attempts = None
-            if self.config.auto_fix and failed_tests:
-                self.logger.info(f"Found {len(failed_tests)} failed tests")
-                test_attempts = self._handle_auto_fix(failed_tests, self.config, runner_config)
+            if self.config.auto_fix and not test_execution_result.is_successful():
+                self.logger.info(f"Found {test_execution_result.get_failure_count()} failed tests")
+                test_attempts = self._handle_auto_fix(test_execution_result, self.config, runner_config)
             
-            # Create TestResult object
+            # Create TestResult object for backward compatibility
             now = datetime.now()
             
             # Determine overall status
-            overall_status = 'passed' if not failed_tests else 'failed'
+            overall_status = 'passed' if test_execution_result.is_successful() else 'failed'
             
             result = TestResult(
                 name=self.config.name,
@@ -121,8 +119,8 @@ class TestAllCommand(BaseTestCommand):
                 start_time=now,
                 end_time=now,
                 status=overall_status,
-                results=results,
-                error=None if not failed_tests else f"{len(failed_tests)} tests failed",
+                results=test_execution_result.to_legacy_format(),  # Convert to legacy format for backward compatibility
+                error=None if test_execution_result.is_successful() else f"{test_execution_result.get_failure_count()} tests failed",
                 steps=[]  # TODO: Add step results if available
             )
             
@@ -248,11 +246,13 @@ class TestAllCommand(BaseTestCommand):
             
         return config
     
-    def _handle_auto_fix(self, failed_tests: List[Dict[str, Any]], config: TestConfiguration, runner_config: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    def _handle_auto_fix(self, test_execution_result: TestExecutionResult, config: TestConfiguration, runner_config: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
         """Handle auto-fix for failed tests.
         
         Args:
-            failed_tests: List of failed tests to fix
+            test_execution_result: Unified test execution result
+            config: Test configuration
+            runner_config: Runner configuration
             
         Returns:
             List of fix attempts if any were made, None otherwise
@@ -260,22 +260,20 @@ class TestAllCommand(BaseTestCommand):
         Raises:
             AutoFixError: If auto-fix process fails
         """
-        if not failed_tests:
-            return None
-            
-        self.logger.info(f"Attempting to fix {len(failed_tests)} failing tests (max retries: {self.config.max_retries})")
+        self.logger.info(f"Attempting to fix {test_execution_result.get_failure_count()} failing tests (max retries: {self.config.max_retries})")
         
         try:
             # Create AutoFix instance and run fixes
+            from ...autofix.main import AutoFix
             fixer = AutoFix(self.config, runner_config)
             files_to_fix = self.config.files_to_fix
             self.logger.info(f"Files to fix: {files_to_fix}")
             if files_to_fix:
                 fix_results = fixer.fix_code(
                     file_path=str(self.config.file_path),
-                    failure_data=failed_tests,
-                    files_to_fix=files_to_fix,
+                    test_execution_result=test_execution_result,  # Pass unified result directly
                     config=config,
+                    files_to_fix=files_to_fix,
                 )
             else:
                 raise AutoFixError("No files to fix were provided")

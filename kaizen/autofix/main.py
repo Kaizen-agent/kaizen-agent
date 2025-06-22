@@ -14,6 +14,9 @@ import tempfile
 import traceback
 import google.generativeai as genai
 
+from kaizen.cli.commands.models import TestExecutionHistory
+from kaizen.utils.test_utils import get_failed_tests_dict_from_unified
+
 if TYPE_CHECKING:
     from kaizen.cli.commands.models import TestConfiguration
 
@@ -44,6 +47,7 @@ class FixAttempt:
     status: FixStatus = FixStatus.PENDING
     changes: Dict[str, Any] = None
     test_results: Optional[Dict[str, Any]] = None
+    test_execution_result: Optional[Any] = None  # Store unified TestExecutionResult
     error: Optional[str] = None
     original_code: Optional[Dict[str, str]] = None
 
@@ -567,6 +571,15 @@ class FixAttemptTracker:
         attempt.status = status
         attempt.changes = changes
         attempt.test_results = test_results
+        attempt.error = error
+    
+    def update_attempt_with_unified_result(self, attempt: FixAttempt, status: FixStatus, 
+                                          changes: Dict, test_execution_result: Any, error: Optional[str] = None) -> None:
+        """Update attempt with unified TestExecutionResult."""
+        attempt.status = status
+        attempt.changes = changes
+        attempt.test_execution_result = test_execution_result
+        attempt.test_results = test_execution_result.to_legacy_format() if test_execution_result else None
         attempt.error = error
     
     def get_successful_attempt(self) -> Optional[FixAttempt]:
@@ -1552,16 +1565,16 @@ class AutoFix:
                 raise ConfigurationError(f"Failed to initialize PRManager: {str(e)}")
         return self.pr_manager
     
-    def fix_code(self, file_path: str, failure_data: List[Dict[str, Any]] = None, 
+    def fix_code(self, file_path: str, test_execution_result=None, 
                 config: Optional['TestConfiguration'] = None, files_to_fix: List[str] = None) -> Dict:
         """Fix code in the given files with retry logic.
         
         Args:
             file_path: Main file path (used for test running)
-            failure_data: Data about test failures
-            user_goal: Optional user goal for fixing
+            test_execution_result: TestExecutionResult object containing test results
+            config: Test configuration
             files_to_fix: List of files to fix
-            
+        
         Returns:
             Dict containing fix results
         """
@@ -1581,9 +1594,17 @@ class AutoFix:
             attempt_tracker = FixAttemptTracker(self.config.max_retries)
             logger.info(f"Attempt tracker: {attempt_tracker}")
             
-            # Initialize learning manager
+            # Initialize test execution history
+            test_history = TestExecutionHistory()
+            
+            # Initialize learning manager with test execution result
             learning_manager = LearningManager()
-            learning_manager.set_baseline_failures(failure_data)
+            if test_execution_result:
+                # Extract failed tests in legacy format for learning manager compatibility
+                failure_data = get_failed_tests_dict_from_unified(test_execution_result)
+                learning_manager.set_baseline_failures(failure_data)
+                # Add baseline result to history
+                test_history.add_baseline_result(test_execution_result)
             logger.info("Learning manager initialized")
             
             results = {'status': 'pending', 'changes': {}, 'processed_files': []}
@@ -1596,10 +1617,15 @@ class AutoFix:
             branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
             subprocess.run(["git", "checkout", "-b", branch_name], check=True)
             
-            # Run baseline test before any fixes
-            logger.info("Running baseline test before any fixes")
-            baseline_test_results = self.test_runner.run_tests(Path(file_path))
-            logger.info(f"Baseline test results: {baseline_test_results}")
+            # Use provided test_execution_result as baseline, otherwise run baseline test
+            if test_execution_result is not None:
+                baseline_test_results = test_execution_result
+                logger.info("Using provided test execution result as baseline")
+            else:
+                logger.info("Running baseline test before any fixes")
+                baseline_test_results = self.test_runner.run_tests(Path(file_path))
+                test_history.add_baseline_result(baseline_test_results)
+                logger.info(f"Baseline test results: {baseline_test_results}")
             
             try:
                 logger.info(f"Attempt tracker should continue check")
@@ -1658,27 +1684,31 @@ class AutoFix:
                                     'error': str(e)
                                 })
                         
-                        # Run tests
+                        # Run tests and get unified result
                         logger.info(f"start running tests with fixed code")
-                        test_results = self._run_tests_and_update_status(results, Path(file_path))
+                        current_test_result = self._run_tests_and_get_result(Path(file_path))
                         
-                        # Update attempt status
-                        status = self._determine_attempt_status(test_results)
-                        attempt_tracker.update_attempt(
-                            attempt, status, results, test_results
+                        # Add to test history
+                        test_history.add_fix_attempt_result(current_test_result)
+                        
+                        # Update attempt status using unified result
+                        status = self._determine_attempt_status_from_unified(current_test_result)
+                        attempt_tracker.update_attempt_with_unified_result(
+                            attempt, status, results, current_test_result
                         )
                         
-                        # Record attempt for learning
+                        # Record attempt for learning (convert to legacy format for compatibility)
                         learning_manager.record_attempt(
                             attempt.attempt_number, 
                             results['changes'], 
-                            test_results, 
+                            current_test_result.to_legacy_format(), 
                             status
                         )
                         logger.info(f"Recorded attempt {attempt.attempt_number} for learning")
                         
                         if status == FixStatus.SUCCESS:
                             logger.info("All tests passed!")
+                            test_history.set_final_result(current_test_result)
                             break
                         
                     except Exception as e:
@@ -1687,176 +1717,127 @@ class AutoFix:
                             attempt, FixStatus.ERROR, {}, error=str(e)
                         )
                         state_manager.restore_files()
+                # Add this except block to fix IndentationError
+            except Exception as e:
+                logger.error(f"Error during fix attempts: {str(e)}")
+                raise
                 
-                # Add learning summary to results
-                learning_summary = learning_manager.get_learning_summary()
-                results['learning_summary'] = learning_summary
-                logger.info("Learning summary added to results", extra={
-                    'total_attempts': learning_summary['total_attempts'],
-                    'patterns_learned': len(learning_summary['successful_patterns'])
-                })
-                
-                # Create PR if needed
-                if self.config.create_pr:
-                    logger.info(f"start creating pr")
-                    try:
-                        best_attempt = attempt_tracker.get_last_attempt()  ## FIX LATER
-                        logger.info(f"best attempt: {best_attempt}")
-                        if best_attempt:
-                            improvement_summary = TestResultAnalyzer.get_improvement_summary(best_attempt.test_results)
-                            best_attempt.test_results['improvement_summary'] = improvement_summary
-                            logger.info(f"start creating pr")
-                            
-                            # Transform all attempts into the expected TestResults format
-                            test_results_for_pr = self._create_test_results_for_pr(
-                                baseline_test_results, attempt_tracker.attempts
-                            )
-                            
-                            pr_data = self._get_pr_manager().create_pr(
-                                best_attempt.changes,
-                                test_results_for_pr
-                            )
-                            return {
-                                'status': 'success' if best_attempt.status == FixStatus.SUCCESS else 'improved',
-                                'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
-                                'pr': pr_data,
-                                'improvement_summary': improvement_summary,
-                                'learning_summary': learning_summary
-                            }
-                    except Exception as e:
-                        logger.error(f"PR creation failed: {str(e)}")
-                        # Check if this is a private repository access issue
-                        if "Private repository access issue" in str(e) or "not all refs are readable" in str(e):
-                            logger.error("Private repository access issue detected. Changes were made but PR creation failed due to repository permissions.")
-                            # Don't revert changes for permission issues - let user handle manually
-                            return {
-                                'status': 'partial_success',
-                                'message': 'Code changes were made successfully, but PR creation failed due to private repository access issues. Please check your GitHub token permissions.',
-                                'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
-                                'error': str(e),
-                                'changes_made': True,
-                                'learning_summary': learning_summary
-                            }
-                        else:
-                            logger.info("PR creation failed for other reasons, reverting changes")
-                            subprocess.run(["git", "checkout", original_branch], check=True)
-                            raise PRCreationError(f"Failed to create PR: {str(e)}")
-                
-                
-                logger.info("No tests were fixed, reverting changes")
-                subprocess.run(["git", "checkout", original_branch], check=True)
-                return {
-                    'status': 'success' if attempt_tracker.get_successful_attempt() else 'failed',
-                    'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
-                    'changes': results['changes'],
-                    'processed_files': results['processed_files'],
-                    'learning_summary': learning_summary
-                }
-                
-            finally:
-                state_manager.cleanup()
+            # Add learning summary to results
+            learning_summary = learning_manager.get_learning_summary()
+            results['learning_summary'] = learning_summary
+            results['test_history'] = test_history.to_legacy_format()
+            logger.info("Learning summary added to results", extra={
+                'total_attempts': learning_summary['total_attempts'],
+                'patterns_learned': len(learning_summary['successful_patterns'])
+            })
+            
+            # Create PR if needed
+            if self.config.create_pr:
+                logger.info(f"start creating pr")
+                try:
+                    best_attempt = attempt_tracker.get_last_attempt()
+                    logger.info(f"best attempt: {best_attempt}")
+                    if best_attempt and hasattr(best_attempt, 'test_execution_result'):
+                        # Use test history for improvement analysis
+                        improvement_summary = test_history.get_improvement_summary()
+                        logger.info(f"start creating pr")
+                        
+                        # Create test results for PR using test history
+                        test_results_for_pr = self._create_test_results_for_pr_from_history(test_history)
+                        
+                        pr_data = self._get_pr_manager().create_pr(
+                            best_attempt.changes,
+                            test_results_for_pr
+                        )
+                        return {
+                            'status': 'success' if best_attempt.status == FixStatus.SUCCESS else 'improved',
+                            'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                            'pr': pr_data,
+                            'improvement_summary': improvement_summary,
+                            'learning_summary': learning_summary,
+                            'test_history': test_history.to_legacy_format()
+                        }
+                except Exception as e:
+                    logger.error(f"PR creation failed: {str(e)}")
+                    # Check if this is a private repository access issue
+                    if "Private repository access issue" in str(e) or "not all refs are readable" in str(e):
+                        logger.error("Private repository access issue detected. Changes were made but PR creation failed due to repository permissions.")
+                        # Don't revert changes for permission issues - let user handle manually
+                        return {
+                            'status': 'partial_success',
+                            'message': 'Code changes were made successfully, but PR creation failed due to private repository access issues. Please check your GitHub token permissions.',
+                            'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                            'error': str(e),
+                            'changes_made': True,
+                            'learning_summary': learning_summary,
+                            'test_history': test_history.to_legacy_format()
+                        }
+                    else:
+                        logger.info("PR creation failed for other reasons, reverting changes")
+                        subprocess.run(["git", "checkout", original_branch], check=True)
+                        raise PRCreationError(f"Failed to create PR: {str(e)}")
+            
+            
+            logger.info("No tests were fixed, reverting changes")
+            subprocess.run(["git", "checkout", original_branch], check=True)
+            return {
+                'status': 'success' if attempt_tracker.get_successful_attempt() else 'failed',
+                'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                'learning_summary': learning_summary,
+                'test_history': test_history.to_legacy_format()
+            }
                 
         except Exception as e:
-            logger.error("Unexpected error", extra={
-                'error': str(e),
-                'error_type': type(e).__name__
-            })
-            return {'status': 'error', 'error': str(e)}
-    
-    def _determine_attempt_status(self, test_results: Dict[str, Any]) -> FixStatus:
-        """Determine the status of a fix attempt based on test results."""
-        if not test_results:
-            return FixStatus.ERROR
+            logger.error(f"Error in fix_code: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             
-        overall_status = test_results.get('overall_status', {})
-        status = overall_status.get('status', 'unknown')
-        
-        if status == 'passed':
+            # Try to restore original branch
+            try:
+                subprocess.run(["git", "checkout", original_branch], check=True)
+            except Exception as restore_error:
+                logger.error(f"Failed to restore original branch: {str(restore_error)}")
+            
+            return {
+                'status': 'error',
+                'error': str(e),
+                'attempts': [vars(attempt) for attempt in attempt_tracker.attempts] if 'attempt_tracker' in locals() else [],
+                'test_history': test_history.to_legacy_format() if 'test_history' in locals() else None
+            }
+        finally:
+            # Cleanup
+            if 'state_manager' in locals():
+                state_manager.cleanup()
+    
+    def _run_tests_and_get_result(self, path: Path):
+        """Run tests and return unified TestExecutionResult."""
+        logger.info(f"Running tests for {path}")
+        test_result = self.test_runner.run_tests(path)
+        return test_result
+    
+    def _determine_attempt_status_from_unified(self, test_execution_result) -> FixStatus:
+        """Determine attempt status from unified TestExecutionResult."""
+        if test_execution_result.is_successful():
             return FixStatus.SUCCESS
-        elif status == 'failed':
+        elif test_execution_result.get_failure_count() > 0:
             return FixStatus.FAILED
         else:
             return FixStatus.ERROR
     
-    def _get_attempt_for_pr(self, attempt_tracker: FixAttemptTracker) -> Optional[FixAttempt]:
-        """Get the appropriate attempt for PR creation based on strategy."""
-        if self.config.pr_strategy == PRStrategy.NONE:
-            return None
-            
-        if self.config.pr_strategy == PRStrategy.ALL_PASSING:
-            return attempt_tracker.get_successful_attempt()
-            
-        # For ANY_IMPROVEMENT, return first attempt with any improvement
-        for attempt in attempt_tracker.attempts:
-            if TestResultAnalyzer.has_improvements(attempt.test_results):
-                return attempt
-                
-        return None
-    
-    def fix_directory(self, directory_path: str, failure_data: Optional[Dict] = None) -> Dict:
-        """Fix code in all Python files in the given directory."""
-        try:
-            logger.info("Starting directory fix", extra={'directory_path': directory_path})
-            
-            results = {
-                'status': 'pending',
-                'files': {},
-                'test_results': None
-            }
-            
-            directory = Path(directory_path)
-            python_files = list(directory.rglob('*.py'))
-            
-            for file_path in python_files:
-                try:
-                    file_results = self.fix_code(str(file_path), failure_data)
-                    results['files'][str(file_path)] = file_results
-                except Exception as e:
-                    logger.error(f"Error fixing file {file_path}", extra={
-                        'error': str(e),
-                        'error_type': type(e).__name__
-                    })
-                    results['files'][str(file_path)] = {
-                        'status': 'error',
-                        'error': str(e)
-                    }
-            
-            self._run_tests_and_update_status(results, directory)
-            
-            changes = {
-                file_path: file_results['changes']
-                for file_path, file_results in results['files'].items()
-                if file_results.get('changes')
-            }
-            if changes:
-                pr_data = self._get_pr_manager().create_pr(changes, results['test_results'])
-                results['pr'] = pr_data
-            
-            logger.info("Directory fix completed", extra={
-                'directory_path': directory_path,
-                'status': results['status']
-            })
-            
-            return results
-            
-        except Exception as e:
-            logger.error("Directory fix failed", extra={
-                'error': str(e),
-                'error_type': type(e).__name__
-            })
-            return {'status': 'error', 'error': str(e)} 
-    
-    def _create_test_results_for_pr(self, baseline_results: Dict, attempts: List[FixAttempt]) -> Dict:
-        """Create TestResults structure for PR manager with all attempts including baseline.
+    def _get_improvement_summary_from_unified(self, baseline_result, current_result) -> Dict:
+        """Get improvement summary comparing two unified TestExecutionResult objects."""
+        baseline_failed = len(baseline_result.get_failed_tests())
+        current_failed = len(current_result.get_failed_tests())
         
-        Args:
-            baseline_results: Test results before any fixes
-            attempts: List of fix attempts with their test results
-            
-        Returns:
-            Dict in TestResults format expected by PR manager
-        """
-        
+        return {
+            'baseline_failed': baseline_failed,
+            'current_failed': current_failed,
+            'improvement': baseline_failed - current_failed,
+            'has_improvement': current_failed < baseline_failed,
+            'all_passed': current_result.is_successful()
+        }
+    
+    def _create_test_results_for_pr_from_history(self, test_history: TestExecutionHistory) -> Dict:
+        """Create test results for PR using test history."""
         # Create agent info
         agent_info: AgentInfo = {
             'name': 'Kaizen AutoFix Agent',
@@ -1864,70 +1845,66 @@ class AutoFix:
             'description': 'Automated code fixing agent using LLM-based analysis'
         }
         
-        # Convert baseline results to Attempt format
-        baseline_attempt = self._convert_test_results_to_attempt(baseline_results, "Baseline (Before Fixes)")
+        # Get all results from test history
+        all_results = test_history.get_all_results()
         
-        # Convert all fix attempts to Attempt format
-        fix_attempts = []
-        for i, attempt in enumerate(attempts, 1):
-            if attempt.test_results:
-                attempt_data = self._convert_test_results_to_attempt(
-                    attempt.test_results, f"Attempt {i}"
-                )
-                fix_attempts.append(attempt_data)
-        
-        # Combine baseline and fix attempts
-        all_attempts = [baseline_attempt] + fix_attempts
+        # Convert each result to the expected Attempt format
+        attempts = []
+        for i, result in enumerate(all_results):
+            # Convert test cases to the expected TestCase format
+            test_cases = []
+            for tc in result.test_cases:
+                # Safely serialize evaluation data
+                safe_evaluation = self._safe_serialize_evaluation(tc.evaluation)
+                
+                test_case: TestCase = {
+                    'name': tc.name,
+                    'status': tc.status.value,
+                    'input': tc.input,
+                    'expected_output': tc.expected_output,
+                    'actual_output': tc.actual_output,
+                    'evaluation': safe_evaluation,
+                    'reason': tc.error_message
+                }
+                test_cases.append(test_case)
+            
+            # Create attempt
+            attempt: Attempt = {
+                'status': result.status.value,
+                'test_cases': test_cases
+            }
+            attempts.append(attempt)
         
         # Create TestResults structure
-        test_results: TestResults = {
+        test_results_for_pr: TestResults = {
             'agent_info': agent_info,
-            'attempts': all_attempts,
-            'additional_summary': f"Total attempts: {len(all_attempts)} (1 baseline + {len(fix_attempts)} fixes)"
+            'attempts': attempts,
+            'additional_summary': f"Total attempts: {len(attempts)}"
         }
         
-        return test_results
+        return test_results_for_pr
     
-    def _convert_test_results_to_attempt(self, test_results: Dict, attempt_name: str) -> Dict:
-        """Convert test results to Attempt format expected by PR manager.
+    def _safe_serialize_evaluation(self, evaluation: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Safely serialize evaluation data to prevent JSON serialization issues.
         
         Args:
-            test_results: Test results from TestRunner
-            attempt_name: Name of the attempt
+            evaluation: Evaluation data to serialize
             
         Returns:
-            Dict in Attempt format
+            Serialized evaluation as string, or None if serialization fails
         """
+        if evaluation is None:
+            return None
         
-        # Get overall status
-        overall_status = test_results.get('overall_status', {})
-        status = overall_status.get('status', 'unknown')
-        
-        # Convert test cases
-        test_cases = []
-        for region_name, region_data in test_results.items():
-            if region_name in ('overall_status', '_status'):
-                continue
-                
-            if isinstance(region_data, dict):
-                region_test_cases = region_data.get('test_cases', [])
-                for tc in region_test_cases:
-                    if isinstance(tc, dict):
-                        test_case: TestCase = {
-                            'name': f"{region_name}: {tc.get('name', 'Unknown')}",
-                            'status': tc.get('status', 'unknown'),
-                            'input': tc.get('input'),
-                            'expected_output': tc.get('expected_output'),
-                            'actual_output': tc.get('output'),
-                            'evaluation': tc.get('evaluation'),
-                            'reason': tc.get('error') or tc.get('details')
-                        }
-                        test_cases.append(test_case)
-        
-        # Create Attempt structure
-        attempt: Attempt = {
-            'status': status,
-            'test_cases': test_cases
-        }
-        
-        return attempt 
+        try:
+            # Try to serialize as JSON first
+            import json
+            return json.dumps(evaluation, default=str)
+        except (TypeError, ValueError) as e:
+            logger.warning(f"Failed to serialize evaluation as JSON: {str(e)}")
+            try:
+                # Fallback to string representation
+                return str(evaluation)
+            except Exception as e2:
+                logger.warning(f"Failed to convert evaluation to string: {str(e2)}")
+                return "Evaluation data unavailable" 
