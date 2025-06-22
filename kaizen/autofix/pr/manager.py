@@ -9,6 +9,7 @@ from datetime import datetime
 from github import Github, GithubException
 from github.PullRequest import PullRequest
 import google.generativeai as genai
+import traceback
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -272,14 +273,26 @@ class PRManager:
             # Initialize LLM
             api_key = os.environ.get("GOOGLE_API_KEY")
             if not api_key:
-                logger.warning("GOOGLE_API_KEY not found, using fallback description")
-                return self._generate_fallback_description(changes, test_results)
+                logger.warning("GOOGLE_API_KEY not found, using algorithmic fallback description")
+                return self._generate_algorithmic_description(changes, test_results)
             
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
             
-            # Prepare the prompt for LLM
-            prompt = self._build_pr_description_prompt(changes, test_results)
+            # Prepare the prompt for LLM with optimized data
+            prompt = self._build_optimized_pr_description_prompt(changes, test_results)
+            
+            # Log prompt length for debugging
+            prompt_length = len(prompt)
+            logger.info(f"Generated PR description prompt", extra={
+                'prompt_length': prompt_length,
+                'prompt_length_kb': prompt_length / 1024
+            })
+            
+            # Check if prompt is too long (Gemini has ~30k token limit, roughly 120k characters)
+            if prompt_length > 100000:  # Conservative limit
+                logger.warning(f"Prompt too long ({prompt_length} chars), using algorithmic fallback")
+                return self._generate_algorithmic_description(changes, test_results)
             
             # Get response from LLM
             response = model.generate_content(
@@ -293,15 +306,35 @@ class PRManager:
             )
             
             if not response or not hasattr(response, 'text') or not response.text:
-                logger.warning("Empty response from LLM, using fallback description")
-                return self._generate_fallback_description(changes, test_results)
+                logger.warning("Empty response from LLM, using algorithmic fallback description")
+                return self._generate_algorithmic_description(changes, test_results)
             
             description = response.text.strip()
             
             # Validate the description
             if len(description) < 50:  # Too short
-                logger.warning("LLM generated description too short, using fallback")
-                return self._generate_fallback_description(changes, test_results)
+                logger.warning("LLM generated description too short, using algorithmic fallback")
+                return self._generate_algorithmic_description(changes, test_results)
+            
+            # Add the test results table to the LLM-generated description
+            # Generate the test results table first
+            test_results_table = self._generate_test_results_table(test_results)
+            
+            # Insert the table after the summary section (if it exists) or at the beginning
+            if "## Summary" in description:
+                # Insert after summary section
+                summary_end = description.find("## Summary") + len("## Summary")
+                # Find the next section
+                next_section_start = description.find("## ", summary_end)
+                if next_section_start == -1:
+                    # No next section, append at the end
+                    description = description[:summary_end] + "\n\n" + test_results_table + "\n\n" + description[summary_end:]
+                else:
+                    # Insert before the next section
+                    description = description[:next_section_start] + "\n\n" + test_results_table + "\n\n" + description[next_section_start:]
+            else:
+                # No summary section, insert at the beginning
+                description = test_results_table + "\n\n" + description
             
             logger.info("Successfully generated PR description using LLM", extra={
                 'description_length': len(description)
@@ -312,9 +345,335 @@ class PRManager:
         except Exception as e:
             logger.error("Error generating PR description with LLM", extra={
                 'error': str(e),
+                'error_type': type(e).__name__,
+                'traceback': traceback.format_exc()
+            })
+            return self._generate_algorithmic_description(changes, test_results)
+    
+    def _generate_algorithmic_description(self, changes: Dict[str, List[CodeChange]], test_results: TestResults) -> str:
+        """
+        Generate a comprehensive PR description algorithmically when LLM fails.
+        This provides a detailed, well-structured description with tables and analysis.
+        
+        Args:
+            changes: Dictionary containing code changes
+            test_results: Dictionary containing test results
+            
+        Returns:
+            str: Algorithmically generated PR description
+        """
+        try:
+            logger.info("Generating algorithmic PR description")
+            
+            description_parts = []
+            
+            # 1. Agent Summary - with individual error handling
+            try:
+                description_parts.extend(self._generate_agent_summary(test_results))
+            except Exception as e:
+                logger.warning(f"Failed to generate agent summary: {str(e)}")
+                description_parts.extend(["## Agent Summary", "\nAgent information unavailable due to error"])
+            
+            # 2. Executive Summary - with individual error handling
+            try:
+                description_parts.extend(self._generate_executive_summary(test_results))
+            except Exception as e:
+                logger.warning(f"Failed to generate executive summary: {str(e)}")
+                description_parts.extend(["## Executive Summary", "\nSummary unavailable due to error"])
+            
+            # 3. Test Results Summary Table - with individual error handling
+            try:
+                test_results_table = self._generate_test_results_table(test_results)
+                description_parts.extend([
+                    "\n## Test Results Summary",
+                    test_results_table
+                ])
+            except Exception as e:
+                logger.warning(f"Failed to generate test results table: {str(e)}")
+                description_parts.extend([
+                    "\n## Test Results Summary",
+                    "\nTest results table unavailable due to error"
+                ])
+            
+            # 4. Detailed Results (Baseline vs Best Attempt) - with individual error handling
+            try:
+                description_parts.extend(self._generate_optimized_detailed_results(test_results))
+            except Exception as e:
+                logger.warning(f"Failed to generate detailed results: {str(e)}")
+                description_parts.extend([
+                    "\n## Detailed Results",
+                    "\nDetailed results unavailable due to error"
+                ])
+            
+            # 5. Prompt Changes (if any) - with individual error handling
+            try:
+                description_parts.extend(self._generate_prompt_changes(changes))
+            except Exception as e:
+                logger.warning(f"Failed to generate prompt changes: {str(e)}")
+                # Don't add anything for prompt changes if it fails - it's optional
+            
+            # 6. Additional Summary - with individual error handling
+            try:
+                description_parts.extend(self._generate_additional_summary(test_results))
+            except Exception as e:
+                logger.warning(f"Failed to generate additional summary: {str(e)}")
+                # Don't add anything for additional summary if it fails - it's optional
+            
+            # 7. Improvement Analysis - with individual error handling
+            try:
+                description_parts.extend(self._generate_improvement_analysis(test_results))
+            except Exception as e:
+                logger.warning(f"Failed to generate improvement analysis: {str(e)}")
+                description_parts.extend([
+                    "\n## Improvement Analysis",
+                    "\nImprovement analysis unavailable due to error"
+                ])
+            
+            full_description = "\n".join(description_parts)
+            
+            logger.info("Successfully generated algorithmic PR description", extra={
+                'description_length': len(full_description)
+            })
+            
+            return full_description
+            
+        except Exception as e:
+            logger.error("Error generating algorithmic description", extra={
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'traceback': traceback.format_exc()
+            })
+            # Ultimate fallback - still provide useful information
+            return self._generate_minimal_fallback_description(changes, test_results)
+    
+    def _generate_minimal_fallback_description(self, changes: Dict[str, List[CodeChange]], test_results: TestResults) -> str:
+        """
+        Generate a minimal but informative fallback description when all else fails.
+        Enhanced to include the test results table for better information.
+        
+        Args:
+            changes: Dictionary containing code changes
+            test_results: Dictionary containing test results
+            
+        Returns:
+            str: Enhanced minimal fallback description
+        """
+        try:
+            description = ["# AutoFix Results"]
+            
+            # Basic agent info
+            if test_results.get('agent_info'):
+                agent_info = test_results['agent_info']
+                description.extend([
+                    f"**Agent:** {agent_info.get('name', 'Unknown')}",
+                    f"**Version:** {agent_info.get('version', 'Unknown')}",
+                    ""
+                ])
+            
+            # Basic test summary
+            attempts = test_results.get('attempts', [])
+            if attempts:
+                total_attempts = len(attempts)
+                baseline_attempt = attempts[0]
+                final_attempt = attempts[-1]
+                
+                baseline_passed = sum(1 for tc in baseline_attempt['test_cases'] if tc['status'] == 'passed')
+                final_passed = sum(1 for tc in final_attempt['test_cases'] if tc['status'] == 'passed')
+                total_tests = len(baseline_attempt['test_cases'])
+                
+                description.extend([
+                    "## Test Results Summary",
+                    f"- **Total Tests:** {total_tests}",
+                    f"- **Total Attempts:** {total_attempts}",
+                    f"- **Baseline Passed:** {baseline_passed}/{total_tests}",
+                    f"- **Final Passed:** {final_passed}/{total_tests}",
+                    f"- **Improvement:** {final_passed - baseline_passed:+d} tests",
+                    ""
+                ])
+                
+                # Add the beautiful test results table
+                try:
+                    test_results_table = self._generate_test_results_table(test_results)
+                    description.extend([
+                        "## Test Results Table",
+                        test_results_table,
+                        ""
+                    ])
+                except Exception as e:
+                    logger.warning(f"Failed to generate test results table in fallback: {str(e)}")
+                    description.extend([
+                        "## Test Results Table",
+                        "Test results table unavailable due to error",
+                        ""
+                    ])
+                
+                # Add basic detailed results for baseline and final attempt
+                try:
+                    description.extend([
+                        "## Detailed Results",
+                        "",
+                        "### Baseline (Before Fixes)",
+                        f"**Status:** {baseline_attempt['status']}",
+                        ""
+                    ])
+                    
+                    for test_case in baseline_attempt['test_cases']:
+                        description.extend([
+                            f"**Test Case:** {test_case['name']}",
+                            f"- **Input:** {test_case.get('input', 'N/A')}",
+                            f"- **Expected Output:** {test_case.get('expected_output', 'N/A')}",
+                            f"- **Actual Output:** {test_case.get('actual_output', 'N/A')}",
+                            f"- **Result:** {test_case['status'].upper()}",
+                            ""
+                        ])
+                    
+                    if total_attempts > 1:
+                        description.extend([
+                            "### Final Attempt",
+                            f"**Status:** {final_attempt['status']}",
+                            ""
+                        ])
+                        
+                        for test_case in final_attempt['test_cases']:
+                            description.extend([
+                                f"**Test Case:** {test_case['name']}",
+                                f"- **Input:** {test_case.get('input', 'N/A')}",
+                                f"- **Expected Output:** {test_case.get('expected_output', 'N/A')}",
+                                f"- **Actual Output:** {test_case.get('actual_output', 'N/A')}",
+                                f"- **Result:** {test_case['status'].upper()}",
+                                ""
+                            ])
+                except Exception as e:
+                    logger.warning(f"Failed to generate detailed results in fallback: {str(e)}")
+                    description.extend([
+                        "## Detailed Results",
+                        "Detailed results unavailable due to error",
+                        ""
+                    ])
+            
+            # Basic changes summary
+            if changes:
+                description.extend([
+                    "## Files Modified",
+                    f"- **Files Modified:** {len(changes)}",
+                    ""
+                ])
+                
+                for file_path, file_changes in changes.items():
+                    if file_path == 'prompt_changes':
+                        continue  # Skip prompt changes in minimal fallback
+                    
+                    if isinstance(file_changes, list):
+                        description.append(f"- **{file_path}:** {len(file_changes)} changes")
+                    else:
+                        description.append(f"- **{file_path}:** Modified")
+            
+            return "\n".join(description)
+            
+        except Exception as e:
+            logger.error("Error generating minimal fallback description", extra={
+                'error': str(e),
                 'error_type': type(e).__name__
             })
-            return self._generate_fallback_description(changes, test_results)
+            return "AutoFix completed with code changes and test results. Please check the test output for details."
+    
+    def _build_optimized_pr_description_prompt(self, changes: Dict[str, List[CodeChange]], test_results: TestResults) -> str:
+        """
+        Build an optimized prompt for LLM that focuses on baseline and best attempt data.
+        The test results table is generated separately and not included in the prompt to reduce length.
+        
+        Args:
+            changes: Dictionary containing code changes (not used in prompt since GitHub shows diffs)
+            test_results: Dictionary containing test results
+            
+        Returns:
+            str: Optimized prompt for LLM
+        """
+        attempts = test_results.get('attempts', [])
+        if not attempts:
+            return self._build_pr_description_prompt(changes, test_results)  # Fallback to original
+        
+        # Find the best attempt
+        best_attempt_index = self._find_best_attempt(attempts)
+        
+        # Create optimized test results with only baseline and best attempt
+        optimized_test_results = {
+            'agent_info': test_results.get('agent_info'),
+            'attempts': [
+                attempts[0],  # Baseline
+                attempts[best_attempt_index] if best_attempt_index > 0 else attempts[0]  # Best attempt
+            ],
+            'additional_summary': test_results.get('additional_summary')
+        }
+        
+        prompt = f"""You are an expert software developer creating a pull request description. 
+Generate a comprehensive, well-structured PR description based on the provided test results.
+
+The description should include the following sections in this exact order:
+
+1. **Summary** - A concise overview of what was accomplished, including agent information if available
+2. **Detailed Results** - Show detailed input/output/evaluation for baseline and best attempt only
+
+## Format Requirements:
+
+### Important Note:
+The test results summary table will be automatically added to the description, so you do not need to generate it.
+
+### Detailed Results Section:
+Show detailed results for ONLY two attempts:
+1. **Baseline (Before Fixes)** - Always show this
+2. **Best Attempt** - Show the attempt with the most passed tests (Attempt {best_attempt_index if best_attempt_index > 0 else 'Baseline'})
+
+For each of these attempts, create subsections like:
+#### Baseline (Before Fixes)
+**Status:** [overall status]
+
+For each test case in the attempt:
+**Test Case:** [name]
+- **Input:** [input value or description]
+- **Expected Output:** [expected output]
+- **Actual Output:** [actual output]
+- **Result:** [PASS/FAIL/ERROR]
+- **Evaluation:** [evaluation details if available]
+
+"""
+        
+        # Add best attempt section if it's different from baseline
+        if best_attempt_index > 0:
+            prompt += f"""#### Best Attempt (Attempt {best_attempt_index})
+**Status:** [overall status]
+[Same format as above]
+
+"""
+        
+        prompt += """Here is the data to work with:
+
+## Test Results Data:
+"""
+        
+        # Add only the optimized test results (baseline + best attempt)
+        try:
+            prompt += f"\n{json.dumps(optimized_test_results, indent=2, default=str)}"
+        except Exception as e:
+            logger.warning(f"Failed to serialize optimized test results to JSON: {str(e)}")
+            prompt += f"\n{str(optimized_test_results)}"
+        
+        prompt += """
+
+## Instructions:
+- Make the summary clear and actionable, mentioning the agent if available
+- For detailed results, ONLY show baseline and best attempt to keep the description concise
+- Highlight any patterns or improvements across attempts
+- Ensure all sections are properly formatted with markdown
+- Keep the overall description professional and informative
+- If any data is missing or null, use "N/A" or "Not available"
+- Make sure the input/output/evaluation for each test case is very clear and readable
+- Keep the total description concise to avoid GitHub character limits
+- Do not include code changes section as GitHub already shows the diff
+
+Generate the complete PR description now:"""
+        
+        return prompt
     
     def _generate_test_results_table(self, test_results: TestResults) -> str:
         """
@@ -383,7 +742,7 @@ class PRManager:
         Build a comprehensive prompt for LLM to generate PR description.
         
         Args:
-            changes: Dictionary containing code changes
+            changes: Dictionary containing code changes (not used in prompt since GitHub shows diffs)
             test_results: Dictionary containing test results
             
         Returns:
@@ -396,25 +755,32 @@ class PRManager:
         # Find the best attempt (the one with the most passed tests)
         best_attempt_index = self._find_best_attempt(attempts)
         
-        # Generate the test results table algorithmically
-        test_results_table = self._generate_test_results_table(test_results)
+        # Create optimized test results with only baseline and best attempt
+        optimized_test_results = {
+            'agent_info': test_results.get('agent_info'),
+            'attempts': [
+                attempts[0],  # Baseline
+                attempts[best_attempt_index] if best_attempt_index > 0 else attempts[0]  # Best attempt
+            ],
+            'additional_summary': test_results.get('additional_summary')
+        }
         
         prompt = f"""You are an expert software developer creating a pull request description. 
-Generate a comprehensive, well-structured PR description based on the provided test results and code changes.
+Generate a comprehensive, well-structured PR description based on the provided test results.
 
 The description should include the following sections in this exact order:
 
 1. **Summary** - A concise overview of what was accomplished, including agent information if available
-2. **Test Results Summary** - A markdown table showing test case results across all attempts
+2. **Test Results Summary** - Generate a markdown table showing test case results across all attempts
 3. **Detailed Results** - Show detailed input/output/evaluation for baseline and best attempt only
-4. **Code Changes** - Brief summary of key code modifications made
 
 ## Format Requirements:
 
 ### Test Results Summary Table:
-Use this exact table (do not modify or regenerate it):
-
-{test_results_table}
+Generate a markdown table with columns: Test Case, Baseline, Attempt 1, Attempt 2, etc., Final Status, Improvement
+- Show all test cases from the baseline attempt
+- For each attempt, show the status (passed/failed/error) for each test case
+- Calculate improvement: Yes if baseline was failed/error and final is passed, No otherwise
 
 ### Detailed Results Section:
 Show detailed results for ONLY two attempts:
@@ -443,126 +809,34 @@ For each test case in the attempt:
 
 """
         
-        prompt += """### Code Changes Section:
-Provide a concise summary of the most important code changes made. Focus on the key modifications and their purpose.
-
-Here is the data to work with:
+        prompt += """Here is the data to work with:
 
 ## Test Results Data:
 """
         
-        # Add test results data
+        # Add only the optimized test results (baseline + best attempt)
         try:
-            prompt += f"\n{json.dumps(test_results, indent=2, default=str)}"
+            prompt += f"\n{json.dumps(optimized_test_results, indent=2, default=str)}"
         except Exception as e:
-            logger.warning(f"Failed to serialize test results to JSON: {str(e)}")
-            prompt += f"\n{str(test_results)}"
-        
-        # Add changes data
-        prompt += "\n\n## Code Changes Data:\n"
-        try:
-            prompt += f"\n{json.dumps(changes, indent=2, default=str)}"
-        except Exception as e:
-            logger.warning(f"Failed to serialize changes to JSON: {str(e)}")
-            prompt += f"\n{str(changes)}"
+            logger.warning(f"Failed to serialize optimized test results to JSON: {str(e)}")
+            prompt += f"\n{str(optimized_test_results)}"
         
         prompt += """
 
 ## Instructions:
 - Make the summary clear and actionable, mentioning the agent if available
-- Use the provided test results table exactly as shown above (do not regenerate it)
 - For detailed results, ONLY show baseline and best attempt to keep the description concise
 - Highlight any patterns or improvements across attempts
-- Keep the code changes section brief and focused on the most important modifications
 - Ensure all sections are properly formatted with markdown
 - Keep the overall description professional and informative
 - If any data is missing or null, use "N/A" or "Not available"
 - Make sure the input/output/evaluation for each test case is very clear and readable
 - Keep the total description concise to avoid GitHub character limits
+- Do not include code changes section as GitHub already shows the diff
 
 Generate the complete PR description now:"""
         
         return prompt
-    
-    def _generate_fallback_description(self, changes: Dict[str, List[CodeChange]], test_results: TestResults) -> str:
-        """
-        Generate a fallback description when LLM is not available.
-        
-        Args:
-            changes: Dictionary containing code changes
-            test_results: Dictionary containing test results
-            
-        Returns:
-            str: Fallback PR description
-        """
-        try:
-            description = []
-            
-            # Add each section using existing methods
-            description.extend(self._generate_agent_summary(test_results))
-            description.extend(self._generate_test_results_summary(test_results))
-            description.extend(self._generate_detailed_results(test_results))
-            description.extend(self._generate_code_changes(changes))
-            description.extend(self._generate_prompt_changes(changes))
-            description.extend(self._generate_additional_summary(test_results))
-            
-            return "\n".join(description)
-            
-        except Exception as e:
-            logger.error("Error generating fallback description", extra={
-                'error': str(e),
-                'error_type': type(e).__name__
-            })
-            return "Code changes and test results"
-    
-    def test_llm_description_generation(self, changes: Dict[str, List[CodeChange]], test_results: TestResults) -> Dict[str, Any]:
-        """
-        Test the LLM description generation independently.
-        
-        Args:
-            changes: Dictionary containing code changes
-            test_results: Dictionary containing test results
-            
-        Returns:
-            Dict containing test results with generated description and metadata
-        """
-        try:
-            logger.info("Testing LLM description generation")
-            
-            # Generate description using LLM
-            description = self._generate_pr_description(changes, test_results)
-            
-            # Check if LLM was used
-            api_key = os.environ.get("GOOGLE_API_KEY")
-            used_llm = bool(api_key)
-            
-            result = {
-                'success': True,
-                'description': description,
-                'description_length': len(description),
-                'used_llm': used_llm,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            logger.info("LLM description generation test completed", extra={
-                'used_llm': used_llm,
-                'description_length': len(description)
-            })
-            
-            return result
-            
-        except Exception as e:
-            logger.error("LLM description generation test failed", extra={
-                'error': str(e),
-                'error_type': type(e).__name__
-            })
-            
-            return {
-                'success': False,
-                'error': str(e),
-                'error_type': type(e).__name__,
-                'timestamp': datetime.now().isoformat()
-            }
     
     def _generate_agent_summary(self, test_results: TestResults) -> List[str]:
         """Generate the agent summary section."""
@@ -718,10 +992,10 @@ Generate the complete PR description now:"""
                 description.extend([
                     f"\n#### {test_case['name']}",
                     f"Input: {test_case.get('input', 'N/A')}",
-                    f"Expected Output: {test_case.get('expected_output', 'N/A')}",
-                    f"Actual Output: {test_case.get('actual_output', 'N/A')}",
-                    f"Result: {test_case['status']}",
-                    f"Evaluation: {safe_evaluation}"
+                    f"- **Expected Output:** {test_case.get('expected_output', 'N/A')}",
+                    f"- **Actual Output:** {test_case.get('actual_output', 'N/A')}",
+                    f"- **Result:** {test_case['status']}",
+                    f"- **Evaluation:** {safe_evaluation}"
                 ])
         
         return description
@@ -2014,3 +2288,217 @@ Generate the complete PR description now:"""
                 ])
         
         return recommendations 
+
+    def _generate_executive_summary(self, test_results: TestResults) -> List[str]:
+        """Generate an executive summary section."""
+        description = ["## Executive Summary"]
+        
+        attempts = test_results.get('attempts', [])
+        if not attempts:
+            description.append("\nNo test results available for summary.")
+            return description
+        
+        baseline_attempt = attempts[0]
+        final_attempt = attempts[-1]
+        
+        baseline_passed = sum(1 for tc in baseline_attempt['test_cases'] if tc['status'] == 'passed')
+        final_passed = sum(1 for tc in final_attempt['test_cases'] if tc['status'] == 'passed')
+        total_tests = len(baseline_attempt['test_cases'])
+        
+        improvement = final_passed - baseline_passed
+        success_rate_baseline = (baseline_passed / total_tests * 100) if total_tests > 0 else 0
+        success_rate_final = (final_passed / total_tests * 100) if total_tests > 0 else 0
+        
+        description.extend([
+            f"\nThis AutoFix session processed **{total_tests}** test cases across **{len(attempts)}** attempts.",
+            f"",
+            f"**Results:**",
+            f"- **Baseline Success Rate:** {success_rate_baseline:.1f}% ({baseline_passed}/{total_tests})",
+            f"- **Final Success Rate:** {success_rate_final:.1f}% ({final_passed}/{total_tests})",
+            f"- **Improvement:** {improvement:+d} tests ({success_rate_final - success_rate_baseline:+.1f}%)",
+            f""
+        ])
+        
+        if improvement > 0:
+            description.append("✅ **Success:** Code fixes improved test results.")
+        elif improvement == 0:
+            description.append("⚠️ **No Change:** Test results remained the same.")
+        else:
+            description.append("❌ **Regression:** Test results worsened.")
+        
+        return description
+    
+    def _generate_optimized_detailed_results(self, test_results: TestResults) -> List[str]:
+        """Generate detailed results showing only baseline vs best attempt."""
+        description = ["\n## Detailed Results"]
+        
+        attempts = test_results.get('attempts', [])
+        if not attempts:
+            description.append("\nNo test results available for detailed analysis.")
+            return description
+        
+        # Find the best attempt
+        best_attempt_index = self._find_best_attempt(attempts)
+        baseline_attempt = attempts[0]
+        best_attempt = attempts[best_attempt_index]
+        
+        # Show baseline results
+        description.extend([
+            "\n### Baseline (Before Fixes)",
+            f"**Status:** {baseline_attempt['status']}",
+            ""
+        ])
+        
+        for test_case in baseline_attempt['test_cases']:
+            description.extend([
+                f"**Test Case:** {test_case['name']}",
+                f"- **Input:** {test_case.get('input', 'N/A')}",
+                f"- **Expected Output:** {test_case.get('expected_output', 'N/A')}",
+                f"- **Actual Output:** {test_case.get('actual_output', 'N/A')}",
+                f"- **Result:** {test_case['status'].upper()}",
+                f"- **Evaluation:** {self._safe_format_evaluation(test_case.get('evaluation'))}",
+                ""
+            ])
+        
+        # Show best attempt results if different from baseline
+        if best_attempt_index > 0:
+            description.extend([
+                f"### Best Attempt (Attempt {best_attempt_index})",
+                f"**Status:** {best_attempt['status']}",
+                ""
+            ])
+            
+            for test_case in best_attempt['test_cases']:
+                description.extend([
+                    f"**Test Case:** {test_case['name']}",
+                    f"- **Input:** {test_case.get('input', 'N/A')}",
+                    f"- **Expected Output:** {test_case.get('expected_output', 'N/A')}",
+                    f"- **Actual Output:** {test_case.get('actual_output', 'N/A')}",
+                    f"- **Result:** {test_case['status'].upper()}",
+                    f"- **Evaluation:** {self._safe_format_evaluation(test_case.get('evaluation'))}",
+                    ""
+                ])
+        
+        return description
+    
+    def _generate_improvement_analysis(self, test_results: TestResults) -> List[str]:
+        """Generate analysis of improvements across attempts."""
+        description = ["\n## Improvement Analysis"]
+        
+        attempts = test_results.get('attempts', [])
+        if not attempts or len(attempts) < 2:
+            description.append("\nInsufficient data for improvement analysis (need at least 2 attempts).")
+            return description
+        
+        # Analyze improvements
+        improvements = []
+        regressions = []
+        unchanged = []
+        
+        baseline_attempt = attempts[0]
+        baseline_test_cases = {tc['name']: tc['status'] for tc in baseline_attempt['test_cases']}
+        
+        for i, attempt in enumerate(attempts[1:], 1):
+            attempt_improvements = []
+            attempt_regressions = []
+            
+            for test_case in attempt['test_cases']:
+                test_name = test_case['name']
+                current_status = test_case['status']
+                baseline_status = baseline_test_cases.get(test_name, 'unknown')
+                
+                if baseline_status == 'failed' and current_status == 'passed':
+                    attempt_improvements.append(test_name)
+                elif baseline_status == 'error' and current_status in ['passed', 'failed']:
+                    attempt_improvements.append(test_name)
+                elif baseline_status == 'passed' and current_status == 'failed':
+                    attempt_regressions.append(test_name)
+            
+            if attempt_improvements:
+                improvements.append(f"Attempt {i}: {', '.join(attempt_improvements)}")
+            if attempt_regressions:
+                regressions.append(f"Attempt {i}: {', '.join(attempt_regressions)}")
+        
+        # Generate analysis text
+        if improvements:
+            description.extend([
+                "\n### ✅ Improvements:",
+                "The following test cases were successfully fixed:"
+            ])
+            for improvement in improvements:
+                description.append(f"- {improvement}")
+        
+        if regressions:
+            description.extend([
+                "\n### ❌ Regressions:",
+                "The following test cases regressed:"
+            ])
+            for regression in regressions:
+                description.append(f"- {regression}")
+        
+        if not improvements and not regressions:
+            description.append("\n### ⚠️ No Significant Changes:")
+            description.append("Test results remained largely unchanged across attempts.")
+        
+        # Add overall assessment
+        total_improvements = sum(len(imp.split(': ')[1].split(', ')) for imp in improvements)
+        total_regressions = sum(len(reg.split(': ')[1].split(', ')) for reg in regressions)
+        
+        description.extend([
+            "",
+            "### Overall Assessment:",
+            f"- **Total Improvements:** {total_improvements}",
+            f"- **Total Regressions:** {total_regressions}",
+            f"- **Net Change:** {total_improvements - total_regressions:+d}"
+        ])
+        
+        return description
+
+    def test_llm_description_generation(self, changes: Dict[str, List[CodeChange]], test_results: TestResults) -> Dict[str, Any]:
+        """
+        Test the LLM description generation independently.
+        
+        Args:
+            changes: Dictionary containing code changes
+            test_results: Dictionary containing test results
+            
+        Returns:
+            Dict containing test results with generated description and metadata
+        """
+        try:
+            logger.info("Testing LLM description generation")
+            
+            # Generate description using LLM
+            description = self._generate_pr_description(changes, test_results)
+            
+            # Check if LLM was used
+            api_key = os.environ.get("GOOGLE_API_KEY")
+            used_llm = bool(api_key)
+            
+            result = {
+                'success': True,
+                'description': description,
+                'description_length': len(description),
+                'used_llm': used_llm,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            logger.info("LLM description generation test completed", extra={
+                'used_llm': used_llm,
+                'description_length': len(description)
+            })
+            
+            return result
+            
+        except Exception as e:
+            logger.error("LLM description generation test failed", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
+            
+            return {
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'timestamp': datetime.now().isoformat()
+            }
