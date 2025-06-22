@@ -1735,7 +1735,7 @@ class AutoFix:
             if self.config.create_pr:
                 logger.info(f"start creating pr")
                 try:
-                    best_attempt = attempt_tracker.get_last_attempt()
+                    best_attempt = attempt_tracker.get_best_attempt()
                     logger.info(f"best attempt: {best_attempt}")
                     if best_attempt and hasattr(best_attempt, 'test_execution_result'):
                         # Use test history for improvement analysis

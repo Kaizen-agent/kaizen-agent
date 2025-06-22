@@ -216,48 +216,182 @@ class PromptBuilder:
    - Focus on critical bugs and errors only
    - Keep changes minimal and targeted
 
-3. Prompt Improvements (When Present):
-   - If the file contains prompts, improve them using modern prompt engineering best practices
-   - Structure prompts with clear sections and hierarchy
-   - Use explicit instructions and constraints
-   - Add validation criteria for responses
-   - Include error handling instructions
-   - Use clear input/output formats
-   - Add context management guidelines
-   - Include safety checks and filters
-   - DO NOT add specific test case examples - keep prompts generic and reusable
-   - DO NOT reference specific file names or paths in prompts
+3. Open-Closed Principle:
+   - Code should be open for extension but closed for modification
+   - Use inheritance, composition, or interfaces for extensibility
+   - Avoid modifying existing classes when adding new functionality
+   - Design for future extensibility without breaking current code
+   - Use abstract base classes or protocols for extensible interfaces
+   - Implement plugin patterns or strategy patterns where appropriate
+   - When fixing, consider how the code can be extended in the future
 
-4. Essential Fixes Only:
+4. Backward Compatibility:
+   - Preserve existing public APIs and interfaces
+   - Maintain function signatures and return types
+   - Keep existing configuration formats and file structures
+   - Avoid breaking changes to existing functionality
+   - Use deprecation warnings instead of immediate removal
+   - Add new features through extension rather than modification
+   - Ensure existing tests continue to pass
+
+5. Prompt Improvements (When Present):
+   - If the file contains prompts, improve them using modern prompt engineering best practices
+   
+   A. Structure and Organization:
+      - Use clear hierarchical sections with numbered or bulleted lists
+      - Group related instructions logically (e.g., context, task, constraints, output format)
+      - Use consistent formatting and indentation for readability
+      - Include a clear role definition at the beginning
+      - Add a summary or overview section for complex prompts
+   
+   B. Clarity and Specificity:
+      - Use explicit, unambiguous language
+      - Avoid vague terms like "good", "proper", "appropriate" without context
+      - Provide specific examples where helpful (but keep them generic)
+      - Define technical terms and acronyms
+      - Use active voice and imperative mood for instructions
+      - Break complex tasks into step-by-step instructions
+   
+   C. Context and Constraints:
+      - Clearly define the AI's role and capabilities
+      - Specify the expected input format and data types
+      - Define output format requirements (JSON, markdown, code blocks, etc.)
+      - Set clear boundaries and limitations
+      - Include error handling instructions
+      - Specify what the AI should do with unclear or invalid inputs
+   
+   D. Validation and Quality Control:
+      - Add validation criteria for responses
+      - Include self-checking instructions (e.g., "verify your response meets these criteria")
+      - Specify quality standards and completeness requirements
+      - Add instructions for handling edge cases
+      - Include confidence level requirements
+   
+   E. Safety and Ethics:
+      - Include safety checks and content filters
+      - Add instructions for handling sensitive information
+      - Specify ethical guidelines and constraints
+      - Include instructions for refusing inappropriate requests
+      - Add bias awareness and mitigation guidelines
+   
+   F. Input/Output Formatting:
+      - Use clear input/output format specifications
+      - Include JSON schema examples where applicable
+      - Specify code block formatting requirements
+      - Define response structure and organization
+      - Include formatting for different content types (code, text, data)
+   
+   G. Context Management:
+      - Add instructions for maintaining conversation context
+      - Specify how to handle multi-turn interactions
+      - Include memory management guidelines
+      - Add instructions for context switching
+      - Specify how to handle conflicting information
+   
+   H. Error Recovery and Fallbacks:
+      - Include graceful degradation instructions
+      - Add fallback strategies for partial failures
+      - Specify how to handle incomplete information
+      - Include retry logic guidelines
+      - Add instructions for escalating issues
+   
+   I. Performance and Efficiency:
+      - Add instructions for optimizing response length
+      - Include guidelines for prioritizing information
+      - Specify when to use concise vs. detailed responses
+      - Add instructions for handling large inputs
+      - Include caching and reuse guidelines
+   
+   J. Best Practices:
+      - DO NOT add specific test case examples - keep prompts generic and reusable
+      - DO NOT reference specific file names or paths in prompts
+      - Use consistent terminology throughout the prompt
+      - Include version information for prompt evolution
+      - Add instructions for prompt debugging and improvement
+      - Include guidelines for prompt testing and validation
+
+   K. Advanced Prompting Techniques:
+      - Few-Shot Learning:
+        * Include 2-3 relevant examples to demonstrate the desired output format
+        * Use diverse examples that cover different scenarios and edge cases
+        * Ensure examples are generic and reusable across different contexts
+        * Format examples consistently with clear input/output pairs
+        * Use examples that demonstrate the expected reasoning process
+      
+      - Chain-of-Thought (CoT) Prompting:
+        * Add instructions for step-by-step reasoning
+        * Include phrases like "Let's think through this step by step"
+        * Encourage the AI to show its work and reasoning process
+        * Use intermediate steps to break down complex problems
+        * Include validation steps within the reasoning chain
+      
+      - Zero-Shot to Few-Shot Progression:
+        * Start with zero-shot instructions for basic tasks
+        * Add few-shot examples for complex or ambiguous tasks
+        * Use progressive examples that build in complexity
+        * Include examples that demonstrate error handling
+      
+      - Self-Consistency and Verification:
+        * Add instructions for the AI to verify its own responses
+        * Include multiple reasoning paths for complex problems
+        * Use ensemble-like approaches with different perspectives
+        * Add confidence scoring for responses
+        * Include instructions for cross-checking results
+      
+      - Retrieval-Augmented Generation (RAG):
+        * Include instructions for using provided context effectively
+        * Add guidelines for synthesizing information from multiple sources
+        * Specify how to handle conflicting information
+        * Include instructions for citing sources when appropriate
+      
+      - Role-Based Prompting:
+        * Define specific roles for different aspects of the task
+        * Use multiple personas for complex decision-making
+        * Include expert perspectives for specialized domains
+        * Add instructions for role-switching when appropriate
+      
+      - Iterative Refinement:
+        * Include instructions for iterative improvement of responses
+        * Add guidelines for self-critique and improvement
+        * Use feedback loops for continuous enhancement
+        * Include instructions for learning from previous interactions
+
+6. Essential Fixes Only:
    - Fix critical bugs and errors
    - Add essential error handling for critical paths
    - Ensure type safety where missing
    - Fix security vulnerabilities
    - Address resource leaks
 
-5. Best Practices (Minimal):
+7. Best Practices (Minimal):
    - Add proper error handling only for critical paths
    - Ensure proper resource cleanup where missing
    - Add essential input validation where critical
    - Fix critical performance issues only
+   - Design for extensibility and maintainability
 
 IMPORTANT GUIDELINES:
-- For code: Make minimal, surgical changes that preserve structure
-- For prompts: Improve existing prompts without adding specific examples
+- For code: Make minimal, surgical changes that preserve structure and maintain backward compatibility
+- For prompts: Improve existing prompts using advanced techniques like few-shot learning and chain-of-thought when appropriate
 - Return ONLY the fixed code, properly formatted in a Python code block
 - Do not include any analysis or explanation in the response
 - Do not change function signatures or class structures
-- Do not add test case examples to prompts
+- Do not add test case examples to prompts (use generic examples instead)
 - Keep all improvements generic and reusable
+- Ensure code is extensible for future modifications
+- Maintain backward compatibility with existing interfaces
+- Use advanced prompting techniques judiciously - only when they improve clarity and effectiveness
 
 The fixed code should:
 - Preserve the original code structure and organization
 - Include only necessary code changes (minimal)
 - Improve prompts generically without specific examples
-- Maintain existing functionality
+- Maintain existing functionality and backward compatibility
 - Follow Python best practices
 - Be properly formatted
 - Include essential error handling only where critical
+- Be designed for future extensibility
+- Use the open-closed principle where appropriate
 
 Format your response as:
 ```python
@@ -404,13 +538,30 @@ Format your response as:
    - Clear documentation for public APIs
    - Consistent code style
 
-3. Performance & Security:
+3. Open-Closed Principle:
+   - Code should be open for extension but closed for modification
+   - Use inheritance, composition, or interfaces for extensibility
+   - Avoid modifying existing classes when adding new functionality
+   - Design for future extensibility without breaking current code
+   - Use abstract base classes or protocols for extensible interfaces
+   - Implement plugin patterns or strategy patterns where appropriate
+
+4. Backward Compatibility:
+   - Preserve existing public APIs and interfaces
+   - Maintain function signatures and return types
+   - Keep existing configuration formats and file structures
+   - Avoid breaking changes to existing functionality
+   - Use deprecation warnings instead of immediate removal
+   - Add new features through extension rather than modification
+   - Ensure existing tests continue to pass
+
+5. Performance & Security:
    - Critical performance bottlenecks
    - Security vulnerabilities
    - Resource leaks
    - API key handling
 
-4. Testing & Reliability:
+6. Testing & Reliability:
    - Critical test coverage gaps
    - Edge case handling
    - Integration points
@@ -423,17 +574,28 @@ Provide your analysis in this format:
    - Impact on functionality
    - Security implications
 
-2. Minimal Changes Required:
+2. Open-Closed Principle Violations:
+   - Identify code that's not extensible
+   - Suggest ways to make it open for extension
+   - Recommend abstract interfaces or base classes
+
+3. Backward Compatibility Concerns:
+   - Identify potential breaking changes
+   - Suggest backward-compatible alternatives
+   - Recommend deprecation strategies
+
+4. Minimal Changes Required:
    - Specific, targeted improvements
    - Focus on critical paths
    - Avoid unnecessary refactoring
+   - Prioritize extensibility and compatibility
 
-3. Implementation Priority:
-   - High: Security, crashes, data loss
-   - Medium: Performance, reliability
-   - Low: Style, documentation
+5. Implementation Priority:
+   - High: Security, crashes, data loss, breaking changes
+   - Medium: Performance, reliability, extensibility
+   - Low: Style, documentation, minor optimizations
 
-Remember: Focus on minimal, necessary changes that follow best practices. Avoid unnecessary refactoring or style changes unless they impact functionality.""",
+Remember: Focus on minimal, necessary changes that follow best practices. Ensure code is extensible and maintains backward compatibility while avoiding unnecessary refactoring or style changes unless they impact functionality.""",
             f"\nFile: {file_path}",
             f"Content:\n{content}"
         ]
