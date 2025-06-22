@@ -316,6 +316,68 @@ class PRManager:
             })
             return self._generate_fallback_description(changes, test_results)
     
+    def _generate_test_results_table(self, test_results: TestResults) -> str:
+        """
+        Generate the test results summary table algorithmically.
+        
+        Args:
+            test_results: Dictionary containing test results
+            
+        Returns:
+            str: Formatted markdown table
+        """
+        attempts = test_results.get('attempts', [])
+        if not attempts:
+            return "No test results available"
+        
+        # Get all test case names from the first attempt (baseline)
+        baseline_attempt = attempts[0]
+        test_case_names = [tc['name'] for tc in baseline_attempt['test_cases']]
+        
+        # Build table header
+        header_parts = ["Test Case", "Baseline"]
+        for i in range(1, len(attempts)):
+            header_parts.append(f"Attempt {i}")
+        header_parts.extend(["Final Status", "Improvement"])
+        
+        # Create header row
+        header_row = "| " + " | ".join(header_parts) + " |"
+        separator_row = "|" + "|".join(["---" for _ in header_parts]) + "|"
+        
+        # Build table rows
+        table_rows = [header_row, separator_row]
+        
+        for case_name in test_case_names:
+            row = [case_name]
+            
+            # Add results for each attempt
+            for attempt in attempts:
+                result = next((tc['status'] for tc in attempt['test_cases'] if tc['name'] == case_name), 'N/A')
+                row.append(result)
+            
+            # Calculate improvement
+            baseline_status = next((tc['status'] for tc in baseline_attempt['test_cases'] if tc['name'] == case_name), 'unknown')
+            final_status = next((tc['status'] for tc in attempts[-1]['test_cases'] if tc['name'] == case_name), 'unknown')
+            
+            # Add final status to the row
+            row.append(final_status)
+            
+            # Determine if there was improvement
+            if baseline_status == 'failed' and final_status == 'passed':
+                improvement = 'Yes'
+            elif baseline_status == 'error' and final_status in ['passed', 'failed']:
+                improvement = 'Yes'
+            elif baseline_status == final_status:
+                improvement = 'No'
+            else:
+                improvement = 'No'  # If it got worse or unclear
+            
+            row.append(improvement)
+            
+            table_rows.append(f"| {' | '.join(row)} |")
+        
+        return "\n".join(table_rows)
+
     def _build_pr_description_prompt(self, changes: Dict[str, List[CodeChange]], test_results: TestResults) -> str:
         """
         Build a comprehensive prompt for LLM to generate PR description.
@@ -334,15 +396,8 @@ class PRManager:
         # Find the best attempt (the one with the most passed tests)
         best_attempt_index = self._find_best_attempt(attempts)
         
-        # Build dynamic table header
-        header_parts = ["Test Case", "Baseline"]
-        for i in range(1, num_attempts):
-            header_parts.append(f"Attempt {i}")
-        header_parts.extend(["Final Status", "Improvement"])
-        
-        # Create the table format string
-        table_header = "| " + " | ".join(header_parts) + " |"
-        table_separator = "|" + "|".join(["---" for _ in header_parts]) + "|"
+        # Generate the test results table algorithmically
+        test_results_table = self._generate_test_results_table(test_results)
         
         prompt = f"""You are an expert software developer creating a pull request description. 
 Generate a comprehensive, well-structured PR description based on the provided test results and code changes.
@@ -357,15 +412,9 @@ The description should include the following sections in this exact order:
 ## Format Requirements:
 
 ### Test Results Summary Table:
-Create a markdown table with these exact columns:
-{table_header}
-{table_separator}
+Use this exact table (do not modify or regenerate it):
 
-- Use the status values from the test data (PASS, FAIL, ERROR, etc.)
-- Show "N/A" for attempts that don't exist
-- The Baseline column shows the initial state before any fixes
-- The Final Status column shows the status after all attempts
-- The Improvement column should show "Yes" if the test improved from baseline, "No" if it stayed the same or got worse
+{test_results_table}
 
 ### Detailed Results Section:
 Show detailed results for ONLY two attempts:
@@ -403,17 +452,25 @@ Here is the data to work with:
 """
         
         # Add test results data
-        prompt += f"\n{json.dumps(test_results, indent=2, default=str)}"
+        try:
+            prompt += f"\n{json.dumps(test_results, indent=2, default=str)}"
+        except Exception as e:
+            logger.warning(f"Failed to serialize test results to JSON: {str(e)}")
+            prompt += f"\n{str(test_results)}"
         
         # Add changes data
         prompt += "\n\n## Code Changes Data:\n"
-        prompt += f"\n{json.dumps(changes, indent=2, default=str)}"
+        try:
+            prompt += f"\n{json.dumps(changes, indent=2, default=str)}"
+        except Exception as e:
+            logger.warning(f"Failed to serialize changes to JSON: {str(e)}")
+            prompt += f"\n{str(changes)}"
         
         prompt += """
 
 ## Instructions:
 - Make the summary clear and actionable, mentioning the agent if available
-- Create the exact table format specified above for test results
+- Use the provided test results table exactly as shown above (do not regenerate it)
 - For detailed results, ONLY show baseline and best attempt to keep the description concise
 - Highlight any patterns or improvements across attempts
 - Keep the code changes section brief and focused on the most important modifications
@@ -573,6 +630,9 @@ Generate the complete PR description now:"""
             baseline_status = next((tc['status'] for tc in baseline_attempt['test_cases'] if tc['name'] == case_name), 'unknown')
             final_status = next((tc['status'] for tc in attempts[-1]['test_cases'] if tc['name'] == case_name), 'unknown')
             
+            # Add final status to the row
+            row.append(final_status)
+            
             # Determine if there was improvement
             if baseline_status == 'failed' and final_status == 'passed':
                 improvement = 'Yes'
@@ -635,13 +695,14 @@ Generate the complete PR description now:"""
         ])
         
         for test_case in baseline_attempt['test_cases']:
+            safe_evaluation = self._safe_format_evaluation(test_case.get('evaluation'))
             description.extend([
                 f"\n#### {test_case['name']}",
                 f"Input: {test_case.get('input', 'N/A')}",
                 f"Expected Output: {test_case.get('expected_output', 'N/A')}",
                 f"Actual Output: {test_case.get('actual_output', 'N/A')}",
                 f"Result: {test_case['status']}",
-                f"Evaluation: {test_case.get('evaluation', 'N/A')}"
+                f"Evaluation: {safe_evaluation}"
             ])
         
         # Show best attempt if it's different from baseline
@@ -653,16 +714,44 @@ Generate the complete PR description now:"""
             ])
             
             for test_case in best_attempt['test_cases']:
+                safe_evaluation = self._safe_format_evaluation(test_case.get('evaluation'))
                 description.extend([
                     f"\n#### {test_case['name']}",
                     f"Input: {test_case.get('input', 'N/A')}",
                     f"Expected Output: {test_case.get('expected_output', 'N/A')}",
                     f"Actual Output: {test_case.get('actual_output', 'N/A')}",
                     f"Result: {test_case['status']}",
-                    f"Evaluation: {test_case.get('evaluation', 'N/A')}"
+                    f"Evaluation: {safe_evaluation}"
                 ])
         
         return description
+    
+    def _safe_format_evaluation(self, evaluation: Optional[str]) -> str:
+        """Safely format evaluation data for display.
+        
+        Args:
+            evaluation: Evaluation data to format
+            
+        Returns:
+            Formatted evaluation string
+        """
+        if evaluation is None:
+            return 'N/A'
+        
+        try:
+            # If it's already a string, return it
+            if isinstance(evaluation, str):
+                return evaluation
+            
+            # If it's a dict, try to format it nicely
+            if isinstance(evaluation, dict):
+                return str(evaluation)
+            
+            # For any other type, convert to string
+            return str(evaluation)
+        except Exception as e:
+            logger.warning(f"Failed to format evaluation: {str(e)}")
+            return 'Evaluation unavailable'
     
     def _generate_code_changes(self, changes: Dict[str, List[CodeChange]]) -> List[str]:
         """Generate the code changes section."""

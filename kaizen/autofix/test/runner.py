@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 import traceback
+from datetime import datetime
 
 # Try to load dotenv for .env file support
 try:
@@ -131,7 +132,7 @@ class TestRunner:
         logger.warning("Could not determine workspace root, using current working directory")
         return original_cwd
     
-    def _run_test_case(self, test_case: Dict, test_file_path: Path) -> Dict:
+    def _run_test_case(self, test_case: Dict, test_file_path: Path):
         """
         Run a single test case with proper assertions and LLM evaluation.
         
@@ -140,8 +141,11 @@ class TestRunner:
             test_file_path: Path to the test file
             
         Returns:
-            Dict containing test case results
+            TestCaseResult containing test case results
         """
+        # Import here to avoid circular import
+        from ...cli.commands.models import TestCaseResult, TestStatus as UnifiedTestStatus
+        
         try:
             logger.info(f"Running test case: {test_case.get('name', 'Unknown')}")
             
@@ -185,9 +189,13 @@ class TestRunner:
             # Parse input data using the new input parser
             input_data = test_case_obj.input.get('input')
             
+            # Extract method name from test case input
+            method_name = test_case_obj.input.get('method')
+            
             # DEBUG: Print the input data before parsing
             logger.info(f"DEBUG: Input data before parsing: {input_data}")
             logger.info(f"DEBUG: Input data type: {type(input_data)}")
+            logger.info(f"DEBUG: Method name: {method_name}")
             if isinstance(input_data, list):
                 logger.info(f"DEBUG: Input data length: {len(input_data)}")
                 for i, item in enumerate(input_data):
@@ -198,93 +206,84 @@ class TestRunner:
                     logger.info(f"DEBUG: About to parse inputs...")
                     parsed_inputs = self.input_parser.parse_inputs(input_data)
                     logger.info(f"DEBUG: Input parsing completed. Parsed {len(parsed_inputs)} input(s) for test case")
-                    
-                    # DEBUG: Print the parsed inputs
-                    for i, parsed_input in enumerate(parsed_inputs):
-                        logger.info(f"DEBUG: Parsed input {i}: {parsed_input} (type: {type(parsed_input)})")
-                        
                 except InputParsingError as e:
-                    logger.error(f"Failed to parse inputs: {str(e)}")
-                    return {
-                        'status': TestStatus.ERROR.value,
-                        'error': f"Input parsing error: {str(e)}"
-                    }
+                    logger.error(f"Input parsing failed: {str(e)}")
+                    return TestCaseResult(
+                        name=test_case.get('name', 'Unknown'),
+                        status=UnifiedTestStatus.ERROR,
+                        region=region_name,
+                        input=input_data,
+                        expected_output=test_case_obj.expected_output,
+                        error_message=f"Input parsing failed: {str(e)}",
+                        timestamp=datetime.now()
+                    )
             else:
                 parsed_inputs = []
             
-            # Determine if we need variable tracking
-            evaluation_targets = test_case_obj.evaluation_targets or []
-            tracked_variables = set()
-            
-            for target in evaluation_targets:
-                if target.get('source') == 'variable':
-                    tracked_variables.add(target.get('name'))
-            
-            logger.info(f"DEBUG: Evaluation targets: {evaluation_targets}")
-            logger.info(f"DEBUG: Tracked variables: {tracked_variables}")
-            
-            # Execute the code region with or without tracking
-            if tracked_variables:
-                logger.info(f"DEBUG: About to execute with variable tracking for: {tracked_variables}")
-                execution_result = self.code_region_executor.execute_region_with_tracking(
-                    region_info,
-                    test_case_obj.input.get('method'),
-                    parsed_inputs,
-                    tracked_variables
-                )
-                actual_output = execution_result['result']
-                tracked_values = execution_result['tracked_values']
-                logger.info(f"DEBUG: Execution with tracking completed")
-            else:
-                logger.info(f"DEBUG: About to execute without variable tracking")
-                actual_output = self.code_region_executor.execute_region(
-                    region_info,
-                    test_case_obj.input.get('method'),
-                    parsed_inputs
-                )
-                tracked_values = None
-                logger.info(f"DEBUG: Execution without tracking completed")
-            
-            logger.info(f"DEBUG: About to run assertions...")
-            # Run assertions
-            assertion_results = self.assertion_runner.run_assertions(
-                test_case_obj.assertions, 
-                actual_output
+            # Execute the code region with parsed inputs
+            logger.info(f"DEBUG: About to execute code region...")
+            execution_result = self.code_region_executor.execute_region_with_tracking(
+                region_info, 
+                method_name=method_name,
+                input_data=parsed_inputs,
+                tracked_variables=set()  # Empty set for no specific tracking
             )
+            actual_output = execution_result['result']
+            tracked_values = execution_result['tracked_values']
+            logger.info(f"DEBUG: Code region execution completed")
+            
+            # Run assertions
+            logger.info(f"DEBUG: About to run assertions...")
+            assertion_results = self.assertion_runner.run_assertions(test_case_obj.assertions, actual_output)
             logger.info(f"DEBUG: Assertions completed")
             
+            # Run LLM evaluation
             logger.info(f"DEBUG: About to evaluate with LLM...")
-            # Evaluate with LLM
             llm_evaluation = self.llm_evaluator.evaluate_result(test_case_obj, actual_output, tracked_values)
             logger.info(f"DEBUG: LLM evaluation completed")
             
             # Determine overall test status
             status = self._determine_test_status(assertion_results, llm_evaluation)
             
-            # Combine results
-            return {
-                'status': status,
-                'input': test_case_obj.input,
-                'parsed_inputs': parsed_inputs,
-                'output': actual_output,
-                'tracked_values': tracked_values,
-                'assertions': assertion_results,
-                'llm_evaluation': llm_evaluation,
-                'expected_output': test_case_obj.expected_output,
-                'region_info': {
-                    'type': region_info.type.value,
-                    'name': region_info.name,
-                    'methods': region_info.class_methods
-                }
-            }
+            # Convert to unified TestStatus
+            unified_status = self._convert_to_unified_status(status)
+            
+            # Create TestCaseResult
+            return TestCaseResult(
+                name=test_case.get('name', 'Unknown'),
+                status=unified_status,
+                region=region_name,
+                input=input_data,
+                expected_output=test_case_obj.expected_output,
+                actual_output=actual_output,
+                error_message=None if unified_status == UnifiedTestStatus.PASSED else "Test failed",
+                evaluation=llm_evaluation,
+                metadata={
+                    'parsed_inputs': parsed_inputs,
+                    'tracked_values': tracked_values,
+                    'assertions': assertion_results,
+                    'region_info': {
+                        'type': region_info.type.value,
+                        'name': region_info.name,
+                        'methods': region_info.class_methods
+                    }
+                },
+                timestamp=datetime.now()
+            )
             
         except Exception as e:
             logger.error(f"Error in test case {test_case.get('name', 'Unknown')}: {str(e)}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
-            return {
-                'status': TestStatus.ERROR.value,
-                'error': str(e)
-            }
+            return TestCaseResult(
+                name=test_case.get('name', 'Unknown'),
+                status=UnifiedTestStatus.ERROR,
+                region=test_case.get('region', 'unknown'),
+                input=test_case.get('input'),
+                expected_output=test_case.get('expected_output'),
+                error_message=str(e),
+                error_details=traceback.format_exc(),
+                timestamp=datetime.now()
+            )
     
     def _determine_test_status(self, assertion_results: List[Dict], llm_evaluation: Dict) -> str:
         """Determine the overall test status based on assertions and LLM evaluation."""
@@ -298,19 +297,42 @@ class TestRunner:
         
         return TestStatus.PASSED.value
     
-    def run_tests(self, test_file_path: Path) -> Dict:
+    def _convert_to_unified_status(self, legacy_status: str):
+        """Convert legacy TestStatus to unified TestStatus."""
+        # Import here to avoid circular import
+        from ...cli.commands.models import TestStatus as UnifiedTestStatus
+        
+        status_mapping = {
+            TestStatus.PASSED.value: UnifiedTestStatus.PASSED,
+            TestStatus.FAILED.value: UnifiedTestStatus.FAILED,
+            TestStatus.ERROR.value: UnifiedTestStatus.ERROR,
+            TestStatus.PENDING.value: UnifiedTestStatus.PENDING,
+            TestStatus.RUNNING.value: UnifiedTestStatus.RUNNING,
+            TestStatus.COMPLETED.value: UnifiedTestStatus.PASSED,  # Completed is considered passed
+        }
+        return status_mapping.get(legacy_status, UnifiedTestStatus.ERROR)
+    
+    def run_tests(self, test_file_path: Path):
         """
-        Run tests and return results.
+        Run tests and return unified TestExecutionResult.
         
         Args:
             test_file_path: Path to the test file
             
         Returns:
-            Dict containing test results
+            TestExecutionResult containing all test results
         """
+        # Import here to avoid circular import
+        from ...cli.commands.models import TestExecutionResult, TestStatus as UnifiedTestStatus
+        
         logger.info(f"DEBUG: Starting run_tests with file path: {test_file_path}")
-        results = self._create_initial_results()
-        summary = TestSummary()
+        
+        # Create the unified test execution result
+        test_result = TestExecutionResult(
+            name=self.test_config.get('name', 'Unknown Test'),
+            file_path=test_file_path,
+            config_path=self.config_file_path
+        )
         
         try:
             # Resolve the file path relative to config file location
@@ -335,82 +357,28 @@ class TestRunner:
                 logger.info(f"Running test case: {test_name}")
                 
                 logger.info(f"DEBUG: About to call _run_test_case for: {test_name}")
-                test_result = self._run_test_case(test_case, resolved_path)
+                test_case_result = self._run_test_case(test_case, resolved_path)
                 logger.info(f"DEBUG: _run_test_case completed for: {test_name}")
-                logger.info(f"Test result: {test_result}")
+                logger.info(f"Test result: {test_case_result}")
                 
-                results[test_name] = self._create_test_result(test_result)
-                
-                summary.total_regions += 1
-                if test_result['status'] == TestStatus.PASSED.value:
-                    summary.passed_regions += 1
-                elif test_result['status'] == TestStatus.FAILED.value:
-                    summary.failed_regions += 1
-                else:
-                    summary.error_regions += 1
+                # Add the test case result to the unified result
+                test_result.add_test_case(test_case_result)
                 
                 logger.info(f"DEBUG: Completed test case {i+1}/{len(test_steps)}: {test_name}")
             
-            logger.info(f"DEBUG: All test cases completed, creating final results")
-            results['overall_status'] = {
-                'status': TestStatus.COMPLETED.value,
-                'summary': summary.to_dict()
-            }
-            results['_status'] = TestStatus.COMPLETED.value
+            logger.info(f"DEBUG: All test cases completed")
             
         except Exception as e:
             logger.error(f"Error running tests: {str(e)}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
-            results['overall_status'] = {
-                'status': TestStatus.FAILED.value,
-                'summary': summary.to_dict()
-            }
-            results['_status'] = TestStatus.ERROR.value
-        
-        logger.info(f"DEBUG: run_tests completed, returning results")
-        return results
-
-    def _create_initial_results(self) -> Dict:
-        """Create initial results structure."""
-        return {
-            'overall_status': {
-                'status': TestStatus.PENDING.value,
-                'summary': TestSummary().to_dict()
-            },
-            '_status': TestStatus.RUNNING.value
-        }
-
-    def _create_test_result(self, test_result: Dict) -> Dict:
-        """
-        Create a structured test result dictionary.
-        
-        Args:
-            test_result: Raw test result dictionary
             
-        Returns:
-            Dict containing structured test result
-        """
-        return {
-            'status': test_result['status'],
-            'test_cases': [{
-                'status': test_result['status'],
-                'input': test_result.get('input'),
-                'parsed_inputs': test_result.get('parsed_inputs', []),
-                'output': test_result.get('output'),
-                'tracked_values': test_result.get('tracked_values', []),
-                'assertions': test_result.get('assertions', []),
-                'llm_evaluation': test_result.get('llm_evaluation', {}),
-                'expected_output': test_result.get('expected_output'),
-                'region_info': test_result.get('region_info', {}),
-                'error': test_result.get('error')
-            }],
-            'summary': {
-                'total': 1,
-                'passed': 1 if test_result['status'] == TestStatus.PASSED.value else 0,
-                'failed': 1 if test_result['status'] == TestStatus.FAILED.value else 0,
-                'error': 1 if test_result['status'] == TestStatus.ERROR.value else 0
-            }
-        }
+            # Add error information to the test result
+            test_result.error_message = f"Test execution failed: {str(e)}"
+            test_result.error_details = traceback.format_exc()
+            test_result.status = UnifiedTestStatus.ERROR
+        
+        logger.info(f"DEBUG: run_tests completed, returning unified result")
+        return test_result
 
     def _load_environment_variables(self) -> None:
         """Load environment variables from .env files and user's environment.
