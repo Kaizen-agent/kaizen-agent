@@ -4,8 +4,11 @@ This module contains validation utilities for test configuration,
 including the ConfigurationValidator class.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from pathlib import Path
+
 from .errors import ConfigurationError
+from .types import DEFAULT_MAX_RETRIES
 
 class ValidationResult:
     """Result of a validation operation.
@@ -69,10 +72,17 @@ class ConfigurationValidator:
                 self.result.add_error(f"Configuration must include '{field}' field")
 
     def _validate_max_retries(self) -> None:
-        """Validate max_retries value."""
-        max_retries = self.data.get('max_retries', 3)
-        if not 1 <= max_retries <= 10:
-            self.result.add_error(f"max_retries must be between 1 and 10, got {max_retries}")
+        """Validate max_retries field."""
+        max_retries = self.data.get('max_retries', DEFAULT_MAX_RETRIES)
+        
+        if not isinstance(max_retries, int):
+            raise ConfigurationError("max_retries must be an integer")
+        
+        if max_retries < 0:
+            raise ConfigurationError("max_retries must be non-negative")
+        
+        if max_retries > 10:
+            raise ConfigurationError("max_retries cannot exceed 10")
 
     def _validate_base_branch(self) -> None:
         """Validate base_branch value."""

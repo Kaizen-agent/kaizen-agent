@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from kaizen.cli.commands.errors import ConfigurationError
+from ..types import PRStrategy, DEFAULT_MAX_RETRIES
 
 from .metadata import TestMetadata
 from .evaluation import TestEvaluation
 from .settings import TestSettings
 from .step import TestStep
-from ..types import PRStrategy
 
 @dataclass(frozen=True)
 class TestConfiguration:
@@ -51,9 +51,9 @@ class TestConfiguration:
     settings: Optional[TestSettings] = None
     auto_fix: bool = False
     create_pr: bool = False
-    max_retries: int = 3
+    max_retries: int = DEFAULT_MAX_RETRIES
     base_branch: str = "main"
-    pr_strategy: PRStrategy = PRStrategy.ANY_IMPROVEMENT
+    pr_strategy: PRStrategy = PRStrategy.ALL_PASSING
     dependencies: List[str] = field(default_factory=list)
     referenced_files: List[str] = field(default_factory=list)
     files_to_fix: List[str] = field(default_factory=list)
@@ -74,7 +74,7 @@ class TestConfiguration:
             FileNotFoundError: If test file does not exist
         """
         # Parse PR strategy
-        pr_strategy = data.get('pr_strategy', 'ANY_IMPROVEMENT')
+        pr_strategy = data.get('pr_strategy', 'ALL_PASSING')
         if isinstance(pr_strategy, str):
             try:
                 pr_strategy = PRStrategy.from_str(pr_strategy)
@@ -94,7 +94,7 @@ class TestConfiguration:
             settings=TestSettings.from_dict(data.get('settings', {})) if 'settings' in data else None,
             auto_fix=data.get('auto_fix', False),
             create_pr=data.get('create_pr', False),
-            max_retries=data.get('max_retries', 3),
+            max_retries=data.get('max_retries', DEFAULT_MAX_RETRIES),
             base_branch=data.get('base_branch', 'main'),
             pr_strategy=pr_strategy,
             dependencies=data.get('dependencies', []),

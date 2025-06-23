@@ -247,10 +247,21 @@ def collect_referenced_files(
                                 imported_files.add(Path(spec.origin).resolve())
                     else:  # ImportFrom
                         if node.module:
-                            module_name = (
-                                f"{file_path.parent.name}.{node.module}"
-                                if node.level > 0 else node.module
-                            )
+                            if node.level > 0:
+                                # Handle relative imports properly
+                                # Build the correct module path based on the level
+                                base_path = file_path.parent
+                                for _ in range(node.level):
+                                    base_path = base_path.parent
+                                
+                                # Create the module name
+                                if base_path.name:
+                                    module_name = f"{base_path.name}.{node.module}"
+                                else:
+                                    module_name = node.module
+                            else:
+                                module_name = node.module
+                            
                             spec = importlib.util.find_spec(module_name)
                             if spec and spec.origin and spec.origin.endswith('.py'):
                                 imported_files.add(Path(spec.origin).resolve())

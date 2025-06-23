@@ -240,7 +240,18 @@ class DependencyManager:
                 
                 # Also add the module with the original file path as key for easier access
                 # This helps when the code tries to import using the original path
-                path_key = str(resolved_path.relative_to(self.workspace_root)).replace('/', '.').replace('.py', '')
+                try:
+                    path_key = str(resolved_path.relative_to(self.workspace_root)).replace('/', '.').replace('.py', '')
+                except ValueError as e:
+                    # File is not in the workspace root - this can happen when users specify
+                    # files from different workspaces or use absolute paths incorrectly
+                    logger.warning(f"File {resolved_path} is not in the workspace root {self.workspace_root}. "
+                                  f"This may indicate a configuration issue. Error: {str(e)}")
+                    
+                    # Try to handle this gracefully by using the file name as the path key
+                    path_key = resolved_path.stem
+                    logger.info(f"Using file name '{path_key}' as path key for {resolved_path}")
+                
                 if path_key not in self._imported_modules:
                     self._imported_modules[path_key] = module
                 
