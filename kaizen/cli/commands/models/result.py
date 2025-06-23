@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, TypeVar, Generic
+from typing import Dict, List, Optional, TypeVar, Generic, Any
 
 from .configuration import TestConfiguration
 
@@ -60,6 +60,8 @@ class TestResult:
         results: Detailed test results
         error: Error message if failed
         steps: Test step results
+        unified_result: Unified test execution result (for detailed logging)
+        test_attempts: Auto-fix attempts (for detailed logging)
     """
     # Required fields
     name: str
@@ -73,6 +75,8 @@ class TestResult:
     # Optional fields
     error: Optional[str] = None
     steps: List[Dict[str, any]] = field(default_factory=list)
+    unified_result: Optional[Any] = None  # TestExecutionResult
+    test_attempts: Optional[List[Dict[str, any]]] = None
     
     @classmethod
     def from_config(cls, config: TestConfiguration) -> 'TestResult':

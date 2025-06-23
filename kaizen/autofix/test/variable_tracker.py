@@ -75,7 +75,6 @@ class VariableTracker:
         """Track the return value of a function."""
         try:
             self.context.return_value = return_value
-            logger.debug(f"Tracked return value: {return_value}")
         except Exception as e:
             logger.debug(f"Error tracking return value: {str(e)}")
     

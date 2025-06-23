@@ -239,6 +239,10 @@ def diagnose_github_access(ctx: click.Context, config: Optional[str], repo: Opti
 # Add setup commands
 cli.add_command(setup)
 
+# Add analyze-logs command
+from .commands.analyze_logs import analyze_logs
+cli.add_command(analyze_logs)
+
 def main() -> None:
     """Main entry point."""
     cli()

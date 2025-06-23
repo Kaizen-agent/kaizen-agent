@@ -44,13 +44,15 @@ class TestSummary:
 class TestRunner:
     """Runs tests using the code region execution system with support for multiple inputs."""
     
-    def __init__(self, test_config: Dict):
+    def __init__(self, test_config: Dict, verbose: bool = False):
         """Initialize the test runner.
         
         Args:
             test_config: Test configuration dictionary
+            verbose: Whether to show detailed debug information
         """
         self.test_config = test_config
+        self.verbose = verbose
         self._validate_config()
         self.workspace_root = self._find_workspace_root()
         self.config_file_path = Path(test_config.get('config_file', ''))
@@ -88,7 +90,8 @@ class TestRunner:
         """
         original_cwd = Path.cwd()
         
-        logger.debug("Starting workspace root detection...")
+        if self.verbose:
+            logger.debug("Starting workspace root detection...")
         
         # Strategy 1: Look for common project root indicators
         current = original_cwd
@@ -96,7 +99,8 @@ class TestRunner:
         depth = 0
         
         while current.parent != current and depth < max_depth:
-            logger.debug(f"Checking directory: {current}")
+            if self.verbose:
+                logger.debug(f"Checking directory: {current}")
             
             # Check for project indicators
             project_indicators = [
@@ -121,9 +125,11 @@ class TestRunner:
             logger.warning(f"Reached maximum depth ({max_depth}) while searching for workspace root")
 
         # Strategy 2: Look for kaizen-agent directory (for development)
-        logger.debug("Searching for kaizen-agent directory...")
+        if self.verbose:
+            logger.debug("Searching for kaizen-agent directory...")
         for ancestor in [original_cwd] + list(original_cwd.parents):
-            logger.debug(f"Checking ancestor: {ancestor}")
+            if self.verbose:
+                logger.debug(f"Checking ancestor: {ancestor}")
             if ancestor.name == 'kaizen-agent':
                 logger.info(f"Found kaizen-agent directory at: {ancestor}")
                 return ancestor
@@ -150,11 +156,13 @@ class TestRunner:
             logger.info(f"Running test case: {test_case.get('name', 'Unknown')}")
             
             # DEBUG: Print the raw test case
-            logger.info(f"DEBUG: Raw test case: {test_case}")
+            if self.verbose:
+                logger.debug(f"DEBUG: Raw test case: {test_case}")
             
             # Get evaluation targets from the top-level configuration
             evaluation_targets = self.test_config.get('evaluation', {}).get('evaluation_targets', [])
-            logger.info(f"DEBUG: Top-level evaluation targets: {evaluation_targets}")
+            if self.verbose:
+                logger.debug(f"DEBUG: Top-level evaluation targets: {evaluation_targets}")
             
             # Convert test case dict to TestCase object, passing the evaluation targets
             test_case_with_evaluation = test_case.copy()
@@ -162,7 +170,8 @@ class TestRunner:
             test_case_obj = TestCase.from_dict(test_case_with_evaluation)
             
             # DEBUG: Print the parsed test case input
-            logger.info(f"DEBUG: TestCase input: {test_case_obj.input}")
+            if self.verbose:
+                logger.debug(f"DEBUG: TestCase input: {test_case_obj.input}")
             
             # Determine region name: use input['region'] if present, else first from top-level 'regions'
             region_name = test_case_obj.input.get('region')
@@ -173,14 +182,16 @@ class TestRunner:
                 region_name = regions[0]
                 logger.info(f"No region specified in test step; using first region from top-level: {region_name}")
             
-            logger.info(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
+            if self.verbose:
+                logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
             
             # Extract and analyze the code region
             region_info = self.code_region_extractor.extract_region(
                 test_file_path, 
                 region_name
             )
-            logger.info(f"DEBUG: Region extraction completed. Region info: {region_info}")
+            if self.verbose:
+                logger.debug(f"DEBUG: Region extraction completed. Region info: {region_info}")
             
             # Add imports from test case to region info
             if 'imports' in test_case_obj.input:
@@ -193,19 +204,22 @@ class TestRunner:
             method_name = test_case_obj.input.get('method')
             
             # DEBUG: Print the input data before parsing
-            logger.info(f"DEBUG: Input data before parsing: {input_data}")
-            logger.info(f"DEBUG: Input data type: {type(input_data)}")
-            logger.info(f"DEBUG: Method name: {method_name}")
-            if isinstance(input_data, list):
-                logger.info(f"DEBUG: Input data length: {len(input_data)}")
-                for i, item in enumerate(input_data):
-                    logger.info(f"DEBUG: Input item {i}: {item} (type: {type(item)})")
+            if self.verbose:
+                logger.debug(f"DEBUG: Input data before parsing: {input_data}")
+                logger.debug(f"DEBUG: Input data type: {type(input_data)}")
+                logger.debug(f"DEBUG: Method name: {method_name}")
+                if isinstance(input_data, list):
+                    logger.debug(f"DEBUG: Input data length: {len(input_data)}")
+                    for i, item in enumerate(input_data):
+                        logger.debug(f"DEBUG: Input item {i}: {item} (type: {type(item)})")
             
             if input_data is not None:
                 try:
-                    logger.info(f"DEBUG: About to parse inputs...")
+                    if self.verbose:
+                        logger.debug(f"DEBUG: About to parse inputs...")
                     parsed_inputs = self.input_parser.parse_inputs(input_data)
-                    logger.info(f"DEBUG: Input parsing completed. Parsed {len(parsed_inputs)} input(s) for test case")
+                    if self.verbose:
+                        logger.debug(f"DEBUG: Input parsing completed. Parsed {len(parsed_inputs)} input(s) for test case")
                 except InputParsingError as e:
                     logger.error(f"Input parsing failed: {str(e)}")
                     return TestCaseResult(
@@ -221,7 +235,8 @@ class TestRunner:
                 parsed_inputs = []
             
             # Execute the code region with parsed inputs
-            logger.info(f"DEBUG: About to execute code region...")
+            if self.verbose:
+                logger.debug(f"DEBUG: About to execute code region...")
             execution_result = self.code_region_executor.execute_region_with_tracking(
                 region_info, 
                 method_name=method_name,
@@ -230,17 +245,22 @@ class TestRunner:
             )
             actual_output = execution_result['result']
             tracked_values = execution_result['tracked_values']
-            logger.info(f"DEBUG: Code region execution completed")
+            if self.verbose:
+                logger.debug(f"DEBUG: Code region execution completed")
             
             # Run assertions
-            logger.info(f"DEBUG: About to run assertions...")
+            if self.verbose:
+                logger.debug(f"DEBUG: About to run assertions...")
             assertion_results = self.assertion_runner.run_assertions(test_case_obj.assertions, actual_output)
-            logger.info(f"DEBUG: Assertions completed")
+            if self.verbose:
+                logger.debug(f"DEBUG: Assertions completed")
             
             # Run LLM evaluation
-            logger.info(f"DEBUG: About to evaluate with LLM...")
+            if self.verbose:
+                logger.debug(f"DEBUG: About to evaluate with LLM...")
             llm_evaluation = self.llm_evaluator.evaluate_result(test_case_obj, actual_output, tracked_values)
-            logger.info(f"DEBUG: LLM evaluation completed")
+            if self.verbose:
+                logger.debug(f"DEBUG: LLM evaluation completed")
             
             # Determine overall test status
             status = self._determine_test_status(assertion_results, llm_evaluation)
@@ -325,7 +345,10 @@ class TestRunner:
         # Import here to avoid circular import
         from ...cli.commands.models import TestExecutionResult, TestStatus as UnifiedTestStatus
         
-        logger.info(f"DEBUG: Starting run_tests with file path: {test_file_path}")
+        logger.info("Starting test execution")
+        
+        if self.verbose:
+            logger.debug(f"DEBUG: Starting run_tests with file path: {test_file_path}")
         
         # Create the unified test execution result
         test_result = TestExecutionResult(
@@ -334,6 +357,8 @@ class TestRunner:
             config_path=self.config_file_path
         )
         
+        logger.info(f"Test configuration loaded: {self.test_config.get('name', 'Unknown Test')}")
+        
         try:
             # Resolve the file path relative to config file location
             if self.config_file_path:
@@ -341,32 +366,47 @@ class TestRunner:
             else:
                 resolved_path = test_file_path
                 
-            logger.info(f"DEBUG: Resolved file path: {resolved_path}")
+            if self.verbose:
+                logger.debug(f"DEBUG: Resolved file path: {resolved_path}")
                 
             if not resolved_path.exists():
                 raise FileNotFoundError(f"Test file not found: {resolved_path}")
             
+            logger.info(f"Test file found: {resolved_path}")
+            
             # Use 'steps' instead of 'tests' for the new format
             test_steps = self.test_config.get('steps', [])
-            logger.info(f"DEBUG: Found {len(test_steps)} test steps to run")
-            logger.info(f"Running test steps: {test_steps}")
+            if self.verbose:
+                logger.debug(f"DEBUG: Found {len(test_steps)} test steps to run")
+            logger.info(f"Running {len(test_steps)} test steps")
             
             for i, test_case in enumerate(test_steps):
-                logger.info(f"DEBUG: Starting test case {i+1}/{len(test_steps)}: {test_case.get('name', 'Unknown')}")
+                if self.verbose:
+                    logger.debug(f"DEBUG: Starting test case {i+1}/{len(test_steps)}: {test_case.get('name', 'Unknown')}")
                 test_name = test_case.get('name', 'Unknown')
                 logger.info(f"Running test case: {test_name}")
                 
-                logger.info(f"DEBUG: About to call _run_test_case for: {test_name}")
+                if self.verbose:
+                    logger.debug(f"DEBUG: About to call _run_test_case for: {test_name}")
                 test_case_result = self._run_test_case(test_case, resolved_path)
-                logger.info(f"DEBUG: _run_test_case completed for: {test_name}")
-                logger.info(f"Test result: {test_case_result}")
+                if self.verbose:
+                    logger.debug(f"DEBUG: _run_test_case completed for: {test_name}")
+                    logger.debug(f"Test result: {test_case_result}")
                 
                 # Add the test case result to the unified result
                 test_result.add_test_case(test_case_result)
                 
-                logger.info(f"DEBUG: Completed test case {i+1}/{len(test_steps)}: {test_name}")
+                # Show test case completion status
+                status_emoji = "✅" if test_case_result.status.value == "passed" else "❌"
+                logger.info(f"{status_emoji} Test case completed: {test_name}")
+                
+                if self.verbose:
+                    logger.debug(f"DEBUG: Completed test case {i+1}/{len(test_steps)}: {test_name}")
             
-            logger.info(f"DEBUG: All test cases completed")
+            logger.info("All test cases completed")
+            
+            if self.verbose:
+                logger.debug(f"DEBUG: All test cases completed")
             
         except Exception as e:
             logger.error(f"Error running tests: {str(e)}")
@@ -377,7 +417,11 @@ class TestRunner:
             test_result.error_details = traceback.format_exc()
             test_result.status = UnifiedTestStatus.ERROR
         
-        logger.info(f"DEBUG: run_tests completed, returning unified result")
+        logger.info("Test execution completed")
+        
+        if self.verbose:
+            logger.debug(f"DEBUG: run_tests completed, returning unified result")
+        
         return test_result
 
     def _load_environment_variables(self) -> None:
@@ -418,6 +462,7 @@ class TestRunner:
         important_vars = ['GOOGLE_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']
         for var in important_vars:
             if os.getenv(var):
-                logger.info(f"Found {var} in environment")
+                if self.verbose:
+                    logger.debug(f"Found {var} in environment")
             else:
                 logger.warning(f"Missing {var} in environment") 

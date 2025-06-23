@@ -1487,7 +1487,7 @@ class AutoFix:
             changes={},
             error=self.ERROR_MSG_FIX_FAILED
         )
-
+        
     def _attempt_common_fixes(self, current_file_path: str, file_content: str) -> str:
         """Attempt common fixes on the file content.
         
@@ -1685,7 +1685,7 @@ class AutoFix:
                                 })
                         
                         # Run tests and get unified result
-                        logger.info(f"start running tests with fixed code")
+                        logger.info(f"Running tests after attempt {attempt.attempt_number}")
                         current_test_result = self._run_tests_and_get_result(Path(file_path))
                         
                         # Add to test history
@@ -1696,6 +1696,11 @@ class AutoFix:
                         attempt_tracker.update_attempt_with_unified_result(
                             attempt, status, results, current_test_result
                         )
+                        
+                        # Show attempt results
+                        failed_count = current_test_result.get_failure_count()
+                        total_count = current_test_result.summary.total_tests
+                        logger.info(f"Attempt {attempt.attempt_number} results: {total_count - failed_count}/{total_count} tests passed")
                         
                         # Record attempt for learning (convert to legacy format for compatibility)
                         learning_manager.record_attempt(

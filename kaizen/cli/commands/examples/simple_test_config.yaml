@@ -1,0 +1,35 @@
+# Simple test configuration for clean output demonstration
+name: "Simple Test"
+file_path: "test_file.py"
+description: "Simple test to demonstrate clean CLI output"
+
+# Test configuration
+agent_type: "default"
+auto_fix: false
+create_pr: false
+max_retries: 0
+
+# Test regions to execute
+regions:
+  - "test_function"
+
+# Test steps
+steps:
+  - name: "Test basic functionality"
+    input:
+      method: "test_function"
+      input: "test input data"
+    expected_output:
+      status: "success"
+    description: "Test the basic functionality of the test function"
+    timeout: 30
+
+# Evaluation criteria
+evaluation:
+  criteria:
+    - "Function returns expected result"
+  llm_provider: "openai"
+  model: "gpt-4"
+  settings:
+    temperature: 0.1
+    max_tokens: 1000 

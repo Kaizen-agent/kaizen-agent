@@ -364,7 +364,7 @@ class DependencyResolver:
             dependencies = self._resolve_all_dependencies(imports)
             logger.debug(f"DEBUG: Dependency resolution completed, found {len(dependencies)} dependencies")
             
-            logger.info(f"✓ Dependencies resolved: {len(dependencies)} found")
+            logger.debug(f"✓ Dependencies resolved: {len(dependencies)} found")
             return frozenset(dependencies)
             
         except (IOError, SyntaxError) as e:
@@ -452,7 +452,7 @@ class DependencyResolver:
             return self._resolve_third_party_module(module_name)
             
         except Exception as e:
-            logger.error(f"Failed to resolve module {module_name}: {str(e)}")
+            logger.debug(f"Failed to resolve module {module_name}: {str(e)}")
             logger.debug(f"DEBUG: Exception details for {module_name}: {traceback.format_exc()}")
             return None
     
@@ -746,8 +746,8 @@ class ImportManager:
         try:
             # First analyze all required imports
             standard_imports, third_party_imports = self._import_analyzer.analyze_imports(region_info.code)
-            logger.info(f"standard_imports: {standard_imports}")
-            logger.info(f"third_party_imports: {third_party_imports}")
+            logger.debug(f"standard_imports: {standard_imports}")
+            logger.debug(f"third_party_imports: {third_party_imports}")
             # Add configured third-party packages to imports
             third_party_imports.update(self.config.common_packages.keys())
             
@@ -1147,7 +1147,7 @@ class CodeRegionExtractor:
     
     def extract_region(self, file_path: Path, region_name: str) -> RegionInfo:
         """Extract a code region from a file."""
-        logger.info(f"Extracting region '{region_name}' from file: {file_path}")
+        logger.debug(f"Extracting region '{region_name}' from file: {file_path}")
         try:
             logger.debug(f"DEBUG: Opening file: {file_path}")
             with open(file_path, 'r') as f:
@@ -1187,7 +1187,7 @@ class CodeRegionExtractor:
                 if line.startswith(('import ', 'from ')) and not line.startswith('#'):
                     # Skip relative imports since dependencies are handled by the dependency manager
                     if line.startswith('from .'):
-                        logger.info(f"Skipping relative import: {line}")
+                        logger.debug(f"Skipping relative import: {line}")
                         continue
                     import_lines.append(line)
             
@@ -1200,12 +1200,12 @@ class CodeRegionExtractor:
             
             # Combine imports with region code
             if import_lines:
-                logger.info(f"Including {len(import_lines)} import statements in region")
+                logger.debug(f"Including {len(import_lines)} import statements in region")
                 code = '\n'.join(import_lines) + '\n\n' + region_code
             else:
                 code = region_code
             
-            logger.info(f"Extracted code region: {len(code)} characters")
+            logger.debug(f"Extracted code region: {len(code)} characters")
             logger.debug(f"DEBUG: About to analyze region: {region_name}")
             
             return self._analyze_region(code, region_name, file_path)
@@ -1226,7 +1226,7 @@ class CodeRegionExtractor:
     
     def _analyze_region(self, code: str, region_name: str, file_path: Path) -> RegionInfo:
         """Analyze the code region to determine its type, structure, and dependencies."""
-        logger.info(f"Analyzing region '{region_name}' from file: {file_path}")
+        logger.debug(f"Analyzing region '{region_name}' from file: {file_path}")
         try:
             logger.debug("DEBUG: Parsing AST")
             tree = ast.parse(code)
@@ -1260,7 +1260,7 @@ class CodeRegionExtractor:
                 class_methods=methods,
                 file_path=file_path
             )
-            logger.info(f"Successfully analyzed region '{region_name}'")
+            logger.debug(f"Successfully analyzed region '{region_name}'")
             logger.debug("DEBUG: _analyze_region completed successfully")
             return region_info
             
@@ -1355,542 +1355,178 @@ class CodeRegionExtractor:
             raise ValueError(f"Failed to determine region type: {str(e)}")
 
 class CodeRegionExecutor:
-    """Executes code regions with support for multiple inputs."""
+    """Executes code regions with import management and variable tracking."""
     
     def __init__(self, workspace_root: Path, imported_dependencies: Optional[Dict[str, Any]] = None):
         """Initialize the code region executor.
         
         Args:
             workspace_root: Root directory of the workspace
-            imported_dependencies: Pre-imported dependencies to make available
+            imported_dependencies: Optional dictionary of pre-imported dependencies
         """
         self.workspace_root = workspace_root
         self.imported_dependencies = imported_dependencies or {}
-        self.input_parser = InputParser()
         self.import_manager = ImportManager(workspace_root)
-        self.dependency_resolver = DependencyResolver(workspace_root)
-        
-        # Initialize simple import resolver
         self.simple_import_resolver = SimpleImportResolver(workspace_root)
     
-    def _ensure_standard_imports(self, namespace: Dict[str, Any]) -> None:
-        """Ensure all standard library imports are available in the namespace.
-        
-        Args:
-            namespace: Dictionary to add imports to
-        """
-        # Add pre-imported dependencies first
-        if self.imported_dependencies:
-            namespace.update(self.imported_dependencies)
-            logger.info(f"Added {len(self.imported_dependencies)} pre-imported dependencies to namespace")
-        
-        # Add standard library imports
-        for module_name in STANDARD_MODULES:
-            if module_name not in namespace:
-                try:
-                    module = __import__(module_name)
-                    namespace[module_name] = module
-                    if module_name == 'typing':
-                        self.import_manager._add_typing_imports(namespace)
-                except builtins.ImportError as e:
-                    logger.warning(f"Failed to import standard library {module_name}: {str(e)}")
-
-    def _validate_input_data(self, input_data: Any, name: str) -> None:
-        """Validate input data for execution.
-        
-        Args:
-            input_data: Data to validate
-            name: Name of the function/method being called
-            
-        Raises:
-            ValueError: If input data is invalid
-        """
-        if input_data is None:
-            raise ValueError(f"Input data required for {name}")
-        
-        if isinstance(input_data, str) and not input_data.strip():
-            raise ValueError(f"Input data for {name} cannot be empty")
-
-    def _execute_code(self, code: str, namespace: Dict[str, Any]) -> None:
-        """Execute Python code in the given namespace.
-        
-        Args:
-            code: Python code to execute
-            namespace: Dictionary containing the execution namespace
-            
-        Raises:
-            SyntaxError: If the code contains syntax errors
-            ValueError: For other execution errors
-        """
-        # Add module globals to support relative imports and other module-level operations
-        if '__name__' not in namespace:
-            namespace['__name__'] = '__main__'
-        if '__file__' not in namespace:
-            namespace['__file__'] = '<exec>'
-        if '__package__' not in namespace:
-            namespace['__package__'] = None
-        if '__builtins__' not in namespace:
-            namespace['__builtins__'] = __builtins__
-        
-        # DEBUG: Log the type and value of 'datetime' in the namespace before execution
-        if 'datetime' in namespace:
-            logger.info(f"DEBUG: 'datetime' in namespace before exec: type={type(namespace['datetime'])}, value={namespace['datetime']}")
-        else:
-            logger.info("DEBUG: 'datetime' not in namespace before exec")
-        
-        # DEBUG: Log available classes and types in namespace
-        available_classes = [name for name, obj in namespace.items() if isinstance(obj, type) and not name.startswith('_')]
-        logger.info(f"DEBUG: Available classes in namespace: {available_classes}")
-        
-        # DEBUG: Log all available names for debugging
-        all_names = list(namespace.keys())
-        logger.debug(f"DEBUG: All available names in namespace: {all_names}")
-        
-        try:
-            exec(code, namespace)
-            logger.debug("Code execution completed successfully")
-        except NameError as e:
-            logger.error(f"NameError in code execution: {str(e)}")
-            logger.error(f"Available names in namespace: {list(namespace.keys())}")
-            logger.error(f"Code that failed: {code[:200]}...")  # Show first 200 chars of code
-            raise
-        except SyntaxError as e:
-            logger.error(f"Syntax error in code: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"Error executing code: {type(e).__name__}: {str(e)}")
-            raise ValueError(f"Failed to execute code: {str(e)}")
-
-    def execute_region(self, region_info: RegionInfo, method_name: Optional[str] = None, 
-                      input_data: Any = None, class_name: Optional[str] = None) -> Any:
-        """Execute a code region and return its result.
+    def execute_region_with_tracking(
+        self, 
+        region_info: RegionInfo, 
+        method_name: Optional[str] = None,
+        input_data: Optional[List[Any]] = None,
+        tracked_variables: Optional[Set[str]] = None
+    ) -> Dict[str, Any]:
+        """Execute a code region with variable tracking.
         
         Args:
             region_info: Information about the code region to execute
-            method_name: Optional name of the method to call
-            input_data: Optional input data for the execution (supports multiple inputs)
-            class_name: Optional override for the class name to instantiate
-        """
-        logger.info(f"Executing region: {region_info.name}")
-        
-        try:
-            # Handle input data - it may already be parsed from TestRunner
-            parsed_inputs = []
-            if input_data is not None:
-                # DEBUG: Print input data details
-                logger.info(f"DEBUG: CodeRegionExecutor received input_data: {input_data}")
-                logger.info(f"DEBUG: CodeRegionExecutor input_data type: {type(input_data)}")
-                
-                # Check if input_data is already a list of parsed values (from TestRunner)
-                if isinstance(input_data, list) and len(input_data) > 0:
-                    # If the first item is not a dict with 'type' key, assume it's already parsed
-                    if not (isinstance(input_data[0], dict) and 'type' in input_data[0]):
-                        logger.info(f"Using already-parsed inputs: {len(input_data)} items")
-                        logger.info(f"DEBUG: Already-parsed inputs: {input_data}")
-                        parsed_inputs = input_data
-                    else:
-                        # It's raw YAML config, need to parse it
-                        logger.info(f"Parsing raw YAML config inputs")
-                        try:
-                            parsed_inputs = self.input_parser.parse_inputs(input_data)
-                            logger.info(f"Parsed {len(parsed_inputs)} input(s) for region execution")
-                        except InputParsingError as e:
-                            logger.error(f"Failed to parse inputs: {str(e)}")
-                            raise ValueError(f"Input parsing error: {str(e)}")
-                else:
-                    # Single value or empty list
-                    logger.info(f"Using single value or empty list input")
-                    parsed_inputs = input_data if isinstance(input_data, list) else [input_data]
-            
-            # Create a custom import manager that uses pre-imported dependencies
-            with self._create_custom_import_manager(region_info) as namespace:
-                # Ensure standard library imports are available
-                self._ensure_standard_imports(namespace)
-                
-                # Execute the code
-                self._execute_code(region_info.code, namespace)
-                
-                # Execute based on region type
-                if region_info.type == RegionType.CLASS:
-                    logger.debug(f"Executing class method: {method_name}")
-                    return self._execute_class_method(namespace, region_info, method_name, parsed_inputs, class_name=class_name)
-                elif region_info.type == RegionType.FUNCTION:
-                    logger.debug(f"Executing function: {region_info.name}")
-                    return self._execute_function(namespace, region_info, parsed_inputs)
-                else:
-                    logger.debug(f"Executing module function: {method_name}")
-                    return self._execute_module(namespace, region_info, method_name, parsed_inputs)
-                    
-        except Exception as e:
-            logger.error(f"Failed to execute region '{region_info.name}': {str(e)}")
-            logger.debug("Full traceback:", exc_info=True)
-            raise ValueError(f"Error executing region '{region_info.name}': {str(e)}")
-
-    def execute_region_with_tracking(self, region_info: RegionInfo, method_name: Optional[str] = None, 
-                                   input_data: Any = None, tracked_variables: Optional[Set[str]] = None, class_name: Optional[str] = None) -> Dict[str, Any]:
-        """Execute a code region with variable tracking and return results.
-        
-        Args:
-            region_info: Information about the code region to execute
-            method_name: Optional name of the method to call
-            input_data: Optional input data for the execution (supports multiple inputs)
-            tracked_variables: Set of variable names to track during execution
-            class_name: Optional override for the class name to instantiate
-        """
-        logger.info(f"Executing region with tracking: {region_info.name}")
-        
-        if tracked_variables is None:
-            tracked_variables = set()
-        
-        try:
-            # Handle input data - it may already be parsed from TestRunner
-            parsed_inputs = []
-            if input_data is not None:
-                # DEBUG: Print input data details
-                logger.info(f"DEBUG: CodeRegionExecutor received input_data: {input_data}")
-                logger.info(f"DEBUG: CodeRegionExecutor input_data type: {type(input_data)}")
-                
-                # Check if input_data is already a list of parsed values (from TestRunner)
-                if isinstance(input_data, list) and len(input_data) > 0:
-                    # If the first item is not a dict with 'type' key, assume it's already parsed
-                    if not (isinstance(input_data[0], dict) and 'type' in input_data[0]):
-                        logger.info(f"Using already-parsed inputs: {len(input_data)} items")
-                        logger.info(f"DEBUG: Already-parsed inputs: {input_data}")
-                        parsed_inputs = input_data
-                    else:
-                        # It's raw YAML config, need to parse it
-                        logger.info(f"Parsing raw YAML config inputs")
-                        try:
-                            parsed_inputs = self.input_parser.parse_inputs(input_data)
-                            logger.info(f"Parsed {len(parsed_inputs)} input(s) for region execution")
-                        except InputParsingError as e:
-                            logger.error(f"Failed to parse inputs: {str(e)}")
-                            raise ValueError(f"Input parsing error: {str(e)}")
-                else:
-                    # Single value or empty list
-                    logger.info(f"Using single value or empty list input")
-                    parsed_inputs = input_data if isinstance(input_data, list) else [input_data]
-            
-            # Create a custom import manager that uses pre-imported dependencies
-            with self._create_custom_import_manager(region_info) as namespace:
-                # Ensure standard library imports are available
-                self._ensure_standard_imports(namespace)
-                
-                # Execute the code
-                self._execute_code(region_info.code, namespace)
-                
-                # Execute with variable tracking
-                with track_variables(tracked_variables) as tracker:
-                    # Execute based on region type
-                    if region_info.type == RegionType.CLASS:
-                        logger.debug(f"Executing class method with tracking: {method_name}")
-                        result = self._execute_class_method(namespace, region_info, method_name, parsed_inputs, class_name=class_name)
-                    elif region_info.type == RegionType.FUNCTION:
-                        logger.debug(f"Executing function with tracking: {region_info.name}")
-                        result = self._execute_function(namespace, region_info, parsed_inputs)
-                    else:
-                        logger.debug(f"Executing module function with tracking: {method_name}")
-                        result = self._execute_module(namespace, region_info, method_name, parsed_inputs)
-                    
-                    # Get tracked values during execution
-                    tracked_values = tracker.get_all_tracked_values()
-                    
-                    # Additionally capture final state of tracked variables from namespace
-                    # This ensures we get the final values even if they weren't captured during execution
-                    final_tracked_values = {}
-                    for var_name in tracked_variables:
-                        if var_name in namespace:
-                            final_tracked_values[var_name] = namespace[var_name]
-                            logger.debug(f"Captured final state of {var_name}: {namespace[var_name]}")
-                    
-                    # For class methods, also check instance variables
-                    if region_info.type == RegionType.CLASS and isinstance(result, dict) and result.get('status') == 'success':
-                        instance = result.get('instance')
-                        if instance:
-                            logger.debug(f"Checking instance variables for tracked variables: {tracked_variables}")
-                            for var_name in tracked_variables:
-                                if hasattr(instance, var_name):
-                                    instance_value = getattr(instance, var_name)
-                                    final_tracked_values[var_name] = instance_value
-                                    logger.debug(f"Captured instance variable {var_name}: {instance_value}")
-                    
-                    # Merge tracked values, preferring final state over execution-time values
-                    merged_tracked_values = tracked_values.copy()
-                    merged_tracked_values.update(final_tracked_values)
-                    
-                    logger.info(f"Final tracked values: {merged_tracked_values}")
-                    
-                    return {
-                        'result': result,
-                        'tracked_values': merged_tracked_values,
-                        'tracked_variables': list(tracked_variables)
-                    }
-                    
-        except Exception as e:
-            logger.error(f"Failed to execute region '{region_info.name}' with tracking: {str(e)}")
-            logger.debug("Full traceback:", exc_info=True)
-            raise ValueError(f"Error executing region '{region_info.name}' with tracking: {str(e)}")
-
-    def _create_custom_import_manager(self, region_info: RegionInfo):
-        """Create a custom import manager that uses pre-imported dependencies.
-        
-        Args:
-            region_info: Information about the code region
+            method_name: Optional method name to call (for class regions)
+            input_data: Optional input data to pass to the method
+            tracked_variables: Optional set of variable names to track
             
         Returns:
-            Context manager for the custom import manager
+            Dictionary containing execution result and tracked values
         """
-        class CustomImportManager:
-            def __init__(self, executor, region_info):
-                self.executor = executor
-                self.region_info = region_info
-                self.namespace = {}
-            
-            def __enter__(self):
-                # Start with pre-imported dependencies
-                if self.executor.imported_dependencies:
-                    self.namespace.update(self.executor.imported_dependencies)
-                    logger.info(f"Added {len(self.executor.imported_dependencies)} pre-imported dependencies to namespace")
+        tracked_variables = tracked_variables or set()
+        input_data = input_data or []
+        
+        try:
+            # Create namespace with imports
+            with self.import_manager.managed_imports(region_info) as namespace:
+                # Add imported dependencies to namespace
+                namespace.update(self.imported_dependencies)
                 
-                # Use simple import resolver to analyze the main file and all its dependencies
-                if self.region_info and self.region_info.file_path:
-                    logger.info(f"Using simple import resolver for {self.region_info.file_path}")
-                    resolved_imports = self.executor.simple_import_resolver.resolve_imports_for_file(
-                        self.region_info.file_path
+                # Execute the code region
+                if region_info.type == RegionType.CLASS:
+                    return self._execute_class_region(
+                        region_info, method_name, input_data, tracked_variables, namespace
                     )
+                elif region_info.type == RegionType.FUNCTION:
+                    return self._execute_function_region(
+                        region_info, input_data, tracked_variables, namespace
+                    )
+                elif region_info.type == RegionType.MODULE:
+                    return self._execute_module_region(
+                        region_info, tracked_variables, namespace
+                    )
+                else:
+                    raise ValueError(f"Unsupported region type: {region_info.type}")
                     
-                    # Merge resolved imports into namespace
-                    self.namespace.update(resolved_imports)
-                    logger.info(f"Simple resolver added {len(resolved_imports)} imports to namespace")
-                
-                # Add essential standard library modules as fallback
-                essential_modules = ['os', 'sys', 'pathlib', 'typing', 'logging', 'json', 'datetime', 'time', 're', 'math', 'random', 'dataclasses']
-                for module_name in essential_modules:
-                    if module_name not in self.namespace:
-                        try:
-                            module = __import__(module_name)
-                            self.namespace[module_name] = module
-                        except ImportError:
-                            pass
-                
-                # Add commonly used imports directly to namespace
-                try:
-                    import dataclasses
-                    self.namespace['dataclass'] = dataclasses.dataclass
-                    self.namespace['field'] = dataclasses.field
-                except builtins.ImportError:
-                    pass
-                
-                try:
-                    import typing
-                    self.namespace['List'] = typing.List
-                    self.namespace['Dict'] = typing.Dict
-                    self.namespace['Optional'] = typing.Optional
-                    self.namespace['Any'] = typing.Any
-                    self.namespace['Union'] = typing.Union
-                except builtins.ImportError:
-                    pass
-                
-                return self.namespace
-            
-            def _import_common_classes(self):
-                """Import common classes using simple import resolution."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def _import_referenced_files(self):
-                """Import classes from referenced files using simple import resolution."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def _import_dependent_modules(self, main_module):
-                """Import classes from modules that are imported by the main module."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def _fallback_import_common_modules(self):
-                """Fallback method using simple import resolution."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def _import_module_classes(self, file_path: Path, module_name: str):
-                """Import all classes from a specific module file."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def _import_from_code_imports(self, code: str):
-                """Scan code for import statements and import those modules using AST parsing."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def _try_import_all_classes_from_module(self, module_name: str):
-                """Try to import all classes from a module (for star imports)."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def _try_import_module(self, module_name: str, alias_name: str):
-                """Try to import a module and add it to the namespace."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def _try_import_class_from_module(self, module_name: str, class_name: str, alias_name: str):
-                """Try to import a specific class from a module."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def _scan_and_import_referenced_classes(self, code: str):
-                """Scan code for class references and try to import them from common locations."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def _try_import_referenced_class(self, class_name: str):
-                """Try to import a referenced class using simple resolution."""
-                # This is now handled by the simple import resolver
-                pass
-            
-            def __exit__(self, exc_type, exc_val, exc_tb):
-                # Cleanup if needed
-                pass
-        
-        return CustomImportManager(self, region_info)
+        except Exception as e:
+            logger.error(f"Error executing region {region_info.name}: {str(e)}")
+            return {
+                'result': None,
+                'tracked_values': {},
+                'tracked_variables': tracked_variables,
+                'error': str(e),
+                'error_details': traceback.format_exc()
+            }
     
-    def _execute_class_method(self, namespace: Dict[str, Any], region_info: RegionInfo, 
-                            method_name: str, input_data: List[Any], class_name: Optional[str] = None) -> Any:
-        """Execute a method from a class with multiple inputs.
+    def _execute_class_region(
+        self, 
+        region_info: RegionInfo, 
+        method_name: str,
+        input_data: List[Any],
+        tracked_variables: Set[str],
+        namespace: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute a class region by calling a specific method."""
+        # Execute the class definition
+        exec(region_info.code, namespace)
         
-        Args:
-            namespace: Dictionary containing the execution namespace
-            region_info: Information about the code region
-            method_name: Name of the method to call
-            input_data: List of input data for the method
-            class_name: Optional override for the class name to instantiate
-        """
-        if not method_name:
-            logger.error(f"Method name required for class region '{region_info.name}'")
-            return {
-                'status': 'error',
-                'error': f"Method name required for class region '{region_info.name}'",
-                'type': 'ValueError'
-            }
+        # Get the class from namespace
+        class_obj = namespace.get(region_info.name)
+        if not class_obj:
+            raise ValueError(f"Class '{region_info.name}' not found in namespace")
         
-        class_to_use = class_name or region_info.name
-        if class_to_use not in namespace:
-            logger.error(f"Class '{class_to_use}' not found in namespace")
-            return {
-                'status': 'error',
-                'error': f"Class '{class_to_use}' not found in namespace",
-                'type': 'ValueError'
-            }
+        # Create instance
+        instance = class_obj()
         
-        if method_name not in region_info.class_methods:
-            logger.error(f"Method '{method_name}' not found in class '{class_to_use}'")
-            return {
-                'status': 'error',
-                'error': f"Method '{method_name}' not found in class '{class_to_use}'",
-                'type': 'ValueError'
-            }
+        # Get the method
+        method = getattr(instance, method_name, None)
+        if not method:
+            raise ValueError(f"Method '{method_name}' not found in class '{region_info.name}'")
         
-        try:
-            logger.debug(f"Instantiating class: {class_to_use}")
-            instance = namespace[class_to_use]()
-            
-            logger.debug(f"Getting method: {method_name}")
-            method = getattr(instance, method_name)
-            
-            # Validate input data
-            try:
-                for i, input_item in enumerate(input_data):
-                    self._validate_input_data(input_item, f"method '{method_name}' input {i}")
-            except ValueError as e:
-                logger.error(f"Input validation failed: {str(e)}")
-                return {
-                    'status': 'error',
-                    'error': str(e),
-                    'type': 'ValueError'
-                }
-            
-            logger.debug(f"Executing method with {len(input_data)} input(s)")
-            
-            # Call method with unpacked inputs
-            if input_data:
+        # Execute with variable tracking
+        with track_variables(tracked_variables) as tracker:
+            # Call the method with input data
+            if len(input_data) == 1:
+                result = method(input_data[0])
+            else:
                 result = method(*input_data)
-            else:
-                result = method()
-                
-            logger.debug(f"Method execution completed successfully")
+            
+            # Get tracked values
+            tracked_values = {}
+            for var_name in tracked_variables:
+                value = tracker.get_variable_value(var_name)
+                if value is not None:
+                    tracked_values[var_name] = value
+            
             return {
-                'status': 'success',
                 'result': result,
-                'instance': instance  # Return the instance for variable tracking
-            }
-            
-        except builtins.AttributeError as e:
-            error_msg = f"Method '{method_name}' not found: {str(e)}"
-            logger.error(error_msg)
-            return {
-                'status': 'error',
-                'error': error_msg,
-                'type': 'AttributeError'
-            }
-        except Exception as e:
-            error_msg = f"Error executing method '{method_name}': {str(e)}"
-            logger.error(error_msg)
-            return {
-                'status': 'error',
-                'error': error_msg,
-                'type': type(e).__name__
+                'tracked_values': tracked_values,
+                'tracked_variables': tracked_variables
             }
     
-    def _execute_function(self, namespace: Dict[str, Any], region_info: RegionInfo, 
-                         input_data: List[Any]) -> Any:
-        """Execute a function with multiple inputs."""
-        try:
-            func = namespace[region_info.name]
-            
-            # Validate input data
-            for i, input_item in enumerate(input_data):
-                self._validate_input_data(input_item, f"function '{region_info.name}' input {i}")
-            
-            # Call function with unpacked inputs
-            if input_data:
-                return func(*input_data)
-            else:
-                return func()
-                
-        except Exception as e:
-            raise ValueError(f"Error executing function '{region_info.name}': {str(e)}")
-    
-    def _execute_module(self, namespace: Dict[str, Any], region_info: RegionInfo, 
-                       method_name: str, input_data: List[Any]) -> Any:
-        """Execute a module-level function with multiple inputs."""
-        if not method_name:
-            raise ValueError(f"Method name required for module region '{region_info.name}'")
+    def _execute_function_region(
+        self, 
+        region_info: RegionInfo,
+        input_data: List[Any],
+        tracked_variables: Set[str],
+        namespace: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute a function region."""
+        # Execute the function definition
+        exec(region_info.code, namespace)
         
-        if method_name not in namespace:
-            raise ValueError(f"Function '{method_name}' not found in module")
+        # Get the function from namespace
+        func = namespace.get(region_info.name)
+        if not func:
+            raise ValueError(f"Function '{region_info.name}' not found in namespace")
         
-        try:
-            func = namespace[method_name]
-            
-            # Validate input data
-            for i, input_item in enumerate(input_data):
-                self._validate_input_data(input_item, f"function '{method_name}' input {i}")
-            
-            # Call function with unpacked inputs
-            if input_data:
-                return func(*input_data)
+        # Execute with variable tracking
+        with track_variables(tracked_variables) as tracker:
+            # Call the function with input data
+            if len(input_data) == 1:
+                result = func(input_data[0])
             else:
-                return func()
-                
-        except Exception as e:
-            raise ValueError(f"Error executing function '{method_name}': {str(e)}")
-
-    def _scan_and_import_referenced_classes(self, code: str):
-        """Scan code for class references and try to import them from common locations."""
-        # This is now handled by the simple import resolver
-        pass
+                result = func(*input_data)
+            
+            # Get tracked values
+            tracked_values = {}
+            for var_name in tracked_variables:
+                value = tracker.get_variable_value(var_name)
+                if value is not None:
+                    tracked_values[var_name] = value
+            
+            return {
+                'result': result,
+                'tracked_values': tracked_values,
+                'tracked_variables': tracked_variables
+            }
     
-    def _try_import_referenced_class(self, class_name: str):
-        """Try to import a referenced class from common locations."""
-        # This is now handled by the simple import resolver
-        pass
+    def _execute_module_region(
+        self, 
+        region_info: RegionInfo,
+        tracked_variables: Set[str],
+        namespace: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute a module region."""
+        # Execute the module code
+        exec(region_info.code, namespace)
+        
+        # For module regions, we don't have a specific return value
+        # but we can track variables that were assigned
+        with track_variables(tracked_variables) as tracker:
+            # Get tracked values
+            tracked_values = {}
+            for var_name in tracked_variables:
+                value = tracker.get_variable_value(var_name)
+                if value is not None:
+                    tracked_values[var_name] = value
+            
+            return {
+                'result': None,  # Module execution doesn't return a specific value
+                'tracked_values': tracked_values,
+                'tracked_variables': tracked_variables
+            }

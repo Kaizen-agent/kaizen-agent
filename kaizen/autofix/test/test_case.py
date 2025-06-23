@@ -197,8 +197,8 @@ class PromptBuilder:
         # Safely serialize for logging
         serialized_criteria = safe_serialize_criteria(criteria)
         serialized_targets = safe_serialize_evaluation_targets(evaluation_targets)
-        logger.info(f"EVALUATION CRITERIA: {serialized_criteria}")
-        logger.info(f"EVALUATION TARGETS: {serialized_targets}")
+        logger.debug(f"EVALUATION CRITERIA: {serialized_criteria}")
+        logger.debug(f"EVALUATION TARGETS: {serialized_targets}")
         
         prompt_parts = [
             "You are an expert test evaluator. Please evaluate the following test result:",

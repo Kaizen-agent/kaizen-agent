@@ -55,16 +55,20 @@ class BaseTestCommand(ABC):
 class TestAllCommand(BaseTestCommand):
     """Command to run all tests."""
     
-    def __init__(self, config: TestConfiguration, logger: logging.Logger):
+    def __init__(self, config: TestConfiguration, logger, verbose: bool = False):
         """Initialize test all command.
         
         Args:
             config: Test configuration
-            logger: Logger instance for command execution
+            logger: Logger instance (can be CleanLogger or logging.Logger)
+            verbose: Whether to show detailed debug information
         """
         super().__init__(logger)
         self.config = config
+        self.verbose = verbose
         self.dependency_manager = DependencyManager()
+        # Store the original logger for clean output methods
+        self.clean_logger = logger if hasattr(logger, 'print_progress') else None
     
     def execute(self) -> Result[TestResult]:
         """Execute all tests.
@@ -73,12 +77,17 @@ class TestAllCommand(BaseTestCommand):
             Result containing TestResult if successful, error otherwise
         """
         try:
-            self.logger.info(f"Running test: {self.config.name}")
-            if self.config.description:
-                self.logger.info(f"Description: {self.config.description}")
+            if self.verbose:
+                self.logger.info(f"Running test: {self.config.name}")
+                if self.config.description:
+                    self.logger.info(f"Description: {self.config.description}")
+            else:
+                self.logger.info(f"Running test: {self.config.name}")
             
             # Validate environment before proceeding
             self._validate_environment()
+            
+            self.logger.info("Environment validation passed")
             
             # Import dependencies and referenced files first
             import_result = self._import_dependencies()
@@ -89,10 +98,14 @@ class TestAllCommand(BaseTestCommand):
             
             # Create and validate runner configuration with imported dependencies
             runner_config = self._create_runner_config(import_result.value.namespace if import_result.value else {})
-            self.logger.info("Starting test execution...")
+            if self.verbose:
+                self.logger.info("Starting test execution...")
+            
+            self.logger.info("Test configuration created successfully")
             
             # Execute tests - now returns unified TestExecutionResult
-            runner = TestRunner(runner_config)
+            self.logger.info(f"Starting test execution for: {self.config.name}")
+            runner = TestRunner(runner_config, verbose=self.verbose)
             test_execution_result = runner.run_tests(self.config.file_path)
             
             if not test_execution_result:
@@ -103,14 +116,26 @@ class TestAllCommand(BaseTestCommand):
             # Handle auto-fix if enabled and tests failed
             test_attempts = None
             if self.config.auto_fix and not test_execution_result.is_successful():
-                self.logger.info(f"Found {test_execution_result.get_failure_count()} failed tests")
+                failed_count = test_execution_result.get_failure_count()
+                self.logger.info(f"Auto-fix enabled: attempting to fix {failed_count} failed tests (max retries: {self.config.max_retries})")
                 test_attempts = self._handle_auto_fix(test_execution_result, self.config, runner_config)
+                
+                if test_attempts:
+                    self.logger.info(f"Auto-fix completed: {len(test_attempts)} attempts made")
+                else:
+                    self.logger.info("Auto-fix completed: no attempts were made")
             
             # Create TestResult object for backward compatibility
             now = datetime.now()
             
             # Determine overall status
             overall_status = 'passed' if test_execution_result.is_successful() else 'failed'
+            
+            # Show final results summary
+            total_tests = test_execution_result.summary.total_tests
+            passed_tests = test_execution_result.summary.passed_tests
+            failed_tests = test_execution_result.summary.failed_tests
+            self.logger.info(f"Test execution completed: {passed_tests}/{total_tests} tests passed")
             
             result = TestResult(
                 name=self.config.name,
@@ -121,7 +146,9 @@ class TestAllCommand(BaseTestCommand):
                 status=overall_status,
                 results=test_execution_result.to_legacy_format(),  # Convert to legacy format for backward compatibility
                 error=None if test_execution_result.is_successful() else f"{test_execution_result.get_failure_count()} tests failed",
-                steps=[]  # TODO: Add step results if available
+                steps=[],  # TODO: Add step results if available
+                unified_result=test_execution_result,
+                test_attempts=test_attempts
             )
             
             return Result.success(result)
@@ -161,10 +188,12 @@ class TestAllCommand(BaseTestCommand):
         """
         try:
             if not self.config.dependencies and not self.config.referenced_files:
-                self.logger.info("No dependencies or referenced files to import")
+                if self.verbose:
+                    self.logger.info("No dependencies or referenced files to import")
                 return Result.success(ImportResult(success=True))
             
-            self.logger.info(f"Importing {len(self.config.dependencies)} dependencies and {len(self.config.referenced_files)} referenced files")
+            if self.verbose:
+                self.logger.info(f"Importing {len(self.config.dependencies)} dependencies and {len(self.config.referenced_files)} referenced files")
             
             import_result = self.dependency_manager.import_dependencies(
                 dependencies=self.config.dependencies,
@@ -207,7 +236,8 @@ class TestAllCommand(BaseTestCommand):
         # Add imported dependencies to the configuration
         if imported_namespace:
             config['imported_dependencies'] = imported_namespace
-            self.logger.info(f"Added {len(imported_namespace)} imported dependencies to runner config")
+            if self.verbose:
+                self.logger.info(f"Added {len(imported_namespace)} imported dependencies to runner config")
         
         if self.config.regions:
             config['regions'] = self.config.regions
@@ -232,17 +262,18 @@ class TestAllCommand(BaseTestCommand):
                 ])
             config['steps'] = [item for sublist in config_steps_temp for item in sublist]
             
-            # DEBUG: Print the test configuration being created
-            self.logger.info(f"DEBUG: Created {len(config['steps'])} test step(s) for runner")
-            for i, test in enumerate(config['steps']):
-                self.logger.info(f"DEBUG: Test {i}: {test['name']}")
-                self.logger.info(f"DEBUG: Test {i} input: {test['input']}")
-                self.logger.info(f"DEBUG: Test {i} method: {test['input'].get('method', 'NOT_FOUND')}")
-                self.logger.info(f"DEBUG: Test {i} expected_output: {test.get('expected_output', 'NOT_FOUND')}")
-                self.logger.info(f"DEBUG: Test {i} input type: {type(test['input'])}")
-                if 'input' in test['input']:
-                    self.logger.info(f"DEBUG: Test {i} nested input: {test['input']['input']}")
-                    self.logger.info(f"DEBUG: Test {i} nested input type: {type(test['input']['input'])}")
+            # DEBUG: Print the test configuration being created (only in verbose mode)
+            if self.verbose:
+                self.logger.debug(f"DEBUG: Created {len(config['steps'])} test step(s) for runner")
+                for i, test in enumerate(config['steps']):
+                    self.logger.debug(f"DEBUG: Test {i}: {test['name']}")
+                    self.logger.debug(f"DEBUG: Test {i} input: {test['input']}")
+                    self.logger.debug(f"DEBUG: Test {i} method: {test['input'].get('method', 'NOT_FOUND')}")
+                    self.logger.debug(f"DEBUG: Test {i} expected_output: {test.get('expected_output', 'NOT_FOUND')}")
+                    self.logger.debug(f"DEBUG: Test {i} input type: {type(test['input'])}")
+                    if 'input' in test['input']:
+                        self.logger.debug(f"DEBUG: Test {i} nested input: {test['input']['input']}")
+                        self.logger.debug(f"DEBUG: Test {i} nested input type: {type(test['input']['input'])}")
             
         return config
     
@@ -260,14 +291,16 @@ class TestAllCommand(BaseTestCommand):
         Raises:
             AutoFixError: If auto-fix process fails
         """
-        self.logger.info(f"Attempting to fix {test_execution_result.get_failure_count()} failing tests (max retries: {self.config.max_retries})")
+        if self.verbose:
+            self.logger.info(f"Attempting to fix {test_execution_result.get_failure_count()} failing tests (max retries: {self.config.max_retries})")
         
         try:
             # Create AutoFix instance and run fixes
             from ...autofix.main import AutoFix
             fixer = AutoFix(self.config, runner_config)
             files_to_fix = self.config.files_to_fix
-            self.logger.info(f"Files to fix: {files_to_fix}")
+            if self.verbose:
+                self.logger.info(f"Files to fix: {files_to_fix}")
             if files_to_fix:
                 fix_results = fixer.fix_code(
                     file_path=str(self.config.file_path),
