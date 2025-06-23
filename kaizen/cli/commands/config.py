@@ -27,7 +27,7 @@ from kaizen.cli.commands.models import (
 )
 from kaizen.cli.commands.models.settings import TestSettings
 from kaizen.cli.commands.result import Result
-from kaizen.cli.commands.types import PRStrategy
+from kaizen.cli.commands.types import PRStrategy, DEFAULT_MAX_RETRIES
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ class ConfigurationManager:
         config_path: Path,
         auto_fix: bool = False,
         create_pr: bool = False,
-        max_retries: int = 3,
+        max_retries: int = DEFAULT_MAX_RETRIES,
         base_branch: str = 'main',
         pr_strategy: str = 'ALL_PASSING'
     ) -> Result[TestConfiguration]:

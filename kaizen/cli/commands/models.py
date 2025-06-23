@@ -6,10 +6,10 @@ for test configuration.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from enum import Enum
 
-from .types import PRStrategy
+from .types import PRStrategy, DEFAULT_MAX_RETRIES
 from .models import TestMetadata, TestEvaluation, TestSettings
 from .validation import ConfigurationValidator
 from .errors import ConfigurationError, FileNotFoundError
@@ -37,50 +37,37 @@ class TestConfiguration:
         max_retries: Maximum number of retry attempts
         base_branch: Base branch for PR creation
         pr_strategy: Strategy for PR creation
+        dependencies: List of dependencies
+        referenced_files: List of referenced files
+        files_to_fix: List of files to fix
     """
     name: str
     file_path: Path
-    config_path: Path
-    agent_type: str
+    config_path: Optional[Path] = None
+    agent_type: Optional[str] = None
     description: Optional[str] = None
     metadata: Optional[TestMetadata] = None
     evaluation: Optional[TestEvaluation] = None
     regions: List[str] = field(default_factory=list)
-    steps: List[Dict[str, Any]] = field(default_factory=list)
+    steps: List['TestStep'] = field(default_factory=list)
     settings: Optional[TestSettings] = None
     auto_fix: bool = False
     create_pr: bool = False
-    max_retries: int = 3
+    max_retries: int = DEFAULT_MAX_RETRIES
     base_branch: str = "main"
-    pr_strategy: PRStrategy = PRStrategy.CREATE_NEW
+    pr_strategy: PRStrategy = PRStrategy.ALL_PASSING
+    dependencies: List[str] = field(default_factory=list)
+    referenced_files: List[str] = field(default_factory=list)
+    files_to_fix: List[str] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], config_path: Path) -> 'TestConfiguration':
-        """Create a TestConfiguration instance from a dictionary.
-        
-        Args:
-            data: Dictionary containing configuration data
-            config_path: Path to the configuration file
-            
-        Returns:
-            TestConfiguration instance
-            
-        Raises:
-            ConfigurationError: If configuration is invalid
-            FileNotFoundError: If test file does not exist
-        """
-        validator = ConfigurationValidator(data)
-        validator.validate()
-        
-        file_path = cls._resolve_path(data['file_path'], config_path)
-        if not file_path.exists():
-            raise FileNotFoundError(f"Test file not found: {file_path}")
-            
+    def from_dict(cls, data: Dict[str, Any]) -> 'TestConfiguration':
+        """Create TestConfiguration from dictionary."""
         return cls(
             name=data['name'],
-            file_path=file_path,
-            config_path=config_path,
-            agent_type=data.get('agent_type', 'default'),
+            file_path=Path(data['file_path']),
+            config_path=Path(data.get('config_path', '')),
+            agent_type=data.get('agent_type'),
             description=data.get('description'),
             metadata=TestMetadata.from_dict(data.get('metadata', {})) if 'metadata' in data else None,
             evaluation=TestEvaluation.from_dict(data.get('evaluation', {})) if 'evaluation' in data else None,
@@ -89,9 +76,12 @@ class TestConfiguration:
             settings=TestSettings.from_dict(data.get('settings', {})) if 'settings' in data else None,
             auto_fix=data.get('auto_fix', False),
             create_pr=data.get('create_pr', False),
-            max_retries=data.get('max_retries', 3),
+            max_retries=data.get('max_retries', DEFAULT_MAX_RETRIES),
             base_branch=data.get('base_branch', 'main'),
-            pr_strategy=cls._parse_pr_strategy(data.get('pr_strategy', PRStrategy.CREATE_NEW))
+            pr_strategy=PRStrategy.from_str(data.get('pr_strategy', 'ALL_PASSING')),
+            dependencies=data.get('dependencies', []),
+            referenced_files=data.get('referenced_files', []),
+            files_to_fix=data.get('files_to_fix', [])
         )
 
     @staticmethod

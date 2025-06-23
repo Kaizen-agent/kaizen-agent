@@ -16,6 +16,7 @@ from .models import (
     TestConfiguration,
     Result
 )
+from .types import DEFAULT_MAX_RETRIES
 
 @dataclass
 class ParseResult:
@@ -104,7 +105,7 @@ class ConfigurationParser:
                 config_path=config_data.get('config_path'),
                 auto_fix=config_data.get('auto_fix', False),
                 create_pr=config_data.get('create_pr', False),
-                max_retries=config_data.get('max_retries', 3),
+                max_retries=config_data.get('max_retries', DEFAULT_MAX_RETRIES),
                 base_branch=config_data.get('base_branch', 'main'),
                 pr_strategy=config_data.get('pr_strategy', 'ALL_PASSING'),
                 description=config_data.get('description'),

@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Set, FrozenSet, Union, Type, TypeVar, Generic
 from collections import defaultdict
 import typing
+import builtins
+import re
 
 # Third-party imports
 # (none in this file)
@@ -23,6 +25,7 @@ import typing
 # Local application imports
 from .input_parser import InputParser, InputParsingError
 from .variable_tracker import VariableTracker, track_variables, safe_serialize_value
+from .simple_import_resolver import SimpleImportResolver
 
 # Configure colored logging
 class ColoredFormatter(logging.Formatter):
@@ -194,59 +197,92 @@ class PackageConfig:
 @dataclass
 class ImportManagerConfig:
     """Configuration for the ImportManager."""
-    common_packages: Dict[str, PackageConfig] = field(default_factory=lambda: {
-        'python-dotenv': PackageConfig(
-            name='python-dotenv',
-            import_name='dotenv',
-            required=True,
-            fallback_names=['dotenv'],
-            special_import='from dotenv import load_dotenv'
-        ),
-        'google-generativeai': PackageConfig(
-            name='google-generativeai',
-            import_name='google.generativeai',
-            required=True,
-            fallback_names=['genai'],
-            special_import='import google.generativeai as genai'
-        ),
-        'openai': PackageConfig(
-            name='openai',
-            import_name='openai',
-            required=True
-        ),
-        'click': PackageConfig(
-            name='click',
-            import_name='click',
-            required=True
-        ),
-        'pyyaml': PackageConfig(
-            name='pyyaml',
-            import_name='yaml',
-            required=True,
-            fallback_names=['yaml']
-        ),
-        'PyGithub': PackageConfig(
-            name='PyGithub',
-            import_name='github',
-            required=False,
-            fallback_names=['github']
-        ),
-        'anthropic': PackageConfig(
-            name='anthropic',
-            import_name='anthropic',
-            required=False
-        ),
-        'typing_extensions': PackageConfig(
-            name='typing_extensions',
-            import_name='typing_extensions',
-            required=False
-        )
-    })
-    standard_libs: Set[str] = field(default_factory=lambda: {
-        'typing', 'os', 'sys', 'pathlib', 'collections', 'dataclasses', 
-        'enum', 'logging', 'importlib', 'ast', 'contextlib', 'json',
-        'datetime', 'time', 're', 'math', 'random', 'itertools', 'functools'
-    })
+    common_packages: Dict[str, PackageConfig] = field(default_factory=dict)
+    standard_libs: Set[str] = field(default_factory=set)
+    
+    def __post_init__(self):
+        """Initialize with default configurations if not provided."""
+        if not self.common_packages:
+            self._load_default_package_config()
+        if not self.standard_libs:
+            self._load_default_standard_libs()
+    
+    def _load_default_package_config(self):
+        """Load default package configuration."""
+        # This can be overridden by external configuration files
+        self.common_packages = {
+            'python-dotenv': PackageConfig(
+                name='python-dotenv',
+                import_name='dotenv',
+                required=True,
+                fallback_names=['dotenv'],
+                special_import='from dotenv import load_dotenv'
+            ),
+            'google-generativeai': PackageConfig(
+                name='google-generativeai',
+                import_name='google.generativeai',
+                required=True,
+                fallback_names=['genai'],
+                special_import='import google.generativeai as genai'
+            ),
+            'openai': PackageConfig(
+                name='openai',
+                import_name='openai',
+                required=True
+            ),
+            'click': PackageConfig(
+                name='click',
+                import_name='click',
+                required=True
+            ),
+            'pyyaml': PackageConfig(
+                name='pyyaml',
+                import_name='yaml',
+                required=True,
+                fallback_names=['yaml']
+            ),
+            'PyGithub': PackageConfig(
+                name='PyGithub',
+                import_name='github',
+                required=False,
+                fallback_names=['github']
+            ),
+            'anthropic': PackageConfig(
+                name='anthropic',
+                import_name='anthropic',
+                required=False
+            ),
+            'typing_extensions': PackageConfig(
+                name='typing_extensions',
+                import_name='typing_extensions',
+                required=False
+            )
+        }
+    
+    def _load_default_standard_libs(self):
+        """Load default standard library configuration."""
+        self.standard_libs = {
+            'typing', 'os', 'sys', 'pathlib', 'collections', 'dataclasses', 
+            'enum', 'logging', 'importlib', 'ast', 'contextlib', 'json',
+            'datetime', 'time', 're', 'math', 'random', 'itertools', 'functools'
+        }
+    
+    def load_from_file(self, config_path: Path) -> None:
+        """Load configuration from a file."""
+        try:
+            import yaml
+            with open(config_path, 'r') as f:
+                config_data = yaml.safe_load(f)
+            
+            if 'packages' in config_data:
+                for package_name, package_data in config_data['packages'].items():
+                    self.common_packages[package_name] = PackageConfig(**package_data)
+            
+            if 'standard_libs' in config_data:
+                self.standard_libs = set(config_data['standard_libs'])
+                
+        except Exception as e:
+            logger.warning(f"Failed to load ImportManagerConfig from {config_path}: {str(e)}")
 
 class DependencyResolver:
     """Resolves module dependencies and handles import cycles."""
@@ -405,11 +441,11 @@ class DependencyResolver:
                 self._module_cache[module_name] = module_info
                 return module_info
             
-            # Check if this is a local module that should be skipped
-            # (it will be handled by the CLI dependency manager)
-            if '.' in module_name and not module_name.startswith(('google', 'openai', 'anthropic', 'click', 'rich', 'yaml')):
-                logger.debug(f"DEBUG: Skipping local module resolution for {module_name} - will be handled by CLI dependency manager")
-                return None
+            # Check if this is a local module that should be handled
+            # We need to handle local modules to import user-defined classes
+            if '.' in module_name:
+                logger.debug(f"DEBUG: Handling local module resolution for {module_name}")
+                return self._resolve_workspace_module(module_name)
             
             # Handle third-party modules
             logger.debug(f"DEBUG: {module_name} is a third-party module")
@@ -460,7 +496,7 @@ class DependencyResolver:
                 module = sys.modules[module_name]
                 try:
                     path = Path(module.__file__) if hasattr(module, '__file__') else Path(module_name)
-                except (AttributeError, TypeError):
+                except (builtins.AttributeError, TypeError):
                     path = Path(module_name)
                 
                 return ModuleInfo(
@@ -482,7 +518,7 @@ class DependencyResolver:
                     is_third_party=False,
                     version=getattr(module, '__version__', None)
                 )
-            except ImportError:
+            except builtins.ImportError:
                 logger.warning(f"Could not import standard module: {module_name}")
                 return ModuleInfo(
                     name=module_name,
@@ -545,26 +581,62 @@ class DependencyResolver:
         Returns:
             ModuleInfo if module is found, None otherwise
         """
-        module_path = self.workspace_root / module_name.replace('.', '/')
+        # Handle different module path formats
+        if '.' in module_name:
+            # Convert module path to file path
+            module_parts = module_name.split('.')
+            module_path = self.workspace_root
+            
+            # Build the path by joining parts
+            for part in module_parts:
+                module_path = module_path / part
+            
+            logger.debug(f"DEBUG: Resolving workspace module {module_name} to path {module_path}")
+        else:
+            module_path = self.workspace_root / module_name
         
         # Try as a Python file
-        if module_path.with_suffix('.py').exists():
+        py_file = module_path.with_suffix('.py')
+        if py_file.exists():
+            logger.debug(f"DEBUG: Found Python file: {py_file}")
             return ModuleInfo(
                 name=module_name,
-                path=module_path.with_suffix('.py'),
+                path=py_file,
                 is_package=False,
                 is_third_party=False
             )
         
-        # Try as a package
-        if module_path.is_dir() and (module_path / '__init__.py').exists():
-            return ModuleInfo(
-                name=module_name,
-                path=module_path / '__init__.py',
-                is_package=True,
-                is_third_party=False
-            )
+        # Try as a package (directory with __init__.py)
+        if module_path.is_dir():
+            init_file = module_path / '__init__.py'
+            if init_file.exists():
+                logger.debug(f"DEBUG: Found package: {init_file}")
+                return ModuleInfo(
+                    name=module_name,
+                    path=init_file,
+                    is_package=True,
+                    is_third_party=False
+                )
         
+        # Try alternative paths (common patterns)
+        alternative_paths = [
+            self.workspace_root / module_name.replace('.', '/') / '__init__.py',
+            self.workspace_root / module_name.replace('.', '/').with_suffix('.py'),
+            self.workspace_root / 'src' / module_name.replace('.', '/') / '__init__.py',
+            self.workspace_root / 'src' / module_name.replace('.', '/').with_suffix('.py'),
+        ]
+        
+        for alt_path in alternative_paths:
+            if alt_path.exists():
+                logger.debug(f"DEBUG: Found module at alternative path: {alt_path}")
+                return ModuleInfo(
+                    name=module_name,
+                    path=alt_path,
+                    is_package=alt_path.name == '__init__.py',
+                    is_third_party=False
+                )
+        
+        logger.debug(f"DEBUG: Module {module_name} not found in workspace")
         return None
     
     def _check_cycles(self, module_name: str) -> None:
@@ -655,6 +727,12 @@ class ImportManager:
         """
         self.workspace_root = workspace_root
         self.config = config or ImportManagerConfig()
+        
+        # Try to load configuration from file
+        config_path = Path(__file__).parent / "package_config.yaml"
+        if config_path.exists():
+            self.config.load_from_file(config_path)
+        
         self._original_sys_path = sys.path.copy()
         self._added_paths: Set[str] = set()
         self._processed_files: Set[Path] = set()
@@ -720,7 +798,7 @@ class ImportManager:
             try:
                 module = __import__(module_name)
                 namespace[module_name] = module
-            except ImportError as e:
+            except builtins.ImportError as e:
                 self._record_import_error(
                     ImportErrorType.IMPORT_ERROR,
                     module_name,
@@ -741,7 +819,7 @@ class ImportManager:
             try:
                 module = __import__(package_name)
                 namespace[package_name] = module
-            except ImportError as e:
+            except builtins.ImportError as e:
                 self._record_import_error(
                     ImportErrorType.IMPORT_ERROR,
                     package_name,
@@ -761,7 +839,7 @@ class ImportManager:
                 module = __import__(config.import_name)
                 namespace[config.import_name] = module
             return
-        except ImportError as e:
+        except builtins.ImportError as e:
             self._record_import_error(
                 ImportErrorType.IMPORT_ERROR,
                 package_name,
@@ -775,7 +853,7 @@ class ImportManager:
                 module = __import__(fallback_name)
                 namespace[fallback_name] = module
                 return
-            except ImportError:
+            except builtins.ImportError:
                 continue
         
         # If we get here, all import attempts failed
@@ -810,7 +888,7 @@ class ImportManager:
         
         if failed_required:
             error_messages = [f"{error.module_name}: {error.message}" for error in failed_required]
-            raise ImportError(
+            raise builtins.ImportError(
                 f"Failed to import required packages:\n" + "\n".join(error_messages)
             )
     
@@ -830,7 +908,7 @@ class ImportManager:
         for name in typing_imports:
             try:
                 namespace[name] = getattr(typing, name)
-            except AttributeError:
+            except builtins.AttributeError:
                 logger.warning(f"Type {name} not found in typing module")
         
         # Also add typing module itself
@@ -894,7 +972,7 @@ class ImportManager:
                     namespace[module_name] = module
                     if is_standard and module_name == 'typing':
                         self._add_typing_imports(namespace)
-                except ImportError as e:
+                except builtins.ImportError as e:
                     logger.warning(f"Failed to import {module_name}: {str(e)}")
 
     def _process_file_dependencies(self, file_path: Path, namespace: Dict[str, Any]) -> None:
@@ -956,7 +1034,7 @@ class ImportManager:
             else:
                 self._add_to_namespace(import_info, module, namespace)
             
-        except ImportError as e:
+        except builtins.ImportError as e:
             logger.warning(f"Failed to import {import_info}: {str(e)}")
             self._try_find_module_in_workspace(import_info, namespace)
     
@@ -975,12 +1053,12 @@ class ImportManager:
                     for type_name in typing_imports:
                         try:
                             namespace[type_name] = getattr(module, type_name)
-                        except AttributeError:
+                        except builtins.AttributeError:
                             logger.warning(f"Type {type_name} not found in typing module")
                 else:
                     try:
                         namespace[name] = getattr(module, name)
-                    except AttributeError:
+                    except builtins.AttributeError:
                         logger.warning(f"Type {name} not found in typing module")
         else:
             namespace['typing'] = module
@@ -1290,6 +1368,10 @@ class CodeRegionExecutor:
         self.imported_dependencies = imported_dependencies or {}
         self.input_parser = InputParser()
         self.import_manager = ImportManager(workspace_root)
+        self.dependency_resolver = DependencyResolver(workspace_root)
+        
+        # Initialize simple import resolver
+        self.simple_import_resolver = SimpleImportResolver(workspace_root)
     
     def _ensure_standard_imports(self, namespace: Dict[str, Any]) -> None:
         """Ensure all standard library imports are available in the namespace.
@@ -1310,7 +1392,7 @@ class CodeRegionExecutor:
                     namespace[module_name] = module
                     if module_name == 'typing':
                         self.import_manager._add_typing_imports(namespace)
-                except ImportError as e:
+                except builtins.ImportError as e:
                     logger.warning(f"Failed to import standard library {module_name}: {str(e)}")
 
     def _validate_input_data(self, input_data: Any, name: str) -> None:
@@ -1355,9 +1437,23 @@ class CodeRegionExecutor:
             logger.info(f"DEBUG: 'datetime' in namespace before exec: type={type(namespace['datetime'])}, value={namespace['datetime']}")
         else:
             logger.info("DEBUG: 'datetime' not in namespace before exec")
+        
+        # DEBUG: Log available classes and types in namespace
+        available_classes = [name for name, obj in namespace.items() if isinstance(obj, type) and not name.startswith('_')]
+        logger.info(f"DEBUG: Available classes in namespace: {available_classes}")
+        
+        # DEBUG: Log all available names for debugging
+        all_names = list(namespace.keys())
+        logger.debug(f"DEBUG: All available names in namespace: {all_names}")
+        
         try:
             exec(code, namespace)
             logger.debug("Code execution completed successfully")
+        except NameError as e:
+            logger.error(f"NameError in code execution: {str(e)}")
+            logger.error(f"Available names in namespace: {list(namespace.keys())}")
+            logger.error(f"Code that failed: {code[:200]}...")  # Show first 200 chars of code
+            raise
         except SyntaxError as e:
             logger.error(f"Syntax error in code: {str(e)}")
             raise
@@ -1366,19 +1462,14 @@ class CodeRegionExecutor:
             raise ValueError(f"Failed to execute code: {str(e)}")
 
     def execute_region(self, region_info: RegionInfo, method_name: Optional[str] = None, 
-                      input_data: Any = None) -> Any:
+                      input_data: Any = None, class_name: Optional[str] = None) -> Any:
         """Execute a code region and return its result.
         
         Args:
             region_info: Information about the code region to execute
             method_name: Optional name of the method to call
             input_data: Optional input data for the execution (supports multiple inputs)
-            
-        Returns:
-            The result of executing the region
-            
-        Raises:
-            ValueError: If execution fails
+            class_name: Optional override for the class name to instantiate
         """
         logger.info(f"Executing region: {region_info.name}")
         
@@ -1422,7 +1513,7 @@ class CodeRegionExecutor:
                 # Execute based on region type
                 if region_info.type == RegionType.CLASS:
                     logger.debug(f"Executing class method: {method_name}")
-                    return self._execute_class_method(namespace, region_info, method_name, parsed_inputs)
+                    return self._execute_class_method(namespace, region_info, method_name, parsed_inputs, class_name=class_name)
                 elif region_info.type == RegionType.FUNCTION:
                     logger.debug(f"Executing function: {region_info.name}")
                     return self._execute_function(namespace, region_info, parsed_inputs)
@@ -1436,7 +1527,7 @@ class CodeRegionExecutor:
             raise ValueError(f"Error executing region '{region_info.name}': {str(e)}")
 
     def execute_region_with_tracking(self, region_info: RegionInfo, method_name: Optional[str] = None, 
-                                   input_data: Any = None, tracked_variables: Optional[Set[str]] = None) -> Dict[str, Any]:
+                                   input_data: Any = None, tracked_variables: Optional[Set[str]] = None, class_name: Optional[str] = None) -> Dict[str, Any]:
         """Execute a code region with variable tracking and return results.
         
         Args:
@@ -1444,12 +1535,7 @@ class CodeRegionExecutor:
             method_name: Optional name of the method to call
             input_data: Optional input data for the execution (supports multiple inputs)
             tracked_variables: Set of variable names to track during execution
-            
-        Returns:
-            Dictionary containing execution result and tracked variables
-            
-        Raises:
-            ValueError: If execution fails
+            class_name: Optional override for the class name to instantiate
         """
         logger.info(f"Executing region with tracking: {region_info.name}")
         
@@ -1498,7 +1584,7 @@ class CodeRegionExecutor:
                     # Execute based on region type
                     if region_info.type == RegionType.CLASS:
                         logger.debug(f"Executing class method with tracking: {method_name}")
-                        result = self._execute_class_method(namespace, region_info, method_name, parsed_inputs)
+                        result = self._execute_class_method(namespace, region_info, method_name, parsed_inputs, class_name=class_name)
                     elif region_info.type == RegionType.FUNCTION:
                         logger.debug(f"Executing function with tracking: {region_info.name}")
                         result = self._execute_function(namespace, region_info, parsed_inputs)
@@ -1565,38 +1651,34 @@ class CodeRegionExecutor:
                 if self.executor.imported_dependencies:
                     self.namespace.update(self.executor.imported_dependencies)
                     logger.info(f"Added {len(self.executor.imported_dependencies)} pre-imported dependencies to namespace")
-                    
-                    # Log what functions are available
-                    function_names = [name for name, obj in self.namespace.items() if callable(obj) and not name.startswith('_')]
-                    if function_names:
-                        logger.info(f"Available functions: {function_names}")
-                    
-                    # Log all available names in namespace
-                    all_names = list(self.namespace.keys())
-                    logger.info(f"All available names in namespace: {all_names}")
-                    
-                    # Check for specific imports that might be needed
-                    specific_imports = ['FEEDBACK_EVALUATION_PROMPT', 'prompts', 'utils', 'gemini_utils']
-                    for import_name in specific_imports:
-                        if import_name in self.namespace:
-                            logger.info(f"Found {import_name} in namespace: {type(self.namespace[import_name])}")
-                        else:
-                            logger.warning(f"Missing {import_name} in namespace")
                 
-                # Add standard library modules
-                for module_name in ['os', 'sys', 'pathlib', 'typing', 'logging', 'json', 'datetime', 'time', 're', 'math', 'random', 'dataclasses']:
-                    try:
-                        module = __import__(module_name)
-                        self.namespace[module_name] = module
-                    except ImportError:
-                        pass
+                # Use simple import resolver to analyze the main file and all its dependencies
+                if self.region_info and self.region_info.file_path:
+                    logger.info(f"Using simple import resolver for {self.region_info.file_path}")
+                    resolved_imports = self.executor.simple_import_resolver.resolve_imports_for_file(
+                        self.region_info.file_path
+                    )
+                    
+                    # Merge resolved imports into namespace
+                    self.namespace.update(resolved_imports)
+                    logger.info(f"Simple resolver added {len(resolved_imports)} imports to namespace")
+                
+                # Add essential standard library modules as fallback
+                essential_modules = ['os', 'sys', 'pathlib', 'typing', 'logging', 'json', 'datetime', 'time', 're', 'math', 'random', 'dataclasses']
+                for module_name in essential_modules:
+                    if module_name not in self.namespace:
+                        try:
+                            module = __import__(module_name)
+                            self.namespace[module_name] = module
+                        except ImportError:
+                            pass
                 
                 # Add commonly used imports directly to namespace
                 try:
                     import dataclasses
                     self.namespace['dataclass'] = dataclasses.dataclass
                     self.namespace['field'] = dataclasses.field
-                except ImportError:
+                except builtins.ImportError:
                     pass
                 
                 try:
@@ -1606,10 +1688,65 @@ class CodeRegionExecutor:
                     self.namespace['Optional'] = typing.Optional
                     self.namespace['Any'] = typing.Any
                     self.namespace['Union'] = typing.Union
-                except ImportError:
+                except builtins.ImportError:
                     pass
                 
                 return self.namespace
+            
+            def _import_common_classes(self):
+                """Import common classes using simple import resolution."""
+                # This is now handled by the simple import resolver
+                pass
+            
+            def _import_referenced_files(self):
+                """Import classes from referenced files using simple import resolution."""
+                # This is now handled by the simple import resolver
+                pass
+            
+            def _import_dependent_modules(self, main_module):
+                """Import classes from modules that are imported by the main module."""
+                # This is now handled by the simple import resolver
+                pass
+            
+            def _fallback_import_common_modules(self):
+                """Fallback method using simple import resolution."""
+                # This is now handled by the simple import resolver
+                pass
+            
+            def _import_module_classes(self, file_path: Path, module_name: str):
+                """Import all classes from a specific module file."""
+                # This is now handled by the simple import resolver
+                pass
+            
+            def _import_from_code_imports(self, code: str):
+                """Scan code for import statements and import those modules using AST parsing."""
+                # This is now handled by the simple import resolver
+                pass
+            
+            def _try_import_all_classes_from_module(self, module_name: str):
+                """Try to import all classes from a module (for star imports)."""
+                # This is now handled by the simple import resolver
+                pass
+            
+            def _try_import_module(self, module_name: str, alias_name: str):
+                """Try to import a module and add it to the namespace."""
+                # This is now handled by the simple import resolver
+                pass
+            
+            def _try_import_class_from_module(self, module_name: str, class_name: str, alias_name: str):
+                """Try to import a specific class from a module."""
+                # This is now handled by the simple import resolver
+                pass
+            
+            def _scan_and_import_referenced_classes(self, code: str):
+                """Scan code for class references and try to import them from common locations."""
+                # This is now handled by the simple import resolver
+                pass
+            
+            def _try_import_referenced_class(self, class_name: str):
+                """Try to import a referenced class using simple resolution."""
+                # This is now handled by the simple import resolver
+                pass
             
             def __exit__(self, exc_type, exc_val, exc_tb):
                 # Cleanup if needed
@@ -1618,7 +1755,7 @@ class CodeRegionExecutor:
         return CustomImportManager(self, region_info)
     
     def _execute_class_method(self, namespace: Dict[str, Any], region_info: RegionInfo, 
-                            method_name: str, input_data: List[Any]) -> Any:
+                            method_name: str, input_data: List[Any], class_name: Optional[str] = None) -> Any:
         """Execute a method from a class with multiple inputs.
         
         Args:
@@ -1626,9 +1763,7 @@ class CodeRegionExecutor:
             region_info: Information about the code region
             method_name: Name of the method to call
             input_data: List of input data for the method
-            
-        Returns:
-            The result of the method execution or error information if execution fails
+            class_name: Optional override for the class name to instantiate
         """
         if not method_name:
             logger.error(f"Method name required for class region '{region_info.name}'")
@@ -1638,17 +1773,26 @@ class CodeRegionExecutor:
                 'type': 'ValueError'
             }
         
-        if method_name not in region_info.class_methods:
-            logger.error(f"Method '{method_name}' not found in class '{region_info.name}'")
+        class_to_use = class_name or region_info.name
+        if class_to_use not in namespace:
+            logger.error(f"Class '{class_to_use}' not found in namespace")
             return {
                 'status': 'error',
-                'error': f"Method '{method_name}' not found in class '{region_info.name}'",
+                'error': f"Class '{class_to_use}' not found in namespace",
+                'type': 'ValueError'
+            }
+        
+        if method_name not in region_info.class_methods:
+            logger.error(f"Method '{method_name}' not found in class '{class_to_use}'")
+            return {
+                'status': 'error',
+                'error': f"Method '{method_name}' not found in class '{class_to_use}'",
                 'type': 'ValueError'
             }
         
         try:
-            logger.debug(f"Instantiating class: {region_info.name}")
-            instance = namespace[region_info.name]()
+            logger.debug(f"Instantiating class: {class_to_use}")
+            instance = namespace[class_to_use]()
             
             logger.debug(f"Getting method: {method_name}")
             method = getattr(instance, method_name)
@@ -1680,7 +1824,7 @@ class CodeRegionExecutor:
                 'instance': instance  # Return the instance for variable tracking
             }
             
-        except AttributeError as e:
+        except builtins.AttributeError as e:
             error_msg = f"Method '{method_name}' not found: {str(e)}"
             logger.error(error_msg)
             return {
@@ -1740,3 +1884,13 @@ class CodeRegionExecutor:
                 
         except Exception as e:
             raise ValueError(f"Error executing function '{method_name}': {str(e)}")
+
+    def _scan_and_import_referenced_classes(self, code: str):
+        """Scan code for class references and try to import them from common locations."""
+        # This is now handled by the simple import resolver
+        pass
+    
+    def _try_import_referenced_class(self, class_name: str):
+        """Try to import a referenced class from common locations."""
+        # This is now handled by the simple import resolver
+        pass

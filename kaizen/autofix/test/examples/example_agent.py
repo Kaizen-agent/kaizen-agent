@@ -3,6 +3,7 @@
 import json
 from typing import Dict, Any, List
 
+# kaizen:start:example_agent
 class ExampleAgent:
     """Example agent that produces multiple outputs for testing flexible evaluation."""
     
@@ -68,4 +69,5 @@ class ExampleAgent:
     
     def get_recommended_action(self) -> str:
         """Get the current recommended action."""
-        return self.recommended_action 
+        return self.recommended_action
+# kaizen:end:example_agent 

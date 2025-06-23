@@ -510,19 +510,30 @@ class DynamicRegionRunner(AgentRunner):
                 # If a method is specified, call it with the input
                 method = input_data.get('method')
                 test_input = input_data.get('input')
-                
+                class_name_override = input_data.get('class_name') or self.config.get('class_name') if hasattr(self, 'config') else None
                 if method and test_input is not None:
-                    # Find the class in the namespace
+                    # Use class_name override if provided
+                    if class_name_override:
+                        if class_name_override in namespace and isinstance(namespace[class_name_override], type):
+                            instance = namespace[class_name_override]()
+                            result = getattr(instance, method)(test_input)
+                            return {
+                                "status": "success",
+                                "output": str(result)
+                            }
+                        else:
+                            return {
+                                "status": "error",
+                                "error": f"Class '{class_name_override}' not found in namespace"
+                            }
+                    # Fallback: auto-discover class as before
                     class_name = None
                     for name, obj in namespace.items():
                         if isinstance(obj, type) and hasattr(obj, method):
                             class_name = name
                             break
-                    
                     if class_name:
-                        # Instantiate the class
                         instance = namespace[class_name]()
-                        # Call the method
                         result = getattr(instance, method)(test_input)
                         return {
                             "status": "success",
