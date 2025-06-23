@@ -1,0 +1,17 @@
+{
+  "test_name": "test_with_unified",
+  "status": "failed",
+  "timestamp": "2025-06-23T12:17:28.938934",
+  "file_path": "test_file.py",
+  "config_path": "test_config.yaml",
+  "start_time": "2025-06-23T12:17:28.938125",
+  "end_time": "2025-06-23T12:17:28.938127",
+  "error": "Some tests failed",
+  "overall_status": {
+    "status": "failed"
+  },
+  "detailed_logs_file": "test_with_unified_20250623_121728_detailed_logs.json",
+  "has_unified_results": true,
+  "has_auto_fix_attempts": true,
+  "auto_fix_attempts_count": 2
+}

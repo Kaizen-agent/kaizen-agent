@@ -35,6 +35,11 @@ Kaizen is a powerful CLI tool that automates test execution, failure analysis, a
 - **Detailed Reporting**: Generate comprehensive test reports and fix attempts
 - **Configuration Management**: YAML-based configuration with validation and dependency management
 - **Dependency Management**: Automatic handling of package dependencies and local file imports
+- **Environment Validation**: Built-in environment setup and validation tools
+- **GitHub Access Testing**: Comprehensive GitHub token and repository access diagnostics
+- **Save Logs Feature**: Save detailed test execution logs for debugging and analysis
+- **Unified Test Results**: Consistent test result handling with rich metadata
+- **Flexible Evaluation**: Advanced evaluation criteria with multiple targets and weights
 
 ## Installation
 
@@ -86,6 +91,18 @@ Before using Kaizen, you need to set up your environment variables for API acces
    export GITHUB_TOKEN="your_github_token_here"
    ```
 
+3. **Use the built-in setup commands:**
+   ```bash
+   # Check your environment setup
+   kaizen setup check-env
+   
+   # Create a template .env file
+   kaizen setup create-env-example
+   
+   # Validate environment for CI/CD
+   kaizen setup validate-env
+   ```
+
 For detailed setup instructions, see the [Environment Setup Guide](docs/environment-setup.md).
 
 ## Quick Start
@@ -126,14 +143,20 @@ kaizen test-all --config test_config.yaml --auto-fix --create-pr
 # Run all tests in configuration
 kaizen test-all --config <config_file> [options]
 
-# Fix specific test files
-kaizen fix-tests <test_files> --project <project_path> [options]
+# Check environment setup
+kaizen setup check-env [--features core github optional]
+
+# Test GitHub access and permissions
+kaizen test-github-access --config <config_file> [--repo owner/repo]
+
+# Comprehensive GitHub access diagnostics
+kaizen diagnose-github-access --config <config_file> [--repo owner/repo]
 ```
 
 ### Run Tests with Auto-Fix
 
 ```bash
-kaizen test-all --config <config_file> [--auto-fix] [--create-pr] [--max-retries <n>] [--base-branch <branch>]
+kaizen test-all --config <config_file> [--auto-fix] [--create-pr] [--max-retries <n>] [--base-branch <branch>] [--save-logs] [--verbose]
 ```
 
 Options:
@@ -143,20 +166,35 @@ Options:
 - `--max-retries`: Maximum number of fix attempts (default: 1)
 - `--base-branch`: Base branch for pull request (default: main)
 - `--pr-strategy`: Strategy for when to create PRs (default: ANY_IMPROVEMENT)
+- `--test-github-access`: Test GitHub access before running tests
+- `--save-logs`: Save detailed test logs in JSON format
+- `--verbose`, `-v`: Show detailed debug information
 
-### Fix Specific Tests
+### Environment Setup Commands
 
 ```bash
-kaizen fix-tests <test_files> --project <project_path> [--make-pr] [--max-retries <n>] [--base-branch <branch>]
+# Check environment status
+kaizen setup check-env --features core github
+
+# Create .env.example template
+kaizen setup create-env-example
+
+# Validate environment (for CI/CD)
+kaizen setup validate-env --features core github
 ```
 
-Options:
-- `test_files`: One or more test files to fix
-- `--project`, `-p`: Project root directory (required)
-- `--make-pr`: Create a pull request with fixes
-- `--max-retries`: Maximum number of fix attempts (default: 1)
-- `--base-branch`: Base branch for pull request (default: main)
-- `--results`, `-r`: Path to save test results
+### GitHub Access Testing
+
+```bash
+# Test GitHub access with config file
+kaizen test-github-access --config test_config.yaml
+
+# Test specific repository
+kaizen test-github-access --repo owner/repo-name --base-branch main
+
+# Comprehensive diagnostics
+kaizen diagnose-github-access --repo owner/repo-name
+```
 
 ## Configuration
 
@@ -208,14 +246,17 @@ steps:
 
 # Evaluation criteria
 evaluation:
-  criteria:
-    - "Function returns expected result"
-    - "Error handling works correctly"
-  llm_provider: "openai"
-  model: "gpt-4"
-  settings:
-    temperature: 0.1
-    max_tokens: 1000
+  evaluation_targets:
+    - name: summary_text
+      source: variable
+      criteria: "Should include key insights from the data"
+      description: "Summary should highlight important patterns"
+      weight: 1.0
+    - name: return
+      source: return
+      criteria: "Should be a dictionary with 'status' and 'results' keys"
+      description: "Return value should have expected structure"
+      weight: 1.0
 
 # Metadata
 metadata:
@@ -272,31 +313,19 @@ steps:
     description: "Test user creation API response"
 ```
 
-#### 3. Evaluation Criteria
-```yaml
-evaluation:
-  criteria:
-    - "Output should be properly formatted"
-    - "Result should be meaningful"
-    - "Status should indicate success"
-  required_fields:
-    - "result"
-    - "status"
-```
-
-#### 4. Advanced Evaluation Targets
+#### 3. Advanced Evaluation Targets
 ```yaml
 evaluation:
   evaluation_targets:
     - name: summary_text
       source: variable
-      criteria: "Should include key insights from the data"
-      description: "Summary should highlight important patterns"
+      criteria: "Should include clarification about the compound's instability"
+      description: "The summary text should explain stability concerns"
       weight: 1.0
     - name: return
       source: return
-      criteria: "Should be a dictionary with 'status' and 'results' keys"
-      description: "Return value should have expected structure"
+      criteria: "Should be a dictionary with 'status' and 'summary' keys"
+      description: "The return value should have the expected structure"
       weight: 1.0
 ```
 
@@ -352,16 +381,21 @@ steps:
             confidence: 0.9
 ```
 
-#### 4. Class Object Inputs
+#### 4. Inline Object Inputs (recommended)
 ```yaml
 steps:
-  - name: Model Input Test
+  - name: Inline Object Test
     input:
-      method: predict
+      method: process_feedback
       input:
-        - name: saved_model
-          type: class_object
-          pickle_path: "trained_model.pkl"
+        - name: chemist_feedback
+          type: inline_object
+          class_path: "input_types.ChemistFeedback"
+          attributes:
+            text: "Compound shows excellent stability"
+            tags: ["stability", "testing"]
+            confidence: 0.95
+            source: "yaml_config"
 ```
 
 ### Multiple Outputs Evaluation
@@ -449,20 +483,15 @@ steps:
             solvent: "ethanol"
             pH: 7.0
         
-        # Object inputs
+        # Inline object inputs (recommended)
         - name: chemist_feedback
-          type: object
+          type: inline_object
           class_path: "input_types.ChemistFeedback"
-          args:
+          attributes:
             text: "Too reactive under current conditions"
             tags: ["solubility", "stability", "safety"]
             confidence: 0.95
             source: "lab_analysis"
-        
-        # Class object inputs
-        - name: stability_model
-          type: class_object
-          pickle_path: "trained_stability_model.pkl"
     
     evaluation:
       type: llm
@@ -538,7 +567,7 @@ class ChemistryAgent:
 | `string` | Simple text input | `{"type": "string", "value": "Hello world"}` |
 | `dict` | Structured data | `{"type": "dict", "value": {"key": "value"}}` |
 | `object` | Dynamic class instantiation | `{"type": "object", "class_path": "module.Class", "args": {...}}` |
-| `class_object` | Direct class object | `{"type": "class_object", "pickle_path": "file.pkl"}` |
+| `inline_object` | Direct object specification | `{"type": "inline_object", "class_path": "module.Class", "attributes": {...}}` |
 
 ### Evaluation Sources Reference
 
@@ -546,7 +575,39 @@ class ChemistryAgent:
 |--------|-------------|---------|
 | `return` | Function's return value | `{"source": "return", "name": "return"}` |
 | `variable` | Specific variable tracking | `{"source": "variable", "name": "summary_text"}` |
-| `pattern` | Future: wildcard matching | Coming soon |
+
+## Save Logs Feature
+
+The `--save-logs` option allows you to save detailed test execution logs in JSON format for later analysis and debugging.
+
+### Usage
+
+```bash
+# Run tests with detailed logging
+kaizen test-all --config test_config.yaml --save-logs
+
+# Combine with other options
+kaizen test-all --config test_config.yaml --auto-fix --create-pr --save-logs
+```
+
+### Output Files
+
+When `--save-logs` is enabled, two files are created in the `test-logs/` directory:
+
+1. **Detailed Logs File**: `{test_name}_{timestamp}_detailed_logs.json`
+   - Complete test execution data
+   - Individual test case results with inputs/outputs
+   - LLM evaluation results and scores
+   - Auto-fix attempts and their outcomes
+   - Error details and stack traces
+   - Execution timing information
+
+2. **Summary File**: `{test_name}_{timestamp}_summary.json`
+   - Quick reference with key metrics
+   - Test name and status
+   - Execution timestamps
+   - Error messages
+   - Overall status summary
 
 ## Development
 

@@ -1,0 +1,22 @@
+{
+  "test_name": "test_example",
+  "status": "passed",
+  "timestamp": "2025-06-23T12:17:28.937675",
+  "file_path": "test_file.py",
+  "config_path": "test_config.yaml",
+  "start_time": "2025-06-23T12:17:27.902014",
+  "end_time": "2025-06-23T12:17:27.902025",
+  "error": null,
+  "overall_status": {
+    "status": "passed",
+    "summary": {
+      "total_tests": 2,
+      "passed_tests": 2,
+      "failed_tests": 0
+    }
+  },
+  "detailed_logs_file": "test_example_20250623_121728_detailed_logs.json",
+  "has_unified_results": false,
+  "has_auto_fix_attempts": false,
+  "auto_fix_attempts_count": 0
+}

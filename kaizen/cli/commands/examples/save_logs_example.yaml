@@ -1,0 +1,41 @@
+name: "save_logs_example"
+description: "Example test configuration demonstrating the --save-logs feature"
+file_path: "example_agent.py"
+agent_type: "example"
+
+# Test regions to evaluate
+regions:
+  - "example_function"
+
+# Test steps
+steps:
+  - name: "test_basic_functionality"
+    description: "Test basic function behavior"
+    command: "process_input"
+    input: "hello world"
+    expected_output: "Hello World!"
+
+  - name: "test_edge_case"
+    description: "Test edge case handling"
+    command: "process_input"
+    input: ""
+    expected_output: "Empty input"
+
+# Evaluation criteria
+evaluation:
+  criteria: "Check if the output matches the expected result exactly"
+  rules:
+    - "Output should be a string"
+    - "Output should match expected_output exactly"
+    - "Function should handle empty input gracefully"
+
+# Auto-fix configuration
+auto_fix: true
+max_retries: 2
+files_to_fix:
+  - "example_agent.py"
+
+# Optional: GitHub integration
+create_pr: false
+base_branch: "main"
+pr_strategy: "ANY_IMPROVEMENT" 

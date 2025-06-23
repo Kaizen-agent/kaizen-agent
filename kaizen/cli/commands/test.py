@@ -21,7 +21,8 @@ Example:
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, NoReturn, List
+from typing import Optional, NoReturn, List, Any
+import json
 
 # Third-party imports
 import click
@@ -53,26 +54,91 @@ from .models import TestResult
 # Configure rich traceback
 install_rich_traceback(show_locals=True)
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True)]
-)
-logger = logging.getLogger("kaizen.test")
+class CleanLogger:
+    """A logger that provides clean, concise output by default."""
+    
+    def __init__(self, verbose: bool = False):
+        """Initialize the clean logger.
+        
+        Args:
+            verbose: Whether to show detailed debug information
+        """
+        self.verbose = verbose
+        self.console = Console()
+        
+        # Configure logging based on verbose flag
+        if verbose:
+            # Full logging for verbose mode
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format="%(message)s",
+                datefmt="[%X]",
+                handlers=[RichHandler(rich_tracebacks=True)]
+            )
+            # Set all kaizen loggers to DEBUG level
+            logging.getLogger("kaizen").setLevel(logging.DEBUG)
+        else:
+            # Clean logging for normal mode - show info, warnings and errors
+            logging.basicConfig(
+                level=logging.INFO,
+                format="%(message)s",
+                datefmt="[%X]",
+                handlers=[RichHandler(rich_tracebacks=True)]
+            )
+            # Set all kaizen loggers to INFO level to show progress messages
+            logging.getLogger("kaizen").setLevel(logging.INFO)
+        
+        self.logger = logging.getLogger("kaizen.test")
+    
+    def info(self, message: str) -> None:
+        """Log info message (shown in both normal and verbose mode)."""
+        self.logger.info(message)
+    
+    def debug(self, message: str) -> None:
+        """Log debug message (only shown in verbose mode)."""
+        if self.verbose:
+            self.logger.debug(message)
+    
+    def warning(self, message: str) -> None:
+        """Log warning message (always shown)."""
+        self.logger.warning(message)
+    
+    def error(self, message: str) -> None:
+        """Log error message (always shown)."""
+        self.logger.error(message)
+    
+    def print(self, message: str, style: str = None) -> None:
+        """Print a message to console (always shown)."""
+        self.console.print(message, style=style)
+    
+    def print_progress(self, message: str) -> None:
+        """Print a progress message (always shown, clean format)."""
+        self.console.print(f"[blue]→[/blue] {message}")
+    
+    def print_success(self, message: str) -> None:
+        """Print a success message (always shown)."""
+        self.console.print(f"[bold green]✓[/bold green] {message}")
+    
+    def print_error(self, message: str) -> None:
+        """Print an error message (always shown)."""
+        self.console.print(f"[bold red]✗[/bold red] {message}")
 
-def _handle_error(error: Exception, message: str) -> NoReturn:
+def _handle_error(error: Exception, message: str, logger: CleanLogger = None) -> NoReturn:
     """Handle errors in a consistent way.
     
     Args:
         error: The exception that occurred
         message: Error message to display
+        logger: CleanLogger instance (optional)
         
     Raises:
         click.Abort: Always raises to abort the command
     """
-    logger.error(f"{message}: {str(error)}")
+    if logger:
+        logger.print_error(f"{message}: {str(error)}")
+    else:
+        # Fallback to standard logging if no logger provided
+        logging.error(f"{message}: {str(error)}")
     raise click.Abort()
 
 def _generate_report_path(test_result: TestResult) -> Path:
@@ -114,7 +180,194 @@ def _display_test_summary(console: Console, test_result: TestResult, rich_format
     console.print("\nTest Results Table:")
     console.print(rich_formatter.format_table(test_result.results))
 
-
+def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) -> None:
+    """Save detailed test logs in JSON format for later analysis.
+    
+    Args:
+        console: Rich console for output
+        test_result: The test result to save
+        config: Test configuration
+    """
+    try:
+        # Create logs directory
+        logs_dir = Path("test-logs")
+        logs_dir.mkdir(exist_ok=True)
+        
+        # Generate timestamp for unique filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filename = f"{test_result.name}_{timestamp}_detailed_logs.json"
+        log_file_path = logs_dir / log_filename
+        
+        # Prepare detailed log data
+        detailed_logs = {
+            "metadata": {
+                "test_name": test_result.name,
+                "file_path": str(test_result.file_path),
+                "config_path": str(test_result.config_path),
+                "start_time": test_result.start_time.isoformat(),
+                "end_time": test_result.end_time.isoformat(),
+                "status": test_result.status,
+                "timestamp": datetime.now().isoformat(),
+                "config": {
+                    "auto_fix": getattr(config, 'auto_fix', False),
+                    "create_pr": getattr(config, 'create_pr', False),
+                    "max_retries": getattr(config, 'max_retries', 0),
+                    "base_branch": getattr(config, 'base_branch', 'main'),
+                    "pr_strategy": getattr(config, 'pr_strategy', 'ANY_IMPROVEMENT')
+                }
+            },
+            "test_results": test_result.results,
+            "error": test_result.error,
+            "steps": test_result.steps
+        }
+        
+        # Add unified test results if available with enhanced test case details
+        if test_result.unified_result:
+            try:
+                unified_data = test_result.unified_result.to_dict()
+                
+                # Enhance the unified results with more detailed test case information
+                enhanced_unified_data = {
+                    **unified_data,
+                    "test_cases_detailed": []
+                }
+                
+                # Add detailed information for each test case
+                for tc in test_result.unified_result.test_cases:
+                    detailed_tc = {
+                        "name": tc.name,
+                        "status": tc.status.value,
+                        "region": tc.region,
+                        "input": tc.input,
+                        "expected_output": tc.expected_output,
+                        "actual_output": tc.actual_output,
+                        "error_message": tc.error_message,
+                        "error_details": tc.error_details,
+                        "evaluation": tc.evaluation,
+                        "evaluation_score": tc.evaluation_score,
+                        "execution_time": tc.execution_time,
+                        "timestamp": tc.timestamp.isoformat() if tc.timestamp else None,
+                        "metadata": tc.metadata,
+                        # Add human-readable summary for quick scanning
+                        "summary": {
+                            "passed": tc.status.value in ['passed'],
+                            "failed": tc.status.value in ['failed', 'error'],
+                            "has_error": tc.error_message is not None,
+                            "has_evaluation": tc.evaluation is not None,
+                            "input_type": type(tc.input).__name__ if tc.input is not None else None,
+                            "output_type": type(tc.actual_output).__name__ if tc.actual_output is not None else None,
+                            "expected_type": type(tc.expected_output).__name__ if tc.expected_output is not None else None
+                        }
+                    }
+                    enhanced_unified_data["test_cases_detailed"].append(detailed_tc)
+                
+                # Add summary statistics for quick reference
+                enhanced_unified_data["test_summary"] = {
+                    "total_test_cases": len(test_result.unified_result.test_cases),
+                    "passed_test_cases": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'passed']),
+                    "failed_test_cases": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'failed']),
+                    "error_test_cases": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'error']),
+                    "test_cases_with_evaluations": len([tc for tc in test_result.unified_result.test_cases if tc.evaluation is not None]),
+                    "test_cases_with_errors": len([tc for tc in test_result.unified_result.test_cases if tc.error_message is not None]),
+                    "regions": list(set(tc.region for tc in test_result.unified_result.test_cases))
+                }
+                
+                detailed_logs["unified_test_results"] = enhanced_unified_data
+                
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not serialize unified results: {str(e)}[/yellow]")
+                detailed_logs["unified_test_results"] = {"error": f"Serialization failed: {str(e)}"}
+        
+        # Add auto-fix attempts if available
+        if test_result.test_attempts:
+            detailed_logs["auto_fix_attempts"] = test_result.test_attempts
+        
+        # Save to JSON file
+        with open(log_file_path, 'w', encoding='utf-8') as f:
+            json.dump(detailed_logs, f, indent=2, ensure_ascii=False, default=str)
+        
+        console.print(f"\n[bold green]✓ Detailed test logs saved to: {log_file_path}[/bold green]")
+        console.print(f"[dim]File size: {log_file_path.stat().st_size / 1024:.1f} KB[/dim]")
+        
+        # Also save a summary file for quick reference
+        summary_filename = f"{test_result.name}_{timestamp}_summary.json"
+        summary_file_path = logs_dir / summary_filename
+        
+        # Enhanced summary with test case details
+        summary_data = {
+            "test_name": test_result.name,
+            "status": test_result.status,
+            "timestamp": datetime.now().isoformat(),
+            "file_path": str(test_result.file_path),
+            "config_path": str(test_result.config_path),
+            "start_time": test_result.start_time.isoformat(),
+            "end_time": test_result.end_time.isoformat(),
+            "error": test_result.error,
+            "overall_status": test_result.results.get('overall_status', {}),
+            "detailed_logs_file": log_filename,
+            "has_unified_results": test_result.unified_result is not None,
+            "has_auto_fix_attempts": test_result.test_attempts is not None,
+            "auto_fix_attempts_count": len(test_result.test_attempts) if test_result.test_attempts else 0
+        }
+        
+        # Add test case summary if unified results are available
+        if test_result.unified_result:
+            summary_data["test_cases_summary"] = {
+                "total": len(test_result.unified_result.test_cases),
+                "passed": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'passed']),
+                "failed": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'failed']),
+                "error": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'error']),
+                "regions": list(set(tc.region for tc in test_result.unified_result.test_cases))
+            }
+            
+            # Add quick reference for failed/error test cases
+            failed_tests = []
+            for tc in test_result.unified_result.test_cases:
+                if tc.status.value in ['failed', 'error']:
+                    failed_tests.append({
+                        "name": tc.name,
+                        "region": tc.region,
+                        "status": tc.status.value,
+                        "input": tc.input,
+                        "expected_output": tc.expected_output,
+                        "actual_output": tc.actual_output,
+                        "error_message": tc.error_message,
+                        "evaluation_score": tc.evaluation_score
+                    })
+            summary_data["failed_test_cases"] = failed_tests
+        
+        with open(summary_file_path, 'w', encoding='utf-8') as f:
+            json.dump(summary_data, f, indent=2, ensure_ascii=False, default=str)
+        
+        console.print(f"[dim]Summary file saved to: {summary_file_path}[/dim]")
+        
+        # Show what was saved with enhanced information
+        if test_result.unified_result:
+            total_tests = len(test_result.unified_result.test_cases)
+            passed_tests = len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'passed'])
+            failed_tests = len([tc for tc in test_result.unified_result.test_cases if tc.status.value in ['failed', 'error']])
+            
+            console.print(f"[dim]✓ Unified test results included ({total_tests} test cases)[/dim]")
+            console.print(f"[dim]  - Passed: {passed_tests}, Failed/Error: {failed_tests}[/dim]")
+            console.print(f"[dim]  - Regions: {', '.join(set(tc.region for tc in test_result.unified_result.test_cases))}[/dim]")
+            
+            # Show failed test cases for quick reference
+            if failed_tests > 0:
+                console.print(f"[dim]  - Failed tests: {', '.join(tc.name for tc in test_result.unified_result.test_cases if tc.status.value in ['failed', 'error'])}[/dim]")
+        
+        if test_result.test_attempts:
+            console.print(f"[dim]✓ Auto-fix attempts included ({len(test_result.test_attempts)} attempts)[/dim]")
+        
+        # Provide guidance on how to analyze the logs
+        console.print(f"\n[bold]How to analyze the logs:[/bold]")
+        console.print(f"[dim]1. Open {log_filename} for complete test details[/dim]")
+        console.print(f"[dim]2. Check 'test_cases_detailed' section for individual test inputs/outputs[/dim]")
+        console.print(f"[dim]3. Use 'test_summary' for quick statistics[/dim]")
+        console.print(f"[dim]4. Review {summary_filename} for failed test cases overview[/dim]")
+        
+    except Exception as e:
+        console.print(f"[bold red]Warning: Failed to save detailed logs: {str(e)}[/bold red]")
+        # Note: Removed the self.verbose check since this function doesn't have access to self
 
 @click.command()
 @click.option('--config', '-c', type=click.Path(exists=True), required=True, help='Test configuration file')
@@ -125,6 +378,8 @@ def _display_test_summary(console: Console, test_result: TestResult, rich_format
 @click.option('--pr-strategy', type=click.Choice([s.value for s in PRStrategy]), 
               default=PRStrategy.ANY_IMPROVEMENT.value, help='Strategy for when to create PRs (default: ANY_IMPROVEMENT)')
 @click.option('--test-github-access', is_flag=True, help='Test GitHub access and permissions before running tests')
+@click.option('--save-logs', is_flag=True, help='Save detailed test logs in JSON format for later analysis')
+@click.option('--verbose', '-v', is_flag=True, help='Show detailed debug information and verbose logging')
 def test_all(
     config: str,
     auto_fix: bool,
@@ -132,9 +387,19 @@ def test_all(
     max_retries: int,
     base_branch: str,
     pr_strategy: str,
-    test_github_access: bool
+    test_github_access: bool,
+    save_logs: bool,
+    verbose: bool
 ) -> None:
     """Run all tests specified in the configuration file.
+    
+    This command executes tests based on the provided configuration file. It supports
+    automatic fixing of failing tests, creating pull requests with fixes, and saving
+    detailed test logs for later analysis.
+    
+    By default, this command provides clean, concise output showing only essential
+    information. Use --verbose to see detailed debug information and step-by-step
+    execution logs.
     
     Args:
         config: Path to the test configuration file
@@ -144,6 +409,21 @@ def test_all(
         base_branch: Base branch for pull request
         pr_strategy: Strategy for when to create PRs
         test_github_access: Whether to test GitHub access and permissions before running tests
+        save_logs: Whether to save detailed test logs in JSON format for later analysis
+        verbose: Whether to show detailed debug information and verbose logging
+        
+    When --save-logs is enabled, the following files are created in the test-logs/ directory:
+    - {test_name}_{timestamp}_detailed_logs.json: Complete test results including inputs, outputs, 
+      evaluations, and auto-fix attempts
+    - {test_name}_{timestamp}_summary.json: Quick reference summary with key metrics
+    
+    The detailed logs include:
+    - Test metadata and configuration
+    - Individual test case results with inputs and outputs
+    - LLM evaluation results and scores
+    - Auto-fix attempts and their outcomes
+    - Error details and stack traces
+    - Execution timing information
         
     Example:
         >>> test_all(
@@ -153,13 +433,17 @@ def test_all(
         ...     max_retries=2,
         ...     base_branch="main",
         ...     pr_strategy="ANY_IMPROVEMENT",
-        ...     test_github_access=True
+        ...     test_github_access=True,
+        ...     save_logs=True,
+        ...     verbose=False
         ... )
     """
-    console = Console()
+    # Initialize clean logger
+    logger = CleanLogger(verbose=verbose)
     
     try:
         # Load configuration
+        logger.print_progress("Loading test configuration...")
         config_manager = ConfigurationManager()
         config_result = config_manager.load_configuration(
             Path(config),
@@ -171,40 +455,41 @@ def test_all(
         )
         
         if not config_result.is_success:
-            _handle_error(config_result.error, "Configuration error")
+            _handle_error(config_result.error, "Configuration error", logger)
         
         config = config_result.value
+        logger.print_success(f"Configuration loaded: {config.name}")
         
         # Load environment variables before testing GitHub access
         if test_github_access or create_pr:
             from ..utils.env_setup import load_environment_variables
-            console.print("[dim]Loading environment variables...[/dim]")
+            logger.print_progress("Loading environment variables...")
             loaded_files = load_environment_variables()
             if loaded_files:
-                console.print(f"[dim]Loaded environment from: {', '.join(loaded_files.keys())}[/dim]")
+                logger.info(f"Loaded environment from: {', '.join(loaded_files.keys())}")
             else:
-                console.print("[dim]No .env files found, using system environment variables[/dim]")
+                logger.info("No .env files found, using system environment variables")
         
         # Test GitHub access if requested
         if test_github_access or create_pr:
-            console.print("\n[bold blue]Testing GitHub Access...[/bold blue]")
+            logger.print_progress("Testing GitHub access...")
             
             # Check if GITHUB_TOKEN is available
             import os
             github_token = os.environ.get('GITHUB_TOKEN')
             if not github_token:
-                console.print("\n[bold red]GITHUB_TOKEN not found in environment variables[/bold red]")
-                console.print("\n[bold]Possible solutions:[/bold]")
-                console.print("1. Create a .env file in your project root with:")
-                console.print("   GITHUB_TOKEN=your_github_token_here")
-                console.print("2. Set the environment variable directly:")
-                console.print("   export GITHUB_TOKEN=your_github_token_here")
-                console.print("3. Check if your .env file is in the correct location")
-                console.print("4. Restart your terminal after creating/modifying .env files")
-                console.print("\n[bold]For more help, run:[/bold]")
-                console.print("   kaizen setup check-env --features github")
+                logger.print_error("GITHUB_TOKEN not found in environment variables")
+                logger.print("\n[bold]Possible solutions:[/bold]")
+                logger.print("1. Create a .env file in your project root with:")
+                logger.print("   GITHUB_TOKEN=your_github_token_here")
+                logger.print("2. Set the environment variable directly:")
+                logger.print("   export GITHUB_TOKEN=your_github_token_here")
+                logger.print("3. Check if your .env file is in the correct location")
+                logger.print("4. Restart your terminal after creating/modifying .env files")
+                logger.print("\n[bold]For more help, run:[/bold]")
+                logger.print("   kaizen setup check-env --features github")
                 if create_pr:
-                    console.print("\n[bold yellow]Warning: PR creation will fail without GITHUB_TOKEN[/bold yellow]")
+                    logger.print("\n[bold yellow]Warning: PR creation will fail without GITHUB_TOKEN[/bold yellow]")
                     if not click.confirm("Continue with test execution?"):
                         return
                 else:
@@ -212,7 +497,7 @@ def test_all(
             
             # Show token status (without exposing the actual token)
             token_preview = github_token[:8] + "..." if len(github_token) > 8 else "***"
-            console.print(f"[dim]GitHub token found: {token_preview}[/dim]")
+            logger.info(f"GitHub token found: {token_preview}")
             
             try:
                 from kaizen.autofix.pr.manager import PRManager
@@ -220,88 +505,100 @@ def test_all(
                 access_result = pr_manager.test_github_access()
                 
                 if access_result['overall_status'] == 'full_access':
-                    console.print("[bold green]✓ GitHub access test passed[/bold green]")
+                    logger.print_success("GitHub access test passed")
                 elif access_result['overall_status'] == 'limited_branch_access_private':
-                    console.print("[bold yellow]⚠ GitHub access test: Partial access (Private Repository)[/bold yellow]")
-                    console.print("Branch-level access is limited, but PR creation may still work.")
+                    logger.print("[bold yellow]⚠ GitHub access test: Partial access (Private Repository)[/bold yellow]")
+                    logger.print("Branch-level access is limited, but PR creation may still work.")
                 else:
-                    console.print(f"[bold red]✗ GitHub access test failed: {access_result['overall_status']}[/bold red]")
+                    logger.print_error(f"GitHub access test failed: {access_result['overall_status']}")
                     
-                    # Display detailed results
-                    console.print("\n[bold]Access Test Results:[/bold]")
-                    
-                    # Repository access
-                    repo = access_result['repository']
-                    if repo.get('accessible'):
-                        console.print(f"  [green]✓ Repository: {repo.get('full_name', 'Unknown')} (Private: {repo.get('private', False)})[/green]")
-                    else:
-                        console.print(f"  [red]✗ Repository: {repo.get('error', 'Unknown error')}[/red]")
-                    
-                    # Branch access
-                    current_branch = access_result['current_branch']
-                    if current_branch.get('accessible'):
-                        console.print(f"  [green]✓ Current branch: {current_branch.get('branch_name', 'Unknown')}[/green]")
-                    else:
-                        console.print(f"  [red]✗ Current branch: {current_branch.get('error', 'Unknown error')}[/red]")
-                    
-                    base_branch = access_result['base_branch']
-                    if base_branch.get('accessible'):
-                        console.print(f"  [green]✓ Base branch: {base_branch.get('branch_name', 'Unknown')}[/green]")
-                    else:
-                        console.print(f"  [red]✗ Base branch: {base_branch.get('error', 'Unknown error')}[/red]")
-                    
-                    # PR permissions
-                    pr_perms = access_result['pr_permissions']
-                    if pr_perms.get('can_read'):
-                        console.print("  [green]✓ PR permissions: Read access confirmed[/green]")
-                    else:
-                        console.print(f"  [red]✗ PR permissions: {pr_perms.get('error', 'Unknown error')}[/red]")
-                    
-                    # Display recommendations
-                    console.print("\n[bold]Recommendations:[/bold]")
-                    for rec in access_result.get('recommendations', []):
-                        console.print(f"  • {rec}")
+                    # Display detailed results only in verbose mode
+                    if verbose:
+                        logger.print("\n[bold]Access Test Results:[/bold]")
+                        
+                        # Repository access
+                        repo = access_result['repository']
+                        if repo.get('accessible'):
+                            logger.print(f"  [green]✓ Repository: {repo.get('full_name', 'Unknown')} (Private: {repo.get('private', False)})[/green]")
+                        else:
+                            logger.print(f"  [red]✗ Repository: {repo.get('error', 'Unknown error')}[/red]")
+                        
+                        # Branch access
+                        current_branch = access_result['current_branch']
+                        if current_branch.get('accessible'):
+                            logger.print(f"  [green]✓ Current branch: {current_branch.get('branch_name', 'Unknown')}[/green]")
+                        else:
+                            logger.print(f"  [red]✗ Current branch: {current_branch.get('error', 'Unknown error')}[/red]")
+                        
+                        base_branch = access_result['base_branch']
+                        if base_branch.get('accessible'):
+                            logger.print(f"  [green]✓ Base branch: {base_branch.get('branch_name', 'Unknown')}[/green]")
+                        else:
+                            logger.print(f"  [red]✗ Base branch: {base_branch.get('error', 'Unknown error')}[/red]")
+                        
+                        # PR permissions
+                        pr_perms = access_result['pr_permissions']
+                        if pr_perms.get('can_read'):
+                            logger.print("  [green]✓ PR permissions: Read access confirmed[/green]")
+                        else:
+                            logger.print(f"  [red]✗ PR permissions: {pr_perms.get('error', 'Unknown error')}[/red]")
+                        
+                        # Display recommendations
+                        logger.print("\n[bold]Recommendations:[/bold]")
+                        for rec in access_result.get('recommendations', []):
+                            logger.print(f"  • {rec}")
                     
                     if create_pr:
                         if access_result['overall_status'] == 'limited_branch_access_private':
-                            console.print("\n[bold yellow]Note: Limited branch access detected for private repository. PR creation will be attempted but may fail.[/bold yellow]")
+                            logger.print("\n[bold yellow]Note: Limited branch access detected for private repository. PR creation will be attempted but may fail.[/bold yellow]")
                             if not click.confirm("Continue with test execution?"):
                                 return
                         else:
-                            console.print("\n[bold yellow]Warning: PR creation may fail due to access issues.[/bold yellow]")
+                            logger.print("\n[bold yellow]Warning: PR creation may fail due to access issues.[/bold yellow]")
                             if not click.confirm("Continue with test execution?"):
                                 return
                             
             except Exception as e:
-                console.print(f"[bold red]GitHub access test failed: {str(e)}[/bold red]")
+                logger.print_error(f"GitHub access test failed: {str(e)}")
                 if create_pr:
-                    console.print("[bold yellow]Warning: PR creation may fail due to access issues.[/bold yellow]")
+                    logger.print("[bold yellow]Warning: PR creation may fail due to access issues.[/bold yellow]")
                     if not click.confirm("Continue with test execution?"):
                         return
         
         # Execute tests
-        command = TestAllCommand(config, logger)
+        logger.print_progress("Running tests...")
+        command = TestAllCommand(config, logger.logger if verbose else logger, verbose=verbose)
         test_result = command.execute()
         
+        if not test_result.is_success:
+            _handle_error(test_result.error, "Test execution error", logger)
         
-        # # Generate report
-        # result_file = _generate_report_path(test_result.value)
+        # Display results
+        test_result_value = test_result.value
+        overall_status = test_result_value.results.get('overall_status', {})
+        if isinstance(overall_status, dict):
+            status = overall_status.get('status', 'unknown')
+        else:
+            status = overall_status
         
-        # # Use Markdown formatter for file output
-        # markdown_formatter = MarkdownTestResultFormatter()
-        # report_writer = TestReportWriter(test_result.value, markdown_formatter, logger)
-        # report_result = report_writer.write_report(result_file)
+        if status == 'passed':
+            logger.print_success(f"All tests passed! ({test_result_value.name})")
+        else:
+            logger.print_error(f"Tests failed! ({test_result_value.name})")
+            if not verbose:
+                logger.print("[dim]Run with --verbose to see detailed test results[/dim]")
         
-        # if not report_result.is_success:
-        #     _handle_error(report_result.error, "Report generation error")
+        # Save detailed logs if requested
+        if save_logs:
+            _save_detailed_logs(logger.console, test_result_value, config)
         
-        # # Use Rich formatter for console output
-        # rich_formatter = RichTestResultFormatter(console)
-        
-        # # Display test summary
-        # _display_test_summary(console, test_result.value, rich_formatter)
-        
-        # console.print(f"\nDetailed report saved to: {result_file}")
+        # Show detailed results in verbose mode
+        if verbose:
+            # Use Rich formatter for console output
+            rich_formatter = RichTestResultFormatter(logger.console)
+            
+            # Display test summary
+            _display_test_summary(logger.console, test_result_value, rich_formatter)
         
     except Exception as e:
-        _handle_error(e, "Unexpected error")
+        _handle_error(e, "Unexpected error", logger)
