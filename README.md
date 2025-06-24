@@ -24,7 +24,14 @@ Kaizen Agent is an AI debugging engineer that continuously tests, analyzes, and 
 
 🎥 **Watch Kaizen Agent in Action:**
 
-https://www.loom.com/share/d3d8a5c344dc4108906d60e5c209962e?sid=5b19b069-c4de-4eba-bf94-2f2ecb089ab5
+<div>
+    <a href="https://www.loom.com/share/d3d8a5c344dc4108906d60e5c209962e">
+      <p>Kaizen Agent Demo - Watch Video</p>
+    </a>
+    <a href="https://www.loom.com/share/d3d8a5c344dc4108906d60e5c209962e">
+      <img style="max-width:300px;" src="https://cdn.loom.com/sessions/thumbnails/d3d8a5c344dc4108906d60e5c209962e-54c4b35b3c755f5d-full-play.gif">
+    </a>
+  </div>
 
 Kaizen Agent acts as an AI debugging engineer that continuously tests, analyzes, and improves your AI agents and LLM applications. Here's how it works at a high level:
 
