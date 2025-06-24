@@ -1,14 +1,13 @@
-# Kaizen Agent - AI-Powered Test Automation for AI Agents and LLM Applications
+# Kaizen Agent - AI Debugging Engineer for AI Agents and LLM Applications
 
 [![Python Versions](https://img.shields.io/pypi/pyversions/kaizen.svg)](https://pypi.org/project/kaizen/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-Kaizen Agent is a powerful CLI tool specifically designed for testing, debugging, and improving AI agents and LLM applications. It acts as an AI debugging engineer that can run multiple tests simultaneously, analyze failures, automatically fix code and prompts, and create pull requests with improvements.
+Kaizen Agent is an AI debugging engineer that continuously tests, analyzes, and improves your AI agents and LLM applications. It runs multiple tests simultaneously, intelligently analyzes failures, automatically fixes code and prompts, and creates pull requests with improvements - all powered by AI.
 
 ## Table of Contents
 
-- [Features](#features)
 - [How It Works](#how-it-works)
 - [Installation](#installation)
 - [Environment Setup](#environment-setup)
@@ -20,25 +19,6 @@ Kaizen Agent is a powerful CLI tool specifically designed for testing, debugging
 - [Contributing](#contributing)
 - [License](#license)
 - [Support](#support)
-
-## Features
-
-- **AI Agent Testing**: Specifically designed for testing AI agents and LLM applications
-- **Parallel Test Execution**: Run multiple tests simultaneously across different files
-- **Multiple Input Support**: Test agents with various input types (strings, dictionaries, objects, and inline objects)
-- **Multiple Output Evaluation**: Evaluate return values, specific variables, and multiple outputs from single test execution
-- **Intelligent Failure Analysis**: Automatically analyze test failures and identify root causes
-- **Automated Code Fixing**: Fix code issues and prompt improvements automatically using AI-powered analysis
-- **Pull Request Integration**: Create pull requests with fixes and improvements
-- **Retry Mechanism**: Automatically retry failed tests after fixes
-- **Detailed Reporting**: Generate comprehensive test reports and fix attempts
-- **Configuration Management**: YAML-based configuration with validation and dependency management
-- **Dependency Management**: Automatic handling of package dependencies and local file imports
-- **Environment Validation**: Built-in environment setup and validation tools
-- **GitHub Access Testing**: Comprehensive GitHub token and repository access diagnostics
-- **Save Logs Feature**: Save detailed test execution logs for debugging and analysis
-- **Unified Test Results**: Consistent test result handling with rich metadata
-- **Flexible Evaluation**: Advanced evaluation criteria with multiple targets and weights
 
 ## How It Works
 
