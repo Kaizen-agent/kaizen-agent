@@ -203,16 +203,94 @@ If you're still having issues:
    ls -la .env*
    ```
 
-5. **Try setting the variable directly:**
+5. **Test GitHub access with Kaizen:**
    ```bash
-   export GITHUB_TOKEN="your_token_here"
    kaizen test-github-access --repo owner/repo-name
    ```
 
-### Prevention Tips
+6. **Run comprehensive diagnostics:**
+   ```bash
+   kaizen diagnose-github-access --repo owner/repo-name
+   ```
 
-1. **Always use .env files** instead of setting variables directly
-2. **Add .env to .gitignore** to avoid committing tokens
-3. **Use .env.example** to document required variables
-4. **Test your setup** before running important commands
-5. **Keep tokens secure** and rotate them regularly 
+## Advanced Troubleshooting
+
+### Environment Variable Priority
+The CLI loads environment variables in this order:
+1. System environment variables
+2. `.env` file in current directory
+3. `.env.local` file in current directory
+4. `.env.test` file in current directory
+
+### Testing Environment Setup
+```bash
+# Test core functionality
+kaizen setup check-env
+
+# Test GitHub integration
+kaizen setup check-env --features github
+
+# Test all features
+kaizen setup check-env --features core github optional
+```
+
+### Validating Environment for CI/CD
+```bash
+# Validate environment (exits with code 0 if valid, 1 if invalid)
+kaizen setup validate-env --features github
+```
+
+### Creating Environment Templates
+```bash
+# Create .env.example in current directory
+kaizen setup create-env-example
+
+# Create .env.example in specific workspace
+kaizen setup create-env-example --workspace /path/to/project
+```
+
+## Quick Commands Reference
+
+```bash
+# Check environment setup
+kaizen setup check-env --features github
+
+# Create environment template
+kaizen setup create-env-example
+
+# Validate environment
+kaizen setup validate-env --features github
+
+# Test GitHub access
+kaizen test-github-access --repo owner/repo-name
+
+# Run comprehensive diagnostics
+kaizen diagnose-github-access --repo owner/repo-name
+
+# Test with access testing
+kaizen test-all --config your_config.yaml --create-pr --test-github-access
+```
+
+## Next Steps
+
+After resolving environment variable issues:
+
+1. **Test your setup:**
+   ```bash
+   kaizen setup check-env --features github
+   ```
+
+2. **Test GitHub access:**
+   ```bash
+   kaizen test-github-access --repo owner/repo-name
+   ```
+
+3. **Run your tests:**
+   ```bash
+   kaizen test-all --config your_config.yaml --create-pr --test-github-access
+   ```
+
+4. **Save detailed logs if needed:**
+   ```bash
+   kaizen test-all --config your_config.yaml --create-pr --test-github-access --save-logs --verbose
+   ``` 

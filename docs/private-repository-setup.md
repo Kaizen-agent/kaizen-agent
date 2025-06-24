@@ -112,6 +112,77 @@ curl -H "Authorization: token YOUR_TOKEN" https://api.github.com/repos/OWNER/REP
 curl -H "Authorization: token YOUR_TOKEN" https://api.github.com/repos/OWNER/REPO/branches/BRANCH_NAME
 ```
 
+## Using Kaizen Commands for Testing
+
+### Environment Setup Check
+```bash
+# Check if environment is properly configured
+kaizen setup check-env --features github
+```
+
+### GitHub Access Testing
+```bash
+# Test with config file
+kaizen test-github-access --config test_config.yaml
+
+# Test specific repository
+kaizen test-github-access --repo owner/repo-name
+
+# Test with specific base branch
+kaizen test-github-access --repo owner/repo-name --base-branch main
+```
+
+### Comprehensive Diagnostics
+```bash
+# Run detailed diagnostics
+kaizen diagnose-github-access --config test_config.yaml
+
+# Or test specific repository
+kaizen diagnose-github-access --repo owner/repo-name
+```
+
+### Test Execution with Access Testing
+```bash
+# Run tests with GitHub access testing
+kaizen test-all --config test_config.yaml --create-pr --test-github-access
+
+# Save detailed logs for analysis
+kaizen test-all --config test_config.yaml --create-pr --test-github-access --save-logs --verbose
+```
+
+## Step-by-Step Setup Process
+
+### Step 1: Environment Setup
+```bash
+# Check current environment
+kaizen setup check-env --features github
+
+# Create environment template if needed
+kaizen setup create-env-example
+
+# Edit your .env file with your tokens
+# GITHUB_TOKEN=ghp_your_token_here
+# GOOGLE_API_KEY=your_google_api_key_here
+```
+
+### Step 2: Test GitHub Access
+```bash
+# Test basic access
+kaizen test-github-access --repo owner/repo-name
+
+# Run comprehensive diagnostics
+kaizen diagnose-github-access --repo owner/repo-name
+```
+
+### Step 3: Test PR Creation
+```bash
+# Test with access testing enabled
+kaizen test-all --config test_config.yaml --create-pr --test-github-access
+
+# Save detailed logs for analysis
+kaizen test-all --config test_config.yaml --create-pr --test-github-access --save-logs --verbose
+```
+
 ## Getting Help
 
 If you're still experiencing issues:
@@ -125,4 +196,23 @@ If you're still experiencing issues:
 For additional support, please provide:
 - The output of `kaizen test-github-access`
 - Your repository visibility (public/private)
-- The specific error messages you're seeing 
+- The specific error messages you're seeing
+
+## Quick Commands Reference
+
+```bash
+# Environment setup
+kaizen setup check-env --features github
+
+# Access testing
+kaizen test-github-access --repo owner/repo-name
+
+# Comprehensive diagnostics
+kaizen diagnose-github-access --repo owner/repo-name
+
+# Test execution with access testing
+kaizen test-all --config test_config.yaml --create-pr --test-github-access
+
+# Save detailed logs
+kaizen test-all --config test_config.yaml --create-pr --test-github-access --save-logs --verbose
+``` 
