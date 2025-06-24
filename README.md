@@ -58,7 +58,7 @@ This workflow ensures your AI agents are robust, reliable, and continuously impr
 ### From Source
 
 ```bash
-git clone https://github.com/yourusername/kaizen-agent.git
+git clone https://github.com/Kaizen-agent/kaizen-agent.git
 cd kaizen-agent
 pip install -e ".[dev]"
 ```
