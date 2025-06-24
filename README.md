@@ -146,8 +146,8 @@ The summarizer agent demonstrates basic text summarization functionality:
 
 3. **Run the tests:**
    ```bash
-   # From the kaizen-agent root directory
-   kaizen test-all --config test_agent/summarizer_agent/test_config.yaml --auto-fix
+   # From the summarizer_agent directory
+   kaizen test-all --config test_config.yaml --auto-fix
    ```
 
 ### Example 2: Email Agent
@@ -167,13 +167,18 @@ The email agent demonstrates email improvement functionality:
 
 3. **Run the tests:**
    ```bash
-   # From the kaizen-agent root directory
-   kaizen test-all --config test_agent/email_agent/test_simple.yaml --auto-fix
+   # From the email_agent directory
+   kaizen test-all --config test_config.yaml --auto-fix
    ```
 
 ### Creating Your Own Test Configuration
 
-1. Create a test configuration file (YAML):
+1. **Navigate to your project directory:**
+   ```bash
+   cd path/to/your/ai-agent-project
+   ```
+
+2. Create a test configuration file (YAML):
 
 ```yaml
 name: My AI Agent Test Suite
@@ -195,11 +200,11 @@ steps:
     description: "Test data processing"
 ```
 
-2. Run tests with auto-fix:
-
-```bash
-kaizen test-all --config test_config.yaml --auto-fix --create-pr
-```
+3. **Run tests with auto-fix:**
+   ```bash
+   # From your project directory
+   kaizen test-all --config test_config.yaml --auto-fix --create-pr
+   ```
 
 ## Usage
 
@@ -222,6 +227,10 @@ kaizen diagnose-github-access --config <config_file> [--repo owner/repo]
 ### Run Tests with Auto-Fix
 
 ```bash
+# Navigate to the directory containing your config file first
+cd path/to/your/project
+
+# Then run the kaizen command
 kaizen test-all --config <config_file> [--auto-fix] [--create-pr] [--max-retries <n>] [--base-branch <branch>] [--save-logs] [--verbose]
 ```
 
@@ -252,6 +261,9 @@ kaizen setup validate-env --features core github
 ### GitHub Access Testing
 
 ```bash
+# Navigate to the directory containing your config file first
+cd path/to/your/project
+
 # Test GitHub access with config file
 kaizen test-github-access --config test_config.yaml
 
@@ -649,6 +661,9 @@ The `--save-logs` option allows you to save detailed test execution logs in JSON
 ### Usage
 
 ```bash
+# Navigate to the directory containing your config file first
+cd path/to/your/project
+
 # Run tests with detailed logging
 kaizen test-all --config test_config.yaml --save-logs
 
