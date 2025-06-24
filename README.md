@@ -1,17 +1,15 @@
-# Kaizen - AI-Powered Test Automation and Code Fixing
+# Kaizen Agent - AI-Powered Test Automation for AI Agents and LLM Applications
 
-[![PyPI version](https://badge.fury.io/py/kaizen.svg)](https://badge.fury.io/py/kaizen)
 [![Python Versions](https://img.shields.io/pypi/pyversions/kaizen.svg)](https://pypi.org/project/kaizen/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Tests](https://github.com/yourusername/kaizen/actions/workflows/tests.yml/badge.svg)](https://github.com/yourusername/kaizen/actions/workflows/tests.yml)
-[![Documentation](https://readthedocs.org/projects/kaizen/badge/?version=latest)](https://kaizen.readthedocs.io/en/latest/?badge=latest)
 
-Kaizen is a powerful CLI tool that automates test execution, failure analysis, and code fixing. It can run multiple tests simultaneously, analyze failures, automatically fix code issues, and create pull requests with the fixes.
+Kaizen Agent is a powerful CLI tool specifically designed for testing, debugging, and improving AI agents and LLM applications. It acts as an AI debugging engineer that can run multiple tests simultaneously, analyze failures, automatically fix code and prompts, and create pull requests with improvements.
 
 ## Table of Contents
 
 - [Features](#features)
+- [How It Works](#how-it-works)
 - [Installation](#installation)
 - [Environment Setup](#environment-setup)
 - [Quick Start](#quick-start)
@@ -25,11 +23,12 @@ Kaizen is a powerful CLI tool that automates test execution, failure analysis, a
 
 ## Features
 
+- **AI Agent Testing**: Specifically designed for testing AI agents and LLM applications
 - **Parallel Test Execution**: Run multiple tests simultaneously across different files
 - **Multiple Input Support**: Test agents with various input types (strings, dictionaries, objects, and inline objects)
 - **Multiple Output Evaluation**: Evaluate return values, specific variables, and multiple outputs from single test execution
 - **Intelligent Failure Analysis**: Automatically analyze test failures and identify root causes
-- **Automated Code Fixing**: Fix code issues automatically using AI-powered analysis
+- **Automated Code Fixing**: Fix code issues and prompt improvements automatically using AI-powered analysis
 - **Pull Request Integration**: Create pull requests with fixes and improvements
 - **Retry Mechanism**: Automatically retry failed tests after fixes
 - **Detailed Reporting**: Generate comprehensive test reports and fix attempts
@@ -41,25 +40,52 @@ Kaizen is a powerful CLI tool that automates test execution, failure analysis, a
 - **Unified Test Results**: Consistent test result handling with rich metadata
 - **Flexible Evaluation**: Advanced evaluation criteria with multiple targets and weights
 
+## How It Works
+
+Kaizen Agent acts as an AI debugging engineer that continuously tests, analyzes, and improves your AI agents and LLM applications. Here's how it works at a high level:
+
+![Kaizen Agent Architecture](kaizen_agent_architecture.png)
+
+### 1. Test Execution
+- **Parallel Testing**: Runs multiple test cases simultaneously across your AI agents
+- **Multiple Input Types**: Supports strings, dictionaries, objects, and inline objects as inputs
+- **Dynamic Loading**: Automatically imports dependencies and referenced files
+
+### 2. Failure Analysis
+- **Intelligent Detection**: Uses AI to analyze test failures and identify root causes
+- **Context Understanding**: Examines code, prompts, and test outputs to understand issues
+- **Pattern Recognition**: Identifies common problems in AI agent implementations
+
+### 3. Automated Fixing
+- **Code Improvements**: Automatically fixes code issues, bugs, and logic problems
+- **Prompt Optimization**: Improves prompts for better AI agent performance
+- **Best Practices**: Applies AI development best practices and patterns
+
+### 4. Quality Assurance
+- **Multiple Output Evaluation**: Evaluates return values, variables, and complex outputs
+- **LLM-based Assessment**: Uses AI to assess the quality and correctness of responses
+- **Continuous Improvement**: Iteratively improves until tests pass
+
+### 5. Integration & Deployment
+- **Pull Request Creation**: Automatically creates PRs with fixes and improvements
+- **Version Control**: Integrates with GitHub for seamless deployment
+- **Documentation**: Updates documentation and comments as needed
+
+This workflow ensures your AI agents are robust, reliable, and continuously improving through automated testing and fixing cycles.
+
 ## Installation
-
-### From PyPI
-
-```bash
-pip install kaizen
-```
 
 ### From Source
 
 ```bash
-git clone https://github.com/yourusername/kaizen.git
-cd kaizen
+git clone https://github.com/yourusername/kaizen-agent.git
+cd kaizen-agent
 pip install -e ".[dev]"
 ```
 
 ## Environment Setup
 
-Before using Kaizen, you need to set up your environment variables for API access.
+Before using Kaizen Agent, you need to set up your environment variables for API access.
 
 ### Required Environment Variables
 
@@ -69,12 +95,6 @@ Before using Kaizen, you need to set up your environment variables for API acces
 - **`GITHUB_TOKEN`** (Required for PR creation): Your GitHub personal access token
   - Create it at: https://github.com/settings/tokens
   - Required scopes: `repo`, `workflow`
-
-### Optional Environment Variables
-
-- **`OPENAI_API_KEY`**: Alternative LLM provider
-- **`ANTHROPIC_API_KEY`**: Alternative LLM provider
-- **`LLM_MODEL_NAME`**: Custom LLM model name (default: `gemini-2.5-flash-preview-05-20`)
 
 ### Environment Setup
 
@@ -107,12 +127,58 @@ For detailed setup instructions, see the [Environment Setup Guide](docs/environm
 
 ## Quick Start
 
+Kaizen Agent comes with two example agents to help you get started quickly. These examples demonstrate how to test AI agents and LLM applications.
+
+### Example 1: Summarizer Agent
+
+The summarizer agent demonstrates basic text summarization functionality:
+
+1. **Navigate to the example:**
+   ```bash
+   cd test_agent/summarizer_agent
+   ```
+
+2. **Set up your environment:**
+   ```bash
+   # Create .env file with your Google API key
+   echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
+   ```
+
+3. **Run the tests:**
+   ```bash
+   # From the kaizen-agent root directory
+   kaizen test-all --config test_agent/summarizer_agent/test_config.yaml --auto-fix
+   ```
+
+### Example 2: Email Agent
+
+The email agent demonstrates email improvement functionality:
+
+1. **Navigate to the example:**
+   ```bash
+   cd test_agent/email_agent
+   ```
+
+2. **Set up your environment:**
+   ```bash
+   # Create .env file with your Google API key
+   echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
+   ```
+
+3. **Run the tests:**
+   ```bash
+   # From the kaizen-agent root directory
+   kaizen test-all --config test_agent/email_agent/test_simple.yaml --auto-fix
+   ```
+
+### Creating Your Own Test Configuration
+
 1. Create a test configuration file (YAML):
 
 ```yaml
-name: My Test Suite
-file_path: path/to/your/code.py
-description: "Test suite for my application"
+name: My AI Agent Test Suite
+file_path: path/to/your/agent.py
+description: "Test suite for my AI agent"
 
 # Test steps
 steps:
@@ -331,11 +397,11 @@ evaluation:
 
 ## Multiple Inputs & Outputs
 
-Kaizen supports advanced multiple inputs and multiple outputs evaluation, making it perfect for complex agent workflows and multi-step processes.
+Kaizen Agent supports advanced multiple inputs and multiple outputs evaluation, making it perfect for complex agent workflows and multi-step processes.
 
 ### Multiple Inputs
 
-Kaizen supports four types of inputs that can be combined in any configuration:
+Kaizen Agent supports four types of inputs that can be combined in any configuration:
 
 #### 1. String Inputs
 ```yaml
@@ -621,8 +687,8 @@ When `--save-logs` is enabled, two files are created in the `test-logs/` directo
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/kaizen.git
-cd kaizen
+git clone https://github.com/yourusername/kaizen-agent.git
+cd kaizen-agent
 ```
 
 2. Create and activate a virtual environment:
@@ -676,7 +742,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - 📚 [Documentation](https://kaizen.readthedocs.io/)
 - 💬 [Discord Community](https://discord.gg/kaizen)
-- 🐛 [Issue Tracker](https://github.com/yourusername/kaizen/issues)
+- 🐛 [Issue Tracker](https://github.com/yourusername/kaizen-agent/issues)
 - 📧 [Email Support](mailto:support@kaizen.dev)
 
 ## Acknowledgments

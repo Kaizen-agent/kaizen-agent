@@ -188,70 +188,111 @@ curl -X POST \
 kaizen test-github-access --repo owner/repo-name
 ```
 
-### Step 2: Check Organization Membership
+### Step 2: Run Comprehensive Diagnostics
+```bash
+# Get detailed diagnostics
+kaizen diagnose-github-access --repo owner/repo-name
+```
+
+### Step 3: Check Organization Membership
 ```bash
 # Verify you're a member
 curl -H "Authorization: token YOUR_TOKEN" https://api.github.com/orgs/ORGANIZATION_NAME/members/YOUR_USERNAME
 ```
 
-### Step 3: Check Repository Permissions
+### Step 4: Check Repository Permissions
 ```bash
 # Verify repository access
 curl -H "Authorization: token YOUR_TOKEN" https://api.github.com/repos/OWNER/REPO
 ```
 
-### Step 4: Test Manual PR Creation
-1. Go to the repository on GitHub
-2. Try to create a PR manually
-3. If manual creation works, the issue is with the token/API
-4. If manual creation fails, the issue is with permissions
+### Step 5: Test PR Creation with Access Testing
+```bash
+# Run tests with access testing enabled
+kaizen test-all --config your_config.yaml --create-pr --test-github-access
+```
 
-### Step 5: Contact Organization Admins
-If all else fails:
-1. Contact the organization administrators
-2. Request appropriate permissions for your role
-3. Ask them to check organization settings and restrictions
+### Step 6: Save Detailed Logs for Analysis
+```bash
+# Save detailed logs to analyze any issues
+kaizen test-all --config your_config.yaml --create-pr --test-github-access --save-logs --verbose
+```
 
-## Common Solutions
+## Using Kaizen Commands for Troubleshooting
 
-### For Organization Members
-1. **Request role upgrade** to Member or higher
-2. **Enable SSO** for your personal access token
-3. **Request repository access** if you're not a collaborator
+### Environment Setup Check
+```bash
+# Check if environment is properly configured
+kaizen setup check-env --features github
+```
 
-### For Outside Collaborators
-1. **Request organization membership**
-2. **Ask for collaborator access** to specific repositories
-3. **Verify your access level** is sufficient for PR creation
+### GitHub Access Testing
+```bash
+# Test with config file
+kaizen test-github-access --config your_config.yaml
 
-### For Repository Owners
-1. **Check branch protection rules**
-2. **Verify organization settings**
-3. **Add necessary collaborators** with appropriate permissions
+# Test specific repository
+kaizen test-github-access --repo owner/repo-name
+```
+
+### Comprehensive Diagnostics
+```bash
+# Run detailed diagnostics
+kaizen diagnose-github-access --config your_config.yaml
+
+# Or test specific repository
+kaizen diagnose-github-access --repo owner/repo-name
+```
+
+### Test Execution with Access Testing
+```bash
+# Run tests with GitHub access testing
+kaizen test-all --config your_config.yaml --create-pr --test-github-access
+
+# Save detailed logs for analysis
+kaizen test-all --config your_config.yaml --create-pr --test-github-access --save-logs --verbose
+```
+
+## Common Error Patterns and Solutions
+
+### "not all refs are readable"
+- **Cause**: Organization restrictions or branch protection rules
+- **Solution**: Contact organization admins, enable SSO, check repository settings
+
+### "403 Forbidden"
+- **Cause**: Insufficient permissions or organization membership issues
+- **Solution**: Request organization membership, verify collaborator status
+
+### "Repository not found"
+- **Cause**: Repository doesn't exist or you don't have access
+- **Solution**: Verify repository name, request access from owners
+
+### "Branch not found"
+- **Cause**: Branch doesn't exist or you can't access it
+- **Solution**: Check branch name, verify branch exists, check permissions
 
 ## Getting Help
 
 If you're still experiencing issues:
 
 1. **Run the diagnostic commands** above
-2. **Check organization settings** with your admin
-3. **Verify your token has SSO enabled** (if required)
-4. **Test manual PR creation** in the GitHub web interface
-5. **Contact organization administrators** for permission issues
+2. **Check the detailed error messages** in the command output
+3. **Contact organization administrators** for permission issues
+4. **Test manual PR creation** in GitHub web interface
+5. **Provide diagnostic output** when seeking help
 
-### Information to Provide
-When seeking help, provide:
-- Organization name
-- Repository name
-- Your role in the organization
-- Output of diagnostic commands
-- Whether manual PR creation works
-- Any error messages from GitHub API
+## Quick Reference
 
-## Prevention
+```bash
+# Environment setup
+kaizen setup check-env --features github
 
-1. **Use organization-specific tokens** when possible
-2. **Enable SSO** for tokens used with organization repositories
-3. **Regularly verify permissions** and access levels
-4. **Keep tokens updated** with appropriate scopes and SSO
-5. **Test access** before running automated workflows 
+# Access testing
+kaizen test-github-access --repo owner/repo-name
+
+# Comprehensive diagnostics
+kaizen diagnose-github-access --repo owner/repo-name
+
+# Test execution with access testing
+kaizen test-all --config your_config.yaml --create-pr --test-github-access --save-logs --verbose
+``` 

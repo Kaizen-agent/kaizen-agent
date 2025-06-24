@@ -114,6 +114,28 @@ The system will:
 3. **Test PR creation manually** before running automated workflows
 4. **Keep tokens updated** with appropriate scopes
 
+## Testing Your Setup
+
+### Step 1: Test GitHub Access
+```bash
+kaizen test-github-access --repo suzuking1192/pharma_ai_agent
+```
+
+### Step 2: Run Comprehensive Diagnostics
+```bash
+kaizen diagnose-github-access --repo suzuking1192/pharma_ai_agent
+```
+
+### Step 3: Test PR Creation with Access Testing
+```bash
+kaizen test-all --config your_config.yaml --create-pr --test-github-access
+```
+
+### Step 4: Save Detailed Logs for Analysis
+```bash
+kaizen test-all --config your_config.yaml --create-pr --test-github-access --save-logs --verbose
+```
+
 ## Summary
 
 Your token has the **correct permissions** for creating pull requests. The branch listing limitation is **normal and expected** and shouldn't prevent PR creation. The enhanced system should now handle this limitation gracefully and provide better guidance.
@@ -122,4 +144,23 @@ Your token has the **correct permissions** for creating pull requests. The branc
 1. Try running your tests again with the enhanced system
 2. If it still fails, create a test branch and try PR creation
 3. Test manual PR creation to verify permissions
-4. Contact organization administrators if manual creation fails 
+4. Contact organization administrators if manual creation fails
+
+## Quick Commands Reference
+
+```bash
+# Test GitHub access
+kaizen test-github-access --repo suzuking1192/pharma_ai_agent
+
+# Run comprehensive diagnostics
+kaizen diagnose-github-access --repo suzuking1192/pharma_ai_agent
+
+# Test PR creation with access testing
+kaizen test-all --config your_config.yaml --create-pr --test-github-access
+
+# Save detailed logs for analysis
+kaizen test-all --config your_config.yaml --create-pr --test-github-access --save-logs --verbose
+
+# Check environment setup
+kaizen setup check-env --features github
+``` 

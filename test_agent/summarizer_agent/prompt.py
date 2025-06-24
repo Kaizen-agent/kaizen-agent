@@ -21,8 +21,5 @@ def get_prompt(text: str) -> str:
     # The prompt should clearly instruct the model to summarize the provided text
     # and specify the desired output format (only the summary).
     return (
-        f"Summarize the following text concisely and accurately. "
-        f"Provide only the summary, without any additional conversational text "
-        f"or introductory phrases.\n\n"
-        f"Text:\n{text}"
+        f"{text}"
     )

@@ -200,17 +200,48 @@ After setting up your environment variables:
    kaizen setup check-env
    ```
 
-2. **Run your first test:**
+2. **Test GitHub access:**
+   ```bash
+   kaizen test-github-access --repo owner/repo-name
+   ```
+
+3. **Run your first test:**
    ```bash
    kaizen test-all --config your-test-config.yaml
    ```
 
-3. **Try auto-fixing:**
+4. **Try auto-fixing:**
    ```bash
    kaizen test-all --config your-test-config.yaml --auto-fix
    ```
 
-4. **Create a pull request:**
+5. **Create a pull request with access testing:**
    ```bash
-   kaizen test-all --config your-test-config.yaml --auto-fix --create-pr
-   ``` 
+   kaizen test-all --config your-test-config.yaml --auto-fix --create-pr --test-github-access
+   ```
+
+6. **Save detailed logs for analysis:**
+   ```bash
+   kaizen test-all --config your-test-config.yaml --auto-fix --save-logs --verbose
+   ```
+
+## Available CLI Commands
+
+### Core Commands
+- `kaizen test-all --config <file>` - Run tests with configuration
+- `kaizen setup check-env` - Check environment setup
+- `kaizen setup create-env-example` - Create environment template
+
+### GitHub Integration
+- `kaizen test-github-access --config <file>` - Test GitHub access
+- `kaizen test-github-access --repo owner/repo` - Test specific repository
+- `kaizen diagnose-github-access --config <file>` - Comprehensive GitHub diagnostics
+
+### Advanced Options
+- `--auto-fix` - Enable automatic code fixing
+- `--create-pr` - Create pull request with fixes
+- `--test-github-access` - Test GitHub access before running tests
+- `--save-logs` - Save detailed test logs in JSON format
+- `--verbose` - Show detailed debug information
+- `--max-retries <n>` - Maximum fix attempts (default: 1)
+- `--base-branch <branch>` - Base branch for PR (default: main) 

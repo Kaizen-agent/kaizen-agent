@@ -17,7 +17,7 @@ The error occurs because of **organization-level restrictions** or **repository-
 
 ### 1. Run Comprehensive Diagnostics
 
-Use the new diagnostic command to identify the exact issue:
+Use the diagnostic command to identify the exact issue:
 
 ```bash
 # If you have a config file
@@ -116,10 +116,16 @@ kaizen diagnose-github-access --repo suzuking1192/pharma_ai_agent
 kaizen test-github-access --repo suzuking1192/pharma_ai_agent
 ```
 
-### Step 3: Test PR Creation
+### Step 3: Test PR Creation with Access Testing
 ```bash
-# Run your tests with PR creation
+# Run your tests with PR creation and access testing
 kaizen test-all --config your_config.yaml --create-pr --test-github-access
+```
+
+### Step 4: Save Detailed Logs for Analysis
+```bash
+# Save detailed logs to analyze any issues
+kaizen test-all --config your_config.yaml --create-pr --test-github-access --save-logs --verbose
 ```
 
 ## Expected Outcomes
@@ -168,6 +174,9 @@ kaizen test-github-access --repo suzuking1192/pharma_ai_agent
 
 # Run tests with PR creation and access testing
 kaizen test-all --config your_config.yaml --create-pr --test-github-access
+
+# Save detailed logs for analysis
+kaizen test-all --config your_config.yaml --create-pr --test-github-access --save-logs --verbose
 
 # Check environment setup
 kaizen setup check-env --features github
