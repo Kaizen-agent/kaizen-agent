@@ -321,7 +321,6 @@ metadata:
   version: "1.0.0"
   author: "Test Author"
   created_at: "2024-01-01T00:00:00Z"
-```
 
 ### Configuration Fields
 
@@ -341,6 +340,121 @@ metadata:
 - `steps`: List of test steps
 - `evaluation`: Evaluation criteria and settings
 - `metadata`: Additional metadata
+
+### Defining Code Regions
+
+To test specific parts of your code, you need to define regions using special comment markers. Kaizen Agent will only test the code within these marked regions.
+
+#### Region Markers
+
+Use these comment markers to define testable regions in your Python code:
+
+```python
+# kaizen:start:{region_name}
+# Your code here - this will be tested
+class MyAgent:
+    def __init__(self):
+        self.name = "My Agent"
+    
+    def process_data(self, data):
+        # This method will be tested
+        return {"status": "success", "data": data}
+# kaizen:end:{region_name}
+```
+
+#### Example: Complete Agent with Regions
+
+```python
+import json
+from typing import Dict, Any
+
+# kaizen:start:customer_support_agent
+class CustomerSupportAgent:
+    def __init__(self):
+        self.issue_analysis = ""
+        self.improvement_recommendations = ""
+        self.analysis_results = {}
+    
+    def analyze_customer_issues(self, *inputs):
+        """Analyze customer issues with multiple inputs."""
+        # Process different input types
+        user_query = None
+        customer_data = None
+        customer_feedback = None
+        
+        for input_item in inputs:
+            if isinstance(input_item, str):
+                user_query = input_item
+            elif isinstance(input_item, dict):
+                customer_data = input_item
+            elif hasattr(input_item, 'text'):
+                customer_feedback = input_item
+        
+        # Set variables that will be tracked for evaluation
+        self.issue_analysis = "Customers are experiencing performance issues."
+        self.improvement_recommendations = "Implement performance optimization."
+        self.analysis_results = {
+            "satisfaction_score": 2.5,
+            "main_issues": ["performance", "stability"],
+            "recommendations": ["optimize code", "add monitoring"]
+        }
+        
+        return {
+            "status": "completed",
+            "analysis": self.issue_analysis,
+            "recommendations": self.improvement_recommendations,
+            "details": self.analysis_results
+        }
+# kaizen:end:customer_support_agent
+
+# This code outside the region won't be tested
+def utility_function():
+    return "This won't be tested"
+```
+
+#### Configuration Reference
+
+In your YAML configuration, reference the region name:
+
+```yaml
+# Test regions to execute
+regions:
+  - "customer_support_agent"  # Matches the region name in your code
+```
+
+#### Best Practices
+
+- **Descriptive Names**: Use clear, descriptive region names (e.g., `customer_support_agent`, `data_processor`)
+- **Complete Classes**: Include entire classes or functions within a single region
+- **Avoid Nesting**: Don't nest regions within other regions
+- **Clean Boundaries**: Place markers at logical code boundaries (class/function level)
+- **Consistent Naming**: Use the same naming convention across your codebase
+
+#### Multiple Regions
+
+You can define multiple regions in the same file:
+
+```python
+# kaizen:start:data_processor
+class DataProcessor:
+    def process(self, data):
+        return {"processed": data}
+# kaizen:end:data_processor
+
+# kaizen:start:report_generator
+class ReportGenerator:
+    def generate(self, data):
+        return {"report": data}
+# kaizen:end:report_generator
+```
+
+Then reference both in your configuration:
+
+```yaml
+regions:
+  - "data_processor"
+  - "report_generator"
+```
 
 ### Expected Outcomes
 
