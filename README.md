@@ -424,7 +424,7 @@ steps:
       input:
         - name: user_query
           type: string
-          value: "How stable is this compound in ethanol?"
+          value: "What are the main issues customers are reporting?"
 ```
 
 #### 2. Dictionary Inputs
@@ -434,13 +434,13 @@ steps:
     input:
       method: analyze_conditions
       input:
-        - name: experimental_conditions
+        - name: customer_data
           type: dict
           value:
-            temperature: 25
-            solvent: "ethanol"
-            pressure: 1.0
-            concentration: 0.1
+            customer_id: "CUST123"
+            product: "Premium Widget"
+            subscription_tier: "Enterprise"
+            support_tickets: 3
 ```
 
 #### 3. Object Inputs (with dynamic imports)
@@ -450,13 +450,13 @@ steps:
     input:
       method: process_feedback
       input:
-        - name: chemist_feedback
+        - name: customer_feedback
           type: object
-          class_path: "input_types.ChemistFeedback"
+          class_path: "input_types.CustomerFeedback"
           args:
-            text: "Too reactive"
-            tags: ["solubility", "stability"]
-            confidence: 0.9
+            text: "Product is too slow"
+            tags: ["performance", "speed"]
+            priority: "high"
 ```
 
 #### 4. Inline Object Inputs (recommended)
@@ -466,14 +466,14 @@ steps:
     input:
       method: process_feedback
       input:
-        - name: chemist_feedback
+        - name: customer_feedback
           type: inline_object
-          class_path: "input_types.ChemistFeedback"
+          class_path: "input_types.CustomerFeedback"
           attributes:
-            text: "Compound shows excellent stability"
-            tags: ["stability", "testing"]
-            confidence: 0.95
-            source: "yaml_config"
+            text: "Excellent customer service experience"
+            tags: ["service", "satisfaction"]
+            priority: "low"
+            source: "survey_response"
 ```
 
 ### Multiple Outputs Evaluation
@@ -483,16 +483,16 @@ Evaluate multiple outputs from your agents including return values and specific 
 ```yaml
 evaluation:
   evaluation_targets:
-    - name: summary_text
+    - name: issue_analysis
       source: variable
-      criteria: "Should include clarification about the compound's instability"
-      description: "The summary text should explain stability concerns"
+      criteria: "Should identify the root cause of customer complaints"
+      description: "The analysis should explain why customers are dissatisfied"
       weight: 1.0
 
     - name: recommended_action
       source: variable
-      criteria: "Should suggest an experiment or alternative solvent"
-      description: "The recommendation should be actionable"
+      criteria: "Should suggest specific improvements or solutions"
+      description: "The recommendation should be actionable and specific"
       weight: 1.0
 
     - name: return
@@ -507,23 +507,23 @@ evaluation:
 Here's a comprehensive example showing multiple inputs and outputs:
 
 ```yaml
-name: Chemistry Analysis Test
+name: Customer Support Analysis Test
 agent_type: dynamic_region
-file_path: chemistry_agent.py
-description: Test chemistry analysis with multiple input types and output evaluation
+file_path: support_agent.py
+description: Test customer support analysis with multiple input types and output evaluation
 
 evaluation:
   evaluation_targets:
-    - name: stability_analysis
+    - name: issue_analysis
       source: variable
-      criteria: "Should identify potential stability issues and their causes"
-      description: "Analysis should cover chemical stability factors"
+      criteria: "Should identify the main customer pain points and their causes"
+      description: "Analysis should cover customer satisfaction factors"
       weight: 1.0
 
-    - name: safety_recommendations
+    - name: improvement_recommendations
       source: variable
-      criteria: "Should provide specific safety precautions and handling instructions"
-      description: "Recommendations should be practical and safety-focused"
+      criteria: "Should provide specific actionable recommendations for improvement"
+      description: "Recommendations should be practical and business-focused"
       weight: 1.0
 
     - name: return
@@ -533,43 +533,44 @@ evaluation:
       weight: 1.0
 
 regions:
-  - ChemistryAgent
+  - SupportAgent
 
 max_retries: 2
 
 files_to_fix:
-  - chemistry_agent.py
+  - support_agent.py
 
 steps:
-  - name: Complex Chemistry Query
+  - name: Complex Customer Query
     description: Test handling of mixed input types with multiple outputs
     input:
-      file_path: chemistry_agent.py
-      method: analyze_compound
+      file_path: support_agent.py
+      method: analyze_customer_issues
       input:
         # String inputs
         - name: user_query
           type: string
-          value: "How stable is this compound in ethanol?"
+          value: "What are the main issues customers are reporting?"
         
         # Dictionary inputs
-        - name: experimental_conditions
+        - name: customer_data
           type: dict
           value:
-            temperature: 298.15
-            pressure: 101325
-            solvent: "ethanol"
-            pH: 7.0
+            customer_id: "CUST123"
+            product: "Premium Widget"
+            subscription_tier: "Enterprise"
+            support_tickets: 3
+            satisfaction_score: 2.5
         
         # Inline object inputs (recommended)
-        - name: chemist_feedback
+        - name: customer_feedback
           type: inline_object
-          class_path: "input_types.ChemistFeedback"
+          class_path: "input_types.CustomerFeedback"
           attributes:
-            text: "Too reactive under current conditions"
-            tags: ["solubility", "stability", "safety"]
-            confidence: 0.95
-            source: "lab_analysis"
+            text: "Product is too slow and crashes frequently"
+            tags: ["performance", "stability", "frustration"]
+            priority: "high"
+            source: "support_ticket"
     
     evaluation:
       type: llm
@@ -584,56 +585,56 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 @dataclass
-class ChemistFeedback:
+class CustomerFeedback:
     text: str
     tags: List[str]
-    confidence: Optional[float] = None
+    priority: Optional[str] = None
     source: Optional[str] = None
     
     def to_dict(self) -> dict:
         return {
             'text': self.text,
             'tags': self.tags,
-            'confidence': self.confidence,
+            'priority': self.priority,
             'source': self.source
         }
 
-class ChemistryAgent:
+class SupportAgent:
     def __init__(self):
         # Variables that will be tracked for evaluation
-        self.stability_analysis = ""
-        self.safety_recommendations = ""
+        self.issue_analysis = ""
+        self.improvement_recommendations = ""
         self.analysis_results = {}
     
-    def analyze_compound(self, *inputs):
-        """Analyze compound with multiple inputs."""
+    def analyze_customer_issues(self, *inputs):
+        """Analyze customer issues with multiple inputs."""
         # Process different input types
         user_query = None
-        experimental_conditions = None
-        chemist_feedback = None
+        customer_data = None
+        customer_feedback = None
         
         for input_item in inputs:
             if isinstance(input_item, str):
                 user_query = input_item
             elif isinstance(input_item, dict):
-                experimental_conditions = input_item
-            elif hasattr(input_item, 'text'):  # ChemistFeedback object
-                chemist_feedback = input_item
+                customer_data = input_item
+            elif hasattr(input_item, 'text'):  # CustomerFeedback object
+                customer_feedback = input_item
         
         # Set variables that will be tracked for evaluation
-        self.stability_analysis = "The compound shows moderate instability in ethanol due to its polar nature."
-        self.safety_recommendations = "Use appropriate PPE and work in a fume hood. Consider alternative solvents."
+        self.issue_analysis = "Customers are experiencing performance issues and system crashes, leading to low satisfaction scores."
+        self.improvement_recommendations = "Implement performance optimization and add crash recovery mechanisms. Consider upgrading server infrastructure."
         self.analysis_results = {
-            "stability_score": 0.3,
-            "risk_factors": ["polar solvent", "temperature sensitivity"],
-            "recommendations": ["use less polar solvent", "maintain low temperature"]
+            "satisfaction_score": 2.5,
+            "main_issues": ["performance", "stability"],
+            "recommendations": ["optimize code", "add monitoring", "improve error handling"]
         }
         
         # Return structured result
         return {
             "status": "completed",
-            "analysis": self.stability_analysis,
-            "recommendations": self.safety_recommendations,
+            "analysis": self.issue_analysis,
+            "recommendations": self.improvement_recommendations,
             "details": self.analysis_results
         }
 ```
