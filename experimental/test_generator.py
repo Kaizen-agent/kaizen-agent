@@ -415,7 +415,7 @@ Requirements:
        steps:
          - name: "Step Name"
            input:
-             file_path: "{os.path.join('test_agent', '{agent_name}', '{agent_name}.py')}"
+             file_path: "{os.path.join('examples', '{agent_name}', '{agent_name}.py')}"
              region: "{'{agent_name}'}"
              method: "{'{method_name}'}"
              input: "hey, can we meet tomorrow to discuss the project?"
@@ -461,7 +461,7 @@ Requirements:
        steps:
          - name: "Step Name"
            input:
-             file_path: "{os.path.join('test_agent', '{agent_name}', '{agent_name}.py')}"
+             file_path: "{os.path.join('examples', '{agent_name}', '{agent_name}.py')}"
              region: "{'{agent_name}'}"
              method: "{'{method_name}'}"
              input: "hey, can we meet tomorrow to discuss the project?"
