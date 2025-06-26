@@ -11,7 +11,7 @@ Kaizen Agent is an AI debugging engineer that continuously tests, analyzes, and 
 - [How It Works](#how-it-works)
 - [Installation](#installation)
 - [Environment Setup](#environment-setup)
-- [Quick Start](#quick-start)
+- [Examples](#examples)
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Multiple Inputs & Outputs](#multiple-inputs--outputs)
@@ -116,7 +116,7 @@ Before using Kaizen Agent, you need to set up your environment variables for API
 
 For detailed setup instructions, see the [Environment Setup Guide](docs/environment-setup.md).
 
-## Quick Start
+## Examples
 
 Kaizen Agent comes with two example agents to help you get started quickly. These examples demonstrate how to test AI agents and LLM applications.
 
@@ -126,7 +126,7 @@ The summarizer agent demonstrates basic text summarization functionality:
 
 1. **Navigate to the example:**
    ```bash
-   cd test_agent/summarizer_agent
+   cd examples/summarizer_agent
    ```
 
 2. **Set up your environment:**
@@ -147,7 +147,7 @@ The email agent demonstrates email improvement functionality:
 
 1. **Navigate to the example:**
    ```bash
-   cd test_agent/email_agent
+   cd examples/email_agent
    ```
 
 2. **Set up your environment:**

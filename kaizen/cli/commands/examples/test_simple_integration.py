@@ -20,7 +20,7 @@ def test_simple_dependency_import():
     manager = DependencyManager()
     
     # Test importing the referenced files from the test configuration
-    config_path = Path("../../test_agent/summarizer_agent/test_config.yaml")
+    config_path = Path("../../examples/summarizer_agent/test_config.yaml")
     referenced_files = ["prompt.py", "utils.py"]
     
     print("Testing dependency import for summarizer agent...")
