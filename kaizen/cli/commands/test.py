@@ -380,6 +380,7 @@ def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) 
 @click.option('--test-github-access', is_flag=True, help='Test GitHub access and permissions before running tests')
 @click.option('--save-logs', is_flag=True, help='Save detailed test logs in JSON format for later analysis')
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed debug information and verbose logging')
+@click.option('--no-confirm', is_flag=True, help='Skip confirmation prompts (useful for non-interactive use)')
 def test_all(
     config: str,
     auto_fix: bool,
@@ -389,7 +390,8 @@ def test_all(
     pr_strategy: str,
     test_github_access: bool,
     save_logs: bool,
-    verbose: bool
+    verbose: bool,
+    no_confirm: bool
 ) -> None:
     """Run all tests specified in the configuration file.
     
@@ -401,6 +403,14 @@ def test_all(
     information. Use --verbose to see detailed debug information and step-by-step
     execution logs.
     
+    The command includes several confirmation steps to ensure user awareness:
+    1. Before auto-fix: Confirms that code files will be modified
+    2. Before PR creation: Confirms that a pull request will be created
+    3. After test failure: Confirms auto-fix should proceed (if enabled)
+    4. After auto-fix: Confirms PR creation should proceed (if both enabled)
+    
+    Use --no-confirm to skip all confirmation prompts (useful for CI/CD pipelines).
+    
     Args:
         config: Path to the test configuration file
         auto_fix: Whether to automatically fix failing tests
@@ -411,6 +421,7 @@ def test_all(
         test_github_access: Whether to test GitHub access and permissions before running tests
         save_logs: Whether to save detailed test logs in JSON format for later analysis
         verbose: Whether to show detailed debug information and verbose logging
+        no_confirm: Whether to skip confirmation prompts (useful for non-interactive use)
         
     When --save-logs is enabled, the following files are created in the test-logs/ directory:
     - {test_name}_{timestamp}_detailed_logs.json: Complete test results including inputs, outputs, 
@@ -460,6 +471,52 @@ def test_all(
         config = config_result.value
         logger.print_success(f"Configuration loaded: {config.name}")
         
+        # Confirm auto-fix operation if enabled
+        if auto_fix:
+            logger.print("\n[bold yellow]⚠ Auto-fix Warning[/bold yellow]")
+            logger.print("Auto-fix will attempt to modify your code files to fix failing tests.")
+            logger.print("This may change your existing code and could potentially introduce new issues.")
+            logger.print(f"Maximum retry attempts: {max_retries}")
+            logger.print("\n[bold]Files that may be modified:[/bold]")
+            
+            # Show files that will be tested/modified
+            if hasattr(config, 'files_to_fix') and config.files_to_fix:
+                for file_path in config.files_to_fix:
+                    logger.print(f"  • {file_path}")
+            else:
+                logger.print("  • Files specified in test configuration")
+            
+            if no_confirm:
+                logger.print_success("Auto-fix confirmed (--no-confirm flag used)")
+            elif not click.confirm("\n[bold]Do you want to proceed with auto-fix?[/bold]"):
+                logger.print("[dim]Auto-fix cancelled by user[/dim]")
+                auto_fix = False
+                # Update config to disable auto-fix
+                config.auto_fix = False
+            else:
+                logger.print_success("Auto-fix confirmed - proceeding with automatic fixes")
+        
+        # Confirm PR creation if enabled
+        if create_pr:
+            logger.print("\n[bold yellow]⚠ Pull Request Creation Warning[/bold yellow]")
+            logger.print("This will create a pull request on GitHub with the fixes applied.")
+            logger.print(f"Base branch: {base_branch}")
+            logger.print(f"PR strategy: {pr_strategy}")
+            logger.print("\n[bold]What will happen:[/bold]")
+            logger.print("  • A new branch will be created with your fixes")
+            logger.print("  • A pull request will be opened against the base branch")
+            logger.print("  • You'll need to review and merge the PR manually")
+            
+            if no_confirm:
+                logger.print_success("PR creation confirmed (--no-confirm flag used)")
+            elif not click.confirm("\n[bold]Do you want to proceed with PR creation?[/bold]"):
+                logger.print("[dim]PR creation cancelled by user[/dim]")
+                create_pr = False
+                # Update config to disable PR creation
+                config.create_pr = False
+            else:
+                logger.print_success("PR creation confirmed - will create pull request after fixes")
+        
         # Load environment variables before testing GitHub access
         if test_github_access or create_pr:
             from ..utils.env_setup import load_environment_variables
@@ -490,7 +547,7 @@ def test_all(
                 logger.print("   kaizen setup check-env --features github")
                 if create_pr:
                     logger.print("\n[bold yellow]Warning: PR creation will fail without GITHUB_TOKEN[/bold yellow]")
-                    if not click.confirm("Continue with test execution?"):
+                    if not no_confirm and not click.confirm("Continue with test execution?"):
                         return
                 else:
                     return
@@ -551,18 +608,18 @@ def test_all(
                     if create_pr:
                         if access_result['overall_status'] == 'limited_branch_access_private':
                             logger.print("\n[bold yellow]Note: Limited branch access detected for private repository. PR creation will be attempted but may fail.[/bold yellow]")
-                            if not click.confirm("Continue with test execution?"):
+                            if not no_confirm and not click.confirm("Continue with test execution?"):
                                 return
                         else:
                             logger.print("\n[bold yellow]Warning: PR creation may fail due to access issues.[/bold yellow]")
-                            if not click.confirm("Continue with test execution?"):
+                            if not no_confirm and not click.confirm("Continue with test execution?"):
                                 return
                             
             except Exception as e:
                 logger.print_error(f"GitHub access test failed: {str(e)}")
                 if create_pr:
                     logger.print("[bold yellow]Warning: PR creation may fail due to access issues.[/bold yellow]")
-                    if not click.confirm("Continue with test execution?"):
+                    if not no_confirm and not click.confirm("Continue with test execution?"):
                         return
         
         # Execute tests
@@ -587,6 +644,31 @@ def test_all(
             logger.print_error(f"Tests failed! ({test_result_value.name})")
             if not verbose:
                 logger.print("[dim]Run with --verbose to see detailed test results[/dim]")
+            
+            # If auto-fix is enabled and tests failed, ask for confirmation before proceeding
+            if auto_fix and config.auto_fix:
+                logger.print("\n[bold yellow]⚠ Auto-fix Confirmation[/bold yellow]")
+                logger.print("Tests have failed. Auto-fix will now attempt to fix the failing tests.")
+                logger.print("This will modify your code files and may introduce changes.")
+                
+                # Show a brief summary of what failed (if available)
+                if test_result_value.unified_result:
+                    failed_tests = [tc for tc in test_result_value.unified_result.test_cases if tc.status.value in ['failed', 'error']]
+                    if failed_tests:
+                        logger.print(f"\n[bold]Failed test cases ({len(failed_tests)}):[/bold]")
+                        for tc in failed_tests[:3]:  # Show first 3 failed tests
+                            logger.print(f"  • {tc.name} ({tc.region})")
+                        if len(failed_tests) > 3:
+                            logger.print(f"  • ... and {len(failed_tests) - 3} more")
+                
+                if no_confirm:
+                    logger.print_success("Auto-fix confirmed (--no-confirm flag used)")
+                elif not click.confirm("\n[bold]Do you want to proceed with auto-fix?[/bold]"):
+                    logger.print("[dim]Auto-fix cancelled by user after seeing test results[/dim]")
+                    # Update config to disable auto-fix
+                    config.auto_fix = False
+                else:
+                    logger.print_success("Proceeding with auto-fix to resolve failing tests")
         
         # Save detailed logs if requested
         if save_logs:
@@ -599,6 +681,41 @@ def test_all(
             
             # Display test summary
             _display_test_summary(logger.console, test_result_value, rich_formatter)
+        
+        # If auto-fix was performed and PR creation is enabled, ask for confirmation before creating PR
+        if (auto_fix and config.auto_fix and create_pr and config.create_pr and 
+            test_result_value.test_attempts and len(test_result_value.test_attempts) > 0):
+            
+            logger.print("\n[bold yellow]⚠ Pull Request Creation Confirmation[/bold yellow]")
+            logger.print("Auto-fix has been completed. A pull request will now be created with the fixes.")
+            logger.print(f"Base branch: {base_branch}")
+            logger.print(f"PR strategy: {pr_strategy}")
+            
+            # Show auto-fix summary
+            if test_result_value.test_attempts:
+                logger.print(f"\n[bold]Auto-fix summary:[/bold]")
+                logger.print(f"  • Attempts made: {len(test_result_value.test_attempts)}")
+                
+                # Count successful fixes
+                successful_fixes = sum(1 for attempt in test_result_value.test_attempts 
+                                     if attempt.get('status') == 'success')
+                logger.print(f"  • Successful fixes: {successful_fixes}")
+                
+                # Show what was fixed
+                if test_result_value.unified_result:
+                    fixed_tests = [tc for tc in test_result_value.unified_result.test_cases 
+                                 if tc.status.value == 'passed']
+                    if fixed_tests:
+                        logger.print(f"  • Tests now passing: {len(fixed_tests)}")
+            
+            if no_confirm:
+                logger.print_success("PR creation confirmed (--no-confirm flag used)")
+            elif not click.confirm("\n[bold]Do you want to create a pull request with these fixes?[/bold]"):
+                logger.print("[dim]PR creation cancelled by user after auto-fix[/dim]")
+                # Update config to disable PR creation
+                config.create_pr = False
+            else:
+                logger.print_success("Proceeding with pull request creation")
         
     except Exception as e:
         _handle_error(e, "Unexpected error", logger)

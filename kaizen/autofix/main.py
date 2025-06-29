@@ -637,16 +637,18 @@ class FixConfig:
     pr_strategy: PRStrategy = PRStrategy.ALL_PASSING
     base_branch: str = 'main'
     auto_fix: bool = True
+    preserve_partial_improvements: bool = True  # New option for onboarding scenarios
     
     @classmethod
     def from_dict(cls, config: Dict) -> 'FixConfig':
         """Create FixConfig from dictionary."""
         return cls(
-            max_retries=config['max_retries'],
-            create_pr=config['create_pr'],
-            pr_strategy=PRStrategy[config['pr_strategy']],
-            base_branch=config['base_branch'],
-            auto_fix=config['auto_fix']
+            max_retries=config.get('max_retries', 1),
+            create_pr=config.get('create_pr', False),
+            pr_strategy=PRStrategy[config.get('pr_strategy', 'ALL_PASSING')],
+            base_branch=config.get('base_branch', 'main'),
+            auto_fix=config.get('auto_fix', True),
+            preserve_partial_improvements=config.get('preserve_partial_improvements', True)
         )
 
 class FixResultDict(TypedDict):
@@ -1567,55 +1569,61 @@ class AutoFix:
     
     def fix_code(self, file_path: str, test_execution_result=None, 
                 config: Optional['TestConfiguration'] = None, files_to_fix: List[str] = None) -> Dict:
-        """Fix code in the given files with retry logic.
+        """Fix code based on test failures.
         
         Args:
-            file_path: Main file path (used for test running)
-            test_execution_result: TestExecutionResult object containing test results
+            file_path: Path to the main test file
+            test_execution_result: Test execution result from previous run
             config: Test configuration
             files_to_fix: List of files to fix
-        
+            
         Returns:
-            Dict containing fix results
+            Dictionary containing fix results
         """
         try:
-            logger.info("Starting code fix", extra={
-                'file_path': file_path,
-                'files_to_fix': files_to_fix,
-                'pr_strategy': self.config.pr_strategy.name
-            })
-            
-            if not files_to_fix:
-                return {'status': 'error', 'error': 'No files to fix provided'}
+            logger.info("AutoFix initialized")
+            logger.info("Starting code fix")
             
             # Initialize components
             state_manager = CodeStateManager(set(files_to_fix))
-            logger.info(f"State manager: {state_manager}")
             attempt_tracker = FixAttemptTracker(self.config.max_retries)
-            logger.info(f"Attempt tracker: {attempt_tracker}")
-            
-            # Initialize test execution history
+            learning_manager = LearningManager()
             test_history = TestExecutionHistory()
             
-            # Initialize learning manager with test execution result
-            learning_manager = LearningManager()
+            logger.info(f"State manager: {state_manager}")
+            logger.info(f"Attempt tracker: {attempt_tracker}")
+            
+            # Set baseline failures for learning
             if test_execution_result:
-                # Extract failed tests in legacy format for learning manager compatibility
-                failure_data = get_failed_tests_dict_from_unified(test_execution_result)
-                learning_manager.set_baseline_failures(failure_data)
-                # Add baseline result to history
+                baseline_failures = self._extract_failure_data_from_unified(test_execution_result)
+                learning_manager.set_baseline_failures(baseline_failures)
                 test_history.add_baseline_result(test_execution_result)
+                logger.info("Set baseline failures for learning")
+            
             logger.info("Learning manager initialized")
             
+            # Check if Git is available
+            git_available = self._check_git_availability()
+            original_branch = None
+            branch_name = None
+            
+            if git_available:
+                try:
+                    # Store the original branch
+                    original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+                    logger.info("Retrieved original branch", extra={'branch': original_branch})
+                    
+                    # Initialize branch_name with a default value
+                    branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                    subprocess.run(["git", "checkout", "-b", branch_name], check=True)
+                    logger.info(f"Created and switched to branch: {branch_name}")
+                except Exception as e:
+                    logger.warning(f"Git operations failed, continuing without Git: {str(e)}")
+                    git_available = False
+            else:
+                logger.info("Git not available, using file-based operations")
+            
             results = {'status': 'pending', 'changes': {}, 'processed_files': []}
-            
-            # Store the original branch
-            original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
-            logger.info("Retrieved original branch", extra={'branch': original_branch})
-            
-            # Initialize branch_name with a default value
-            branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-            subprocess.run(["git", "checkout", "-b", branch_name], check=True)
             
             # Use provided test_execution_result as baseline, otherwise run baseline test
             if test_execution_result is not None:
@@ -1736,8 +1744,8 @@ class AutoFix:
                 'patterns_learned': len(learning_summary['successful_patterns'])
             })
             
-            # Create PR if needed
-            if self.config.create_pr:
+            # Create PR if needed and Git is available
+            if self.config.create_pr and git_available:
                 logger.info(f"start creating pr")
                 try:
                     best_attempt = attempt_tracker.get_best_attempt()
@@ -1779,28 +1787,91 @@ class AutoFix:
                         }
                     else:
                         logger.info("PR creation failed for other reasons, reverting changes")
-                        subprocess.run(["git", "checkout", original_branch], check=True)
+                        if git_available and original_branch:
+                            subprocess.run(["git", "checkout", original_branch], check=True)
                         raise PRCreationError(f"Failed to create PR: {str(e)}")
+            elif self.config.create_pr and not git_available:
+                logger.warning("PR creation requested but Git is not available. Changes were made but no PR was created.")
+                return {
+                    'status': 'partial_success',
+                    'message': 'Code changes were made successfully, but PR creation failed because Git is not available in this environment.',
+                    'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                    'changes_made': True,
+                    'learning_summary': learning_summary,
+                    'test_history': test_history.to_legacy_format()
+                }
             
+            # Check if any improvements were made, even if not all tests pass
+            best_attempt = attempt_tracker.get_best_attempt()
+            has_any_improvements = False
             
-            logger.info("No tests were fixed, reverting changes")
-            subprocess.run(["git", "checkout", original_branch], check=True)
-            return {
-                'status': 'success' if attempt_tracker.get_successful_attempt() else 'failed',
-                'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
-                'learning_summary': learning_summary,
-                'test_history': test_history.to_legacy_format()
-            }
+            if best_attempt and best_attempt.test_execution_result:
+                # Compare with baseline to see if there were any improvements
+                if test_execution_result:
+                    improvement_summary = self._get_improvement_summary_from_unified(
+                        test_execution_result, best_attempt.test_execution_result
+                    )
+                    has_any_improvements = improvement_summary['has_improvement']
+                else:
+                    # If no baseline, check if any tests passed
+                    has_any_improvements = best_attempt.test_execution_result.get_failure_count() < best_attempt.test_execution_result.summary.total_tests
+            
+            # Determine if we should preserve changes based on improvements and configuration
+            should_preserve_changes = (
+                has_any_improvements or 
+                best_attempt.status == FixStatus.SUCCESS or
+                (len(results['changes']) > 0 and self.config.preserve_partial_improvements)  # Use config option
+            )
+            
+            logger.info("Change preservation decision", extra={
+                'has_any_improvements': has_any_improvements,
+                'best_attempt_success': best_attempt.status == FixStatus.SUCCESS if best_attempt else False,
+                'changes_made': len(results['changes']) > 0,
+                'preserve_partial_improvements': self.config.preserve_partial_improvements,
+                'should_preserve_changes': should_preserve_changes
+            })
+            
+            if should_preserve_changes:
+                logger.info("Preserving changes due to improvements or successful fixes")
+                return {
+                    'status': 'success' if best_attempt and best_attempt.status == FixStatus.SUCCESS else 'improved',
+                    'message': 'Code changes were applied successfully. Some improvements were made even if not all tests pass.',
+                    'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                    'changes_made': True,
+                    'learning_summary': learning_summary,
+                    'test_history': test_history.to_legacy_format()
+                }
+            else:
+                # Only revert if no improvements were made at all
+                logger.info("No improvements were made, reverting changes")
+                if git_available and original_branch:
+                    subprocess.run(["git", "checkout", original_branch], check=True)
+                else:
+                    # If Git is not available, restore files using state manager
+                    state_manager.restore_files()
+                    logger.info("Restored files using state manager (Git not available)")
+                
+                return {
+                    'status': 'failed',
+                    'message': 'No improvements were made to the code. All changes have been reverted.',
+                    'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                    'changes_made': False,
+                    'learning_summary': learning_summary,
+                    'test_history': test_history.to_legacy_format()
+                }
                 
         except Exception as e:
             logger.error(f"Error in fix_code: {str(e)}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
             
-            # Try to restore original branch
+            # Try to restore original branch or files
             try:
-                subprocess.run(["git", "checkout", original_branch], check=True)
+                if 'git_available' in locals() and git_available and 'original_branch' in locals() and original_branch:
+                    subprocess.run(["git", "checkout", original_branch], check=True)
+                elif 'state_manager' in locals():
+                    state_manager.restore_files()
             except Exception as restore_error:
-                logger.error(f"Failed to restore original branch: {str(restore_error)}")
+                logger.error(f"Failed to restore original state: {str(restore_error)}")
             
             return {
                 'status': 'error',
@@ -1808,16 +1879,10 @@ class AutoFix:
                 'attempts': [vars(attempt) for attempt in attempt_tracker.attempts] if 'attempt_tracker' in locals() else [],
                 'test_history': test_history.to_legacy_format() if 'test_history' in locals() else None
             }
-        finally:
-            # Cleanup
-            if 'state_manager' in locals():
-                state_manager.cleanup()
-    
+
     def _run_tests_and_get_result(self, path: Path):
         """Run tests and return unified TestExecutionResult."""
-        logger.info(f"Running tests for {path}")
-        test_result = self.test_runner.run_tests(path)
-        return test_result
+        return self.test_runner.run_tests(path)
     
     def _determine_attempt_status_from_unified(self, test_execution_result) -> FixStatus:
         """Determine attempt status from unified TestExecutionResult."""
@@ -1912,4 +1977,27 @@ class AutoFix:
                 return str(evaluation)
             except Exception as e2:
                 logger.warning(f"Failed to convert evaluation to string: {str(e2)}")
-                return "Evaluation data unavailable" 
+                return "Evaluation data unavailable"
+
+    def _check_git_availability(self) -> bool:
+        """Check if Git is available in the current environment.
+        
+        Returns:
+            True if Git is available, False otherwise
+        """
+        try:
+            subprocess.run(["git", "--version"], capture_output=True, check=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
+    
+    def _extract_failure_data_from_unified(self, test_execution_result) -> Dict:
+        """Extract failure data from unified test execution result for learning manager compatibility.
+        
+        Args:
+            test_execution_result: Unified TestExecutionResult object
+            
+        Returns:
+            Dictionary containing failure data in legacy format
+        """
+        return get_failed_tests_dict_from_unified(test_execution_result) 

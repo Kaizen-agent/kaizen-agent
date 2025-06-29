@@ -82,24 +82,29 @@ class ConfigurationManager:
                 return parse_result
             
             # Create configuration object with all fields at once
+            config = TestConfiguration.from_dict(config_data, config_path)
+            
+            # Override CLI-specific settings
             config = TestConfiguration(
-                name=config_data['name'],
-                file_path=Path(config_data['file_path']),
-                config_path=config_path,
+                name=config.name,
+                file_path=config.file_path,
+                config_path=config.config_path,
+                agent_type=config.agent_type,
+                description=config.description,
+                metadata=config.metadata,
+                evaluation=config.evaluation,
+                regions=config.regions,
+                agent=config.agent,  # Include the agent field
+                steps=config.steps,
+                settings=config.settings,
                 auto_fix=auto_fix,
                 create_pr=create_pr,
                 max_retries=max_retries,
                 base_branch=base_branch,
                 pr_strategy=PRStrategy.from_str(pr_strategy),
-                description=config_data.get('description'),
-                agent_type=config_data.get('agent_type'),
-                regions=config_data.get('regions', []),
-                steps=parse_result.value.steps if parse_result.value else [],
-                metadata=parse_result.value.metadata if parse_result.value else None,
-                evaluation=parse_result.value.evaluation if parse_result.value else None,
-                dependencies=config_data.get('dependencies', []),
-                referenced_files=config_data.get('referenced_files', []),
-                files_to_fix=parse_result.value.files_to_fix if parse_result.value else []
+                dependencies=config.dependencies,
+                referenced_files=config.referenced_files,
+                files_to_fix=config.files_to_fix
             )
             
             logger.info(f"Created configuration object: {config}")

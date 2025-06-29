@@ -1,0 +1,68 @@
+name: "Agent Entry Point Example"
+description: "Example test configuration using the new agent entry point system without markers"
+file_path: "example_agent.py"
+agent_type: "dynamic_region"
+
+# New agent entry point configuration (replaces regions and markers)
+agent:
+  module: "example_agent"  # Module name (without .py extension)
+  class: "ExampleAgent"    # Class name to instantiate
+  method: "process_input"  # Method name to call
+
+# Test steps (no need to specify region or method in steps)
+steps:
+  - name: "Basic Input Processing"
+    description: "Test basic input processing functionality"
+    input:
+      input: "Hello, world!"
+    evaluation:
+      type: llm
+
+  - name: "Complex Input Handling"
+    description: "Test handling of complex input data"
+    input:
+      input:
+        - name: user_query
+          type: string
+          value: "Process this data for me"
+        - name: data
+          type: dict
+          value:
+            items: [1, 2, 3, 4, 5]
+            operation: "sum"
+    evaluation:
+      type: llm
+
+# Evaluation criteria
+evaluation:
+  evaluation_targets:
+    - name: processed_result
+      source: variable
+      criteria: "Should contain the processed input data"
+      description: "Result should reflect the input processing"
+      weight: 1.0
+
+    - name: return
+      source: return
+      criteria: "Should return a dictionary with 'status' and 'result' keys"
+      description: "Return value should have expected structure"
+      weight: 1.0
+
+# Auto-fix configuration
+auto_fix: true
+max_retries: 2
+files_to_fix:
+  - "example_agent.py"
+
+# Optional: GitHub integration
+create_pr: false
+base_branch: "main"
+pr_strategy: "ANY_IMPROVEMENT"
+
+# Dependencies (if needed)
+dependencies:
+  - "requests>=2.25.0"
+
+# Referenced files (if needed)
+referenced_files:
+  - "utils/helper.py" 

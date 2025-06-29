@@ -18,7 +18,7 @@ except ImportError:
     DOTENV_AVAILABLE = False
 
 from .test_case import TestCase, TestStatus, LLMEvaluator, AssertionRunner
-from .code_region import CodeRegionExtractor, CodeRegionExecutor
+from .code_region import CodeRegionExtractor, CodeRegionExecutor, RegionInfo, RegionType, AgentEntryPoint
 from .input_parser import InputParser, InputParsingError
 
 # Configure logging
@@ -173,23 +173,74 @@ class TestRunner:
             if self.verbose:
                 logger.debug(f"DEBUG: TestCase input: {test_case_obj.input}")
             
-            # Determine region name: use input['region'] if present, else first from top-level 'regions'
-            region_name = test_case_obj.input.get('region')
-            if not region_name:
-                regions = self.test_config.get('regions', [])
-                if not regions:
-                    raise ValueError("No region specified in test step or top-level 'regions' field.")
-                region_name = regions[0]
-                logger.info(f"No region specified in test step; using first region from top-level: {region_name}")
+            # Check if we have agent entry point configuration (new system)
+            agent_entry_point_dict = self.test_config.get('agent')
+            if agent_entry_point_dict:
+                # Convert dictionary to AgentEntryPoint object
+                agent_entry_point = AgentEntryPoint(
+                    module=agent_entry_point_dict['module'],
+                    class_name=agent_entry_point_dict.get('class'),
+                    method=agent_entry_point_dict.get('method'),
+                    fallback_to_function=agent_entry_point_dict.get('fallback_to_function', True)
+                )
+                
+                # Use the new agent entry point system
+                if self.verbose:
+                    logger.debug(f"DEBUG: Using agent entry point system: {agent_entry_point}")
+                
+                # Validate the entry point
+                if not self.code_region_extractor.validate_entry_point(agent_entry_point, test_file_path):
+                    raise ValueError(f"Invalid agent entry point: {agent_entry_point}")
+                
+                # Extract region using entry point
+                region_info = self.code_region_extractor.extract_region_by_entry_point(
+                    test_file_path, 
+                    agent_entry_point
+                )
+                region_name = f"{agent_entry_point.module}.{agent_entry_point.class_name or agent_entry_point.method}"
             
-            if self.verbose:
-                logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
+            else:
+                # Use the legacy marker-based system
+                if self.verbose:
+                    logger.debug(f"DEBUG: Using legacy marker-based system")
+                
+                # Determine region name: use input['region'] if present, else first from top-level 'regions'
+                region_name = test_case_obj.input.get('region')
+                if not region_name:
+                    regions = self.test_config.get('regions', [])
+                    if not regions:
+                        if agent_entry_point_dict:
+                            # Use agent entry point logic (already handled above)
+                            pass  # Do nothing, agent entry point logic is above
+                        else:
+                            # No agent entry point, fallback to method in step input
+                            method_name = test_case_obj.input.get('method')
+                            if not method_name:
+                                raise ValueError("No method specified in test step and no regions configured")
+                            if self.verbose:
+                                logger.debug(f"DEBUG: Extracting function '{method_name}' from test file")
+                            region_info = self.code_region_extractor.extract_region(
+                                test_file_path, 
+                                method_name
+                            )
+                            region_name = method_name
+                    else:
+                        region_name = regions[0]
+                        logger.info(f"No region specified in test step; using first region from top-level: {region_name}")
+                        if self.verbose:
+                            logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
+                        region_info = self.code_region_extractor.extract_region(
+                            test_file_path, 
+                            region_name
+                        )
+                else:
+                    if self.verbose:
+                        logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
+                    region_info = self.code_region_extractor.extract_region(
+                        test_file_path, 
+                        region_name
+                    )
             
-            # Extract and analyze the code region
-            region_info = self.code_region_extractor.extract_region(
-                test_file_path, 
-                region_name
-            )
             if self.verbose:
                 logger.debug(f"DEBUG: Region extraction completed. Region info: {region_info}")
             
@@ -200,8 +251,10 @@ class TestRunner:
             # Parse input data using the new input parser
             input_data = test_case_obj.input.get('input')
             
-            # Extract method name from test case input
-            method_name = test_case_obj.input.get('method')
+            # Extract method name from test case input (only for legacy system)
+            method_name = None
+            if not agent_entry_point_dict:
+                method_name = test_case_obj.input.get('method')
             
             # DEBUG: Print the input data before parsing
             if self.verbose:
@@ -285,7 +338,8 @@ class TestRunner:
                     'region_info': {
                         'type': region_info.type.value,
                         'name': region_info.name,
-                        'methods': region_info.class_methods
+                        'methods': region_info.class_methods,
+                        'entry_point': agent_entry_point_dict
                     }
                 },
                 timestamp=datetime.now()

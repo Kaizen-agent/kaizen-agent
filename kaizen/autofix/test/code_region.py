@@ -153,6 +153,21 @@ class ModuleInfo:
     dependencies: FrozenSet[str] = frozenset()
 
 @dataclass
+class AgentEntryPoint:
+    """Configuration for agent entry point without markers.
+    
+    Attributes:
+        module: Module path (e.g., 'path.to.module')
+        class_name: Class name to instantiate (optional)
+        method: Method name to call (optional)
+        fallback_to_function: Whether to fallback to function if class/method not found
+    """
+    module: str
+    class_name: Optional[str] = None
+    method: Optional[str] = None
+    fallback_to_function: bool = True
+
+@dataclass
 class RegionInfo:
     """Information about a code region.
     
@@ -166,6 +181,7 @@ class RegionInfo:
         dependencies: Set of module dependencies
         class_methods: Optional list of class methods
         file_path: Optional path to the source file
+        entry_point: Optional agent entry point configuration
     """
     type: RegionType
     name: str
@@ -176,6 +192,7 @@ class RegionInfo:
     dependencies: FrozenSet[ModuleInfo]
     class_methods: Optional[List[str]] = None
     file_path: Optional[Path] = None
+    entry_point: Optional[AgentEntryPoint] = None
 
 @dataclass
 class ImportError:
@@ -1354,6 +1371,162 @@ class CodeRegionExtractor:
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise ValueError(f"Failed to determine region type: {str(e)}")
 
+    def extract_region_by_entry_point(self, file_path: Path, entry_point: AgentEntryPoint) -> RegionInfo:
+        """Extract a code region using agent entry point configuration instead of markers.
+        
+        Args:
+            file_path: Path to the file containing the agent
+            entry_point: Agent entry point configuration
+            
+        Returns:
+            RegionInfo object with the extracted region
+            
+        Raises:
+            RegionExtractionError: If region extraction fails
+            ImportError: If module/class/method cannot be imported
+        """
+        logger.debug(f"Extracting region using entry point: {entry_point}")
+        try:
+            # Read the entire file content
+            with open(file_path, 'r') as f:
+                content = f.read()
+            
+            # Extract imports from the entire file
+            import_lines = []
+            for line in content.split('\n'):
+                line = line.strip()
+                if line.startswith(('import ', 'from ')) and not line.startswith('#'):
+                    if line.startswith('from .'):
+                        logger.debug(f"Skipping relative import: {line}")
+                        continue
+                    import_lines.append(line)
+            
+            # Use the entire file content as the region
+            code = content
+            if import_lines:
+                logger.debug(f"Found {len(import_lines)} import lines in file")
+            
+            # Analyze the region to determine type and structure
+            region_info = self._analyze_region(code, entry_point.module, file_path)
+            
+            # Set the entry point configuration
+            region_info.entry_point = entry_point
+            
+            logger.debug(f"Successfully extracted region using entry point: {entry_point}")
+            return region_info
+            
+        except IOError as e:
+            logger.error(f"IOError reading file {file_path}: {str(e)}")
+            raise RegionExtractionError(f"Failed to read file {file_path}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error extracting region with entry point: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise RegionExtractionError(f"Failed to extract region with entry point: {str(e)}")
+
+    def validate_entry_point(self, entry_point: AgentEntryPoint, file_path: Path) -> bool:
+        """Validate that the specified entry point exists and is callable.
+        
+        Args:
+            entry_point: Agent entry point configuration
+            file_path: Path to the file containing the agent
+            
+        Returns:
+            True if entry point is valid, False otherwise
+        """
+        try:
+            # Add the file's directory to Python path temporarily
+            file_dir = str(file_path.parent)
+            if file_dir not in sys.path:
+                sys.path.insert(0, file_dir)
+            
+            try:
+                # Import the module using importlib for better control
+                module_name = entry_point.module
+                if '.' in module_name:
+                    # Handle nested modules
+                    module_parts = module_name.split('.')
+                    base_module = module_parts[0]
+                    
+                    # Try to import the base module
+                    try:
+                        module = importlib.import_module(base_module)
+                    except builtins.ImportError:
+                        logger.error(f"Base module '{base_module}' not found")
+                        return False
+                    
+                    # Navigate to the nested module
+                    for part in module_parts[1:]:
+                        if hasattr(module, part):
+                            module = getattr(module, part)
+                        else:
+                            logger.error(f"Module part '{part}' not found in {module}")
+                            return False
+                else:
+                    # For simple module names, try to import directly
+                    try:
+                        module = importlib.import_module(module_name)
+                    except builtins.ImportError:
+                        # If direct import fails, try to load from file
+                        if file_path.exists():
+                            spec = importlib.util.spec_from_file_location(module_name, file_path)
+                            if spec and spec.loader:
+                                module = importlib.util.module_from_spec(spec)
+                                spec.loader.exec_module(module)
+                            else:
+                                logger.error(f"Could not load module from file: {file_path}")
+                                return False
+                        else:
+                            logger.error(f"Module '{module_name}' not found and file does not exist: {file_path}")
+                            return False
+                
+                # If class is specified, check if it exists
+                if entry_point.class_name:
+                    if not hasattr(module, entry_point.class_name):
+                        logger.error(f"Class '{entry_point.class_name}' not found in module '{module_name}'")
+                        if entry_point.fallback_to_function:
+                            logger.info(f"Falling back to function lookup for '{entry_point.class_name}'")
+                            return hasattr(module, entry_point.class_name)
+                        return False
+                    
+                    class_obj = getattr(module, entry_point.class_name)
+                    
+                    # If method is specified, check if it exists
+                    if entry_point.method:
+                        if not hasattr(class_obj, entry_point.method):
+                            logger.error(f"Method '{entry_point.method}' not found in class '{entry_point.class_name}'")
+                            return False
+                        
+                        method_obj = getattr(class_obj, entry_point.method)
+                        if not callable(method_obj):
+                            logger.error(f"'{entry_point.method}' is not callable in class '{entry_point.class_name}'")
+                            return False
+                
+                # If no class specified but method is, check if it's a function in the module
+                elif entry_point.method:
+                    if not hasattr(module, entry_point.method):
+                        logger.error(f"Function '{entry_point.method}' not found in module '{module_name}'")
+                        return False
+                    
+                    func_obj = getattr(module, entry_point.method)
+                    if not callable(func_obj):
+                        logger.error(f"'{entry_point.method}' is not callable in module '{module_name}'")
+                        return False
+                
+                logger.debug(f"Entry point validation successful: {entry_point}")
+                return True
+                
+            finally:
+                # Clean up: remove the added path
+                if file_dir in sys.path:
+                    sys.path.remove(file_dir)
+                    
+        except builtins.ImportError as e:
+            logger.error(f"Import error validating entry point: {str(e)}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error validating entry point: {str(e)}")
+            return False
+
 class CodeRegionExecutor:
     """Executes code regions with import management and variable tracking."""
     
@@ -1391,7 +1564,13 @@ class CodeRegionExecutor:
         input_data = input_data or []
         
         try:
-            # Create namespace with imports
+            # If entry point is specified, use it for execution
+            if region_info.entry_point:
+                return self._execute_with_entry_point(
+                    region_info, input_data, tracked_variables
+                )
+            
+            # Otherwise use the traditional region-based execution
             with self.import_manager.managed_imports(region_info) as namespace:
                 # Add imported dependencies to namespace
                 namespace.update(self.imported_dependencies)
@@ -1421,7 +1600,157 @@ class CodeRegionExecutor:
                 'error': str(e),
                 'error_details': traceback.format_exc()
             }
-    
+
+    def _execute_with_entry_point(
+        self,
+        region_info: RegionInfo,
+        input_data: List[Any],
+        tracked_variables: Set[str]
+    ) -> Dict[str, Any]:
+        """Execute code using agent entry point configuration.
+        
+        Args:
+            region_info: Region info with entry point configuration
+            input_data: Input data to pass to the method/function
+            tracked_variables: Variables to track during execution
+            
+        Returns:
+            Dictionary containing execution result and tracked values
+        """
+        entry_point = region_info.entry_point
+        if not entry_point:
+            raise ValueError("No entry point specified in region info")
+        
+        try:
+            # Add the file's directory to Python path temporarily
+            file_dir = str(region_info.file_path.parent) if region_info.file_path else str(self.workspace_root)
+            if file_dir not in sys.path:
+                sys.path.insert(0, file_dir)
+            
+            try:
+                # Import the module using importlib for better control
+                module_name = entry_point.module
+                if '.' in module_name:
+                    # Handle nested modules
+                    module_parts = module_name.split('.')
+                    base_module = module_parts[0]
+                    
+                    # Try to import the base module
+                    try:
+                        module = importlib.import_module(base_module)
+                    except builtins.ImportError:
+                        logger.error(f"Base module '{base_module}' not found")
+                        raise
+                    
+                    # Navigate to the nested module
+                    for part in module_parts[1:]:
+                        if hasattr(module, part):
+                            module = getattr(module, part)
+                        else:
+                            logger.error(f"Module part '{part}' not found in {module}")
+                            raise AttributeError(f"Module part '{part}' not found")
+                else:
+                    # For simple module names, try to import directly
+                    try:
+                        module = importlib.import_module(module_name)
+                    except builtins.ImportError:
+                        # If direct import fails, try to load from file
+                        if region_info.file_path and region_info.file_path.exists():
+                            spec = importlib.util.spec_from_file_location(module_name, region_info.file_path)
+                            if spec and spec.loader:
+                                module = importlib.util.module_from_spec(spec)
+                                spec.loader.exec_module(module)
+                            else:
+                                logger.error(f"Could not load module from file: {region_info.file_path}")
+                                raise
+                        else:
+                            logger.error(f"Module '{module_name}' not found and file does not exist: {region_info.file_path}")
+                            raise
+                
+                # Execute with variable tracking
+                with track_variables(tracked_variables) as tracker:
+                    result = None
+                    
+                    # If class is specified, instantiate and call method
+                    if entry_point.class_name:
+                        if not hasattr(module, entry_point.class_name):
+                            if entry_point.fallback_to_function:
+                                # Fallback to function if class not found
+                                if hasattr(module, entry_point.class_name):
+                                    func = getattr(module, entry_point.class_name)
+                                    if callable(func):
+                                        if len(input_data) == 1:
+                                            result = func(input_data[0])
+                                        else:
+                                            result = func(*input_data)
+                                else:
+                                    raise AttributeError(f"Neither class nor function '{entry_point.class_name}' found in module '{module_name}'")
+                            else:
+                                raise AttributeError(f"Class '{entry_point.class_name}' not found in module '{module_name}'")
+                        else:
+                            class_obj = getattr(module, entry_point.class_name)
+                            instance = class_obj()
+                            
+                            # If method is specified, call it
+                            if entry_point.method:
+                                if not hasattr(instance, entry_point.method):
+                                    raise AttributeError(f"Method '{entry_point.method}' not found in class '{entry_point.class_name}'")
+                                
+                                method = getattr(instance, entry_point.method)
+                                if len(input_data) == 1:
+                                    result = method(input_data[0])
+                                else:
+                                    result = method(*input_data)
+                            else:
+                                # If no method specified, try to call the instance directly
+                                if callable(instance):
+                                    if len(input_data) == 1:
+                                        result = instance(input_data[0])
+                                    else:
+                                        result = instance(*input_data)
+                                else:
+                                    raise ValueError(f"Instance of '{entry_point.class_name}' is not callable and no method specified")
+                    
+                    # If no class specified but method is, call it as a function
+                    elif entry_point.method:
+                        if not hasattr(module, entry_point.method):
+                            raise AttributeError(f"Function '{entry_point.method}' not found in module '{module_name}'")
+                        
+                        func = getattr(module, entry_point.method)
+                        if not callable(func):
+                            raise ValueError(f"'{entry_point.method}' is not callable in module '{module_name}'")
+                        
+                        if len(input_data) == 1:
+                            result = func(input_data[0])
+                        else:
+                            result = func(*input_data)
+                    
+                    # If neither class nor method specified, raise error
+                    else:
+                        raise ValueError("Either class_name or method must be specified in entry point")
+                    
+                    # Get tracked values
+                    tracked_values = {}
+                    for var_name in tracked_variables:
+                        value = tracker.get_variable_value(var_name)
+                        if value is not None:
+                            tracked_values[var_name] = value
+                    
+                    return {
+                        'result': result,
+                        'tracked_values': tracked_values,
+                        'tracked_variables': tracked_variables
+                    }
+                    
+            finally:
+                # Clean up: remove the added path
+                if file_dir in sys.path:
+                    sys.path.remove(file_dir)
+                    
+        except Exception as e:
+            logger.error(f"Error executing with entry point {entry_point}: {str(e)}")
+            raise
+
     def _execute_class_region(
         self, 
         region_info: RegionInfo, 
