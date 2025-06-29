@@ -12,6 +12,21 @@ from .evaluation import TestEvaluation
 from .settings import TestSettings
 from .step import TestStep
 
+@dataclass
+class AgentEntryPoint:
+    """Configuration for agent entry point without markers.
+    
+    Attributes:
+        module: Module path (e.g., 'path.to.module')
+        class_name: Class name to instantiate (optional)
+        method: Method name to call (optional)
+        fallback_to_function: Whether to fallback to function if class/method not found
+    """
+    module: str
+    class_name: Optional[str] = None
+    method: Optional[str] = None
+    fallback_to_function: bool = True
+
 @dataclass(frozen=True)
 class TestConfiguration:
     """Test configuration with all required and optional settings.
@@ -24,7 +39,8 @@ class TestConfiguration:
         description: Test description
         metadata: Test metadata
         evaluation: Test evaluation criteria
-        regions: List of regions to test
+        regions: List of regions to test (legacy marker-based)
+        agent: Agent entry point configuration (new marker-free approach)
         steps: List of test steps
         settings: Test settings
         auto_fix: Enable auto-fix
@@ -40,13 +56,14 @@ class TestConfiguration:
     name: str
     file_path: Path
     config_path: Path
-    agent_type: str
     
     # Optional fields
+    agent_type: Optional[str] = None
     description: Optional[str] = None
     metadata: Optional[TestMetadata] = None
     evaluation: Optional[TestEvaluation] = None
     regions: List[str] = field(default_factory=list)
+    agent: Optional[AgentEntryPoint] = None
     steps: List[TestStep] = field(default_factory=list)
     settings: Optional[TestSettings] = None
     auto_fix: bool = False
@@ -81,15 +98,28 @@ class TestConfiguration:
             except ValueError as e:
                 raise ConfigurationError(str(e))
         
+        # Parse agent entry point if present
+        agent_entry_point = None
+        if 'agent' in data:
+            agent_data = data['agent']
+            if isinstance(agent_data, dict):
+                agent_entry_point = AgentEntryPoint(
+                    module=agent_data['module'],
+                    class_name=agent_data.get('class'),
+                    method=agent_data.get('method'),
+                    fallback_to_function=agent_data.get('fallback_to_function', True)
+                )
+        
         return cls(
             name=data['name'],
             file_path=Path(data['file_path']),
             config_path=config_path,
-            agent_type=data.get('agent_type', 'default'),
+            agent_type=data.get('agent_type'),
             description=data.get('description'),
             metadata=TestMetadata.from_dict(data.get('metadata', {})) if 'metadata' in data else None,
             evaluation=TestEvaluation.from_dict(data.get('evaluation', {})) if 'evaluation' in data else None,
             regions=data.get('regions', []),
+            agent=agent_entry_point,
             steps=[TestStep.from_dict(step) for step in data.get('steps', [])],
             settings=TestSettings.from_dict(data.get('settings', {})) if 'settings' in data else None,
             auto_fix=data.get('auto_fix', False),

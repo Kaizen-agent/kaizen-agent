@@ -1,24 +1,9 @@
-# Kaizen Agent - AI Debugging Engineer for AI Agents and LLM Applications
+# Kaizen Agent - AI Debugging Engineer for AI Agents
 
 [![Python Versions](https://img.shields.io/pypi/pyversions/kaizen.svg)](https://pypi.org/project/kaizen/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-Kaizen Agent is an AI debugging engineer that continuously tests, analyzes, and improves your AI agents and LLM applications. It runs multiple tests simultaneously, intelligently analyzes failures, automatically fixes code and prompts, and creates pull requests with improvements - all powered by AI.
-
-## Table of Contents
-
-- [How It Works](#how-it-works)
-- [Installation](#installation)
-- [Environment Setup](#environment-setup)
-- [Examples](#examples)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [Multiple Inputs & Outputs](#multiple-inputs--outputs)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
-- [Support](#support)
+**Test, debug, and improve your AI agents automatically.** Kaizen Agent runs your agents, analyzes failures, and fixes code and prompts using AI.
 
 ## How It Works
 
@@ -35,839 +20,521 @@ Kaizen Agent is an AI debugging engineer that continuously tests, analyzes, and 
 
 Kaizen Agent acts as an AI debugging engineer that continuously tests, analyzes, and improves your AI agents and LLM applications. Here's how it works at a high level:
 
-![Kaizen Agent Architecture](kaizen_agent_architecture.png)
+![Kaizen Agent Architecture](kaizen_agent_workflow.png)
 
-### 1. Test Execution
-- **Parallel Testing**: Runs multiple test cases simultaneously across your AI agents
-- **Multiple Input Types**: Supports strings, dictionaries, objects, and inline objects as inputs
-- **Dynamic Loading**: Automatically imports dependencies and referenced files
+## When Kaizen Agent is Useful
 
-### 2. Failure Analysis
-- **Intelligent Detection**: Uses AI to analyze test failures and identify root causes
-- **Context Understanding**: Examines code, prompts, and test outputs to understand issues
-- **Pattern Recognition**: Identifies common problems in AI agent implementations
+**Kaizen Agent is most valuable during the development phase of your AI agents, right after you've written the initial code but before deployment.**
 
-### 3. Automated Fixing
-- **Code Improvements**: Automatically fixes code issues, bugs, and logic problems
-- **Prompt Optimization**: Improves prompts for better AI agent performance
-- **Best Practices**: Applies AI development best practices and patterns
+### Perfect Timing: Pre-Deployment Testing & Tuning
 
-### 4. Quality Assurance
-- **Multiple Output Evaluation**: Evaluates return values, variables, and complex outputs
-- **LLM-based Assessment**: Uses AI to assess the quality and correctness of responses
-- **Continuous Improvement**: Iteratively improves until tests pass
+After writing your agent code, you typically need to:
+- **Test with various inputs** to ensure reliability
+- **Tweak prompts** for better performance  
+- **Debug edge cases** and failure scenarios
+- **Optimize code** based on test results
 
-### 5. Integration & Deployment
-- **Pull Request Creation**: Automatically creates PRs with fixes and improvements
-- **Version Control**: Integrates with GitHub for seamless deployment
-- **Documentation**: Updates documentation and comments as needed
+**Kaizen Agent automates this entire process.** Instead of manually writing test cases and debugging failures, you simply:
+1. Define your test inputs and evaluation criteria in YAML
+2. Run `kaizen test-all --auto-fix`
+3. Let Kaizen automatically test, analyze failures, and improve your code
 
-This workflow ensures your AI agents are robust, reliable, and continuously improving through automated testing and fixing cycles.
+### Ideal Use Cases
 
-## Installation
+- **🔄 Iterative Development**: Test and improve agents during development cycles
+- **🚀 Pre-Deployment Validation**: Ensure your agent works reliably before going live
+- **🐛 Bug Detection**: Catch and fix issues you might miss with manual testing
+- **📈 Performance Optimization**: Continuously improve prompts and code based on test results
+- **🛡️ Quality Assurance**: Maintain high standards as your agent evolves
 
-### From Source
+### When NOT to Use
+
+- **Production environments** - Kaizen is for development/testing, not live systems
+- **Simple, stable agents** - If your agent is already working perfectly, you might not need it
+- **Non-AI applications** - Kaizen is specifically designed for AI agents and LLM applications
+
+## Quick Start (1 minute)
+
+**Requirements:**
+- Python 3.8+ (Python 3.9+ recommended for best performance)
+
+### 1. Install & Setup
 
 ```bash
+# Clone the repository
 git clone https://github.com/Kaizen-agent/kaizen-agent.git
-cd kaizen-agent
-pip install -e ".[dev]"
+
+# Create a test directory for your specific agent
+mkdir my-email-agent-test
+cd my-email-agent-test
+
+# Create a virtual environment for this test
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install Kaizen Agent in this isolated environment
+pip install -e "../kaizen-agent[dev]"
+
+# Create .env file with your Google API key
+cat > .env << EOF
+GOOGLE_API_KEY=your_api_key_here
+EOF
+
+# Or set it directly in your shell
+export GOOGLE_API_KEY="your_api_key_here"
 ```
 
-## Environment Setup
+### 2. Create Your Agent
 
-Before using Kaizen Agent, you need to set up your environment variables for API access.
+Create `my_agent.py`:
 
-### Required Environment Variables
+```python
+import google.generativeai as genai
+import os
 
-- **`GOOGLE_API_KEY`** (Required): Your Google AI API key for LLM operations
-  - Get it from: https://makersuite.google.com/app/apikey
+class EmailAgent:
+    def __init__(self):
+        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+        # Simple prompt that Kaizen can improve significantly
+        self.system_prompt = "Improve this email draft."
+    
+    def improve_email(self, email_draft):
+        full_prompt = f"{self.system_prompt}\n\nEmail draft:\n{email_draft}\n\nImproved version:"
+        response = self.model.generate_content(full_prompt)
+        return response.text
+```
 
-- **`GITHUB_TOKEN`** (Required for PR creation): Your GitHub personal access token
-  - Create it at: https://github.com/settings/tokens
-  - Required scopes: `repo`, `workflow`
+### 3. Create Test Config
 
-### Environment Setup
+**🎯 No Python Test Code Required!** 
 
-1. **Create a .env file:**
-   ```bash
-   # Create .env file with your API keys
-   echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
-   echo "GITHUB_TOKEN=your_github_token_here" >> .env
-   ```
+Kaizen Agent uses YAML configuration instead of traditional Python test files. This is a new, simpler way to test AI agents:
 
-2. **Or use environment variables:**
-   ```bash
-   export GOOGLE_API_KEY="your_google_api_key_here"
-   export GITHUB_TOKEN="your_github_token_here"
-   ```
+- **❌ Traditional approach**: Write Python test files with `unittest` or `pytest`
+- **✅ Kaizen approach**: Define tests in YAML - no Python test code needed!
 
-3. **Use the built-in setup commands:**
-   ```bash
-   # Check your environment setup
-   kaizen setup check-env
-   
-   # Create a template .env file
-   kaizen setup create-env-example
-   
-   # Validate environment for CI/CD
-   kaizen setup validate-env
-   ```
-
-For detailed setup instructions, see the [Environment Setup Guide](docs/environment-setup.md).
-
-## Examples
-
-Kaizen Agent comes with two example agents to help you get started quickly. These examples demonstrate how to test AI agents and LLM applications.
-
-### Example 1: Summarizer Agent
-
-The summarizer agent demonstrates basic text summarization functionality:
-
-1. **Navigate to the example:**
-   ```bash
-   cd examples/summarizer_agent
-   ```
-
-2. **Set up your environment:**
-   ```bash
-   # Create .env file with your Google API key
-   echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
-   ```
-
-3. **Run the tests:**
-   ```bash
-   # From the summarizer_agent directory
-   kaizen test-all --config test_config.yaml --auto-fix
-   ```
-
-### Example 2: Email Agent
-
-The email agent demonstrates email improvement functionality:
-
-1. **Navigate to the example:**
-   ```bash
-   cd examples/email_agent
-   ```
-
-2. **Set up your environment:**
-   ```bash
-   # Create .env file with your Google API key
-   echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
-   ```
-
-3. **Run the tests:**
-   ```bash
-   # From the email_agent directory
-   kaizen test-all --config test_config.yaml --auto-fix
-   ```
-
-### Creating Your Own Test Configuration
-
-1. **Navigate to your project directory:**
-   ```bash
-   cd path/to/your/ai-agent-project
-   ```
-
-2. Create a test configuration file (YAML):
+Create `kaizen.yaml`:
 
 ```yaml
-name: My AI Agent Test Suite
-file_path: path/to/your/agent.py
-description: "Test suite for my AI agent"
+name: Email Improvement Agent Test
+file_path: my_agent.py
+description: This agent improves email drafts by making them more professional, clear, and well-structured. It transforms casual or poorly written emails into polished, business-appropriate communications.
+agent:
+  module: my_agent
+  class: EmailAgent
+  method: improve_email
 
-# Test steps
-steps:
-  - name: Test Case 1
-    input:
-      method: run
-      input: "test input"
-    description: "Test basic functionality"
+evaluation:
+  evaluation_targets:
+    - name: quality
+      source: return
+      criteria: "The email should be professional, polite, and well-structured with proper salutations and closings"
+      weight: 0.5
+    - name: format
+      source: return
+      criteria: "The response should contain only the improved email content without any explanatory text, markdown formatting, or additional commentary. It should be a clean, standalone email draft ready for use."
+      weight: 0.5
     
-  - name: Test Case 2
+
+files_to_fix:
+  - my_agent.py
+
+steps:
+  - name: Professional Email Improvement
     input:
-      method: process_data
-      input: {"data": [1, 2, 3]}
-    description: "Test data processing"
+      input: "hey boss, i need time off next week. thanks"
+  
+  - name: Edge Case - Empty Email
+    input:
+      input: ""
+  
+  - name: Edge Case - Very Informal Email
+    input:
+      input: "yo dude, can't make it to the meeting tomorrow. got stuff to do. sorry!"
 ```
 
-3. **Run tests with auto-fix:**
-   ```bash
-   # From your project directory
-   kaizen test-all --config test_config.yaml --auto-fix --create-pr
-   ```
-
-## Usage
-
-### Available Commands
+### 4. Run Tests
 
 ```bash
-# Run all tests in configuration
-kaizen test-all --config <config_file> [options]
-
-# Check environment setup
-kaizen setup check-env [--features core github optional]
-
-# Test GitHub access and permissions
-kaizen test-github-access --config <config_file> [--repo owner/repo]
-
-# Comprehensive GitHub access diagnostics
-kaizen diagnose-github-access --config <config_file> [--repo owner/repo]
+# Run tests with auto-fix and save detailed logs
+kaizen test-all --config kaizen.yaml --auto-fix --save-logs
 ```
 
-### Run Tests with Auto-Fix
+This will:
+- Test your email improvement agent with realistic scenarios
+- Automatically improve the simple prompt to handle different email types
+- Save detailed logs to `test-logs/` so you can see the before/after improvements
+
+## GitHub Setup (for Pull Requests)
+
+To create pull requests with fixes, you need to set up GitHub access:
+
+### 1. Create GitHub Personal Access Token
+
+1. Go to [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens)
+2. Click "Generate new token (classic)"
+3. Give it a descriptive name (e.g., "Kaizen AutoFix")
+4. Set an expiration date
+5. **Important**: Select these scopes:
+   - ✅ `repo` (Full control of private repositories)
+
+### 2. Set Up Environment Variables
+
+Create a `.env` file in your project root:
 
 ```bash
-# Navigate to the directory containing your config file first
-cd path/to/your/project
-
-# Then run the kaizen command
-kaizen test-all --config <config_file> [--auto-fix] [--create-pr] [--max-retries <n>] [--base-branch <branch>] [--save-logs] [--verbose]
+# Create .env file
+cat > .env << EOF
+GOOGLE_API_KEY=your_google_api_key_here
+GITHUB_TOKEN=ghp_your_github_token_here
+EOF
 ```
 
-Options:
-- `--config`, `-c`: Path to test configuration file (required)
-- `--auto-fix`: Enable automatic code fixing
-- `--create-pr`: Create a pull request with fixes
-- `--max-retries`: Maximum number of fix attempts (default: 1)
-- `--base-branch`: Base branch for pull request (default: main)
-- `--pr-strategy`: Strategy for when to create PRs (default: ANY_IMPROVEMENT)
-- `--test-github-access`: Test GitHub access before running tests
-- `--save-logs`: Save detailed test logs in JSON format
-- `--verbose`, `-v`: Show detailed debug information
-
-### Environment Setup Commands
+### 3. Test GitHub Access
 
 ```bash
-# Check environment status
-kaizen setup check-env --features core github
+# Test GitHub access
+kaizen test-github-access --repo your-username/your-repo-name
 
-# Create .env.example template
+# Run tests with PR creation
+kaizen test-all --config kaizen.yaml --auto-fix --create-pr
+```
+
+## How to Create a Test Configuration File
+
+Kaizen Agent uses YAML configuration files to define test suites for your AI agents. This approach eliminates the need for traditional Python test files while providing powerful testing capabilities.
+
+### Sample Configuration File
+
+Here's a complete example that demonstrates all available configuration options:
+
+```yaml
+name: Text Analysis Agent Test Suite
+agent_type: dynamic_region
+file_path: agents/text_analyzer.py
+description: |
+  Test suite for the TextAnalyzer agent that processes and analyzes text content.
+  
+  This agent performs sentiment analysis, extracts key information, and provides
+  structured analysis results. Tests cover various input types, edge cases, and
+  expected output formats to ensure reliable performance.
+
+agent:
+  module: agents.text_analyzer
+  class: TextAnalyzer
+  method: analyze_text
+
+evaluation:
+  evaluation_targets:
+    - name: sentiment_score
+      source: variable
+      criteria: "The sentiment_score must be a float between -1.0 and 1.0. Negative values indicate negative sentiment, positive values indicate positive sentiment. The score should accurately reflect the emotional tone of the input text."
+      description: "Evaluates the accuracy of sentiment analysis output"
+      weight: 0.4
+    - name: key_phrases
+      source: variable
+      criteria: "The key_phrases should be a list of strings containing the most important phrases from the input text"
+      description: "Checks if key phrase extraction is working correctly"
+      weight: 0.3
+    - name: analysis_quality
+      source: return
+      criteria: "The response should be well-structured, professional, and contain actionable insights"
+      description: "Evaluates the overall quality and usefulness of the analysis"
+      weight: 0.3
+
+max_retries: 3
+
+files_to_fix:
+  - agents/text_analyzer.py
+  - agents/prompts.py
+
+referenced_files:
+  - agents/prompts.py
+  - utils/text_utils.py
+
+steps:
+  - name: Positive Review Analysis
+    description: "Analyze a positive customer review"
+    input:
+      file_path: agents/text_analyzer.py
+      method: analyze_text
+      input: 
+        - name: text_content
+          type: string
+          value: "This product exceeded my expectations! The quality is outstanding and the customer service was excellent. I would definitely recommend it to others."
+          
+      expected_output: 
+        sentiment_score: 0.8
+        key_phrases: ["exceeded expectations", "outstanding quality", "excellent customer service"]
+
+  - name: Negative Feedback Analysis
+    description: "Analyze negative customer feedback"
+    input:
+      file_path: agents/text_analyzer.py
+      method: analyze_text
+      input: 
+        - name: text_content
+          type: string
+          value: "I'm very disappointed with this purchase. The product arrived damaged and the support team was unhelpful."
+          
+      expected_output: 
+        sentiment_score: -0.7
+        key_phrases: ["disappointed", "damaged product", "unhelpful support"]
+
+  - name: Neutral Text Analysis
+    description: "Analyze neutral or mixed sentiment text"
+    input:
+      file_path: agents/text_analyzer.py
+      method: analyze_text
+      input: 
+        - name: text_content
+          type: string
+          value: "The product has both good and bad aspects. The design is nice but the price is high."
+          
+      expected_output: 
+        sentiment_score: 0.0
+        key_phrases: ["good aspects", "bad aspects", "nice design", "high price"]
+
+  - name: Object Input Analysis
+    description: "Analyze text using a structured user review object"
+    input:
+      file_path: agents/text_analyzer.py
+      method: analyze_review
+      input: 
+        - name: user_review
+          type: object
+          class_path: agents.review_processor.UserReview
+          args: 
+            text: "This product exceeded my expectations! The quality is outstanding."
+            rating: 5
+            category: "electronics"
+            helpful_votes: 12
+            verified_purchase: true
+        - name: analysis_settings
+          type: dict
+          value:
+            include_sentiment: true
+            extract_keywords: true
+            detect_emotions: false
+          
+      expected_output: 
+        sentiment_score: 0.9
+        key_phrases: ["exceeded expectations", "outstanding quality", "excellent customer service"]
+        review_quality: "high"
+
+  - name: Empty Input Handling
+    description: "Test how the agent handles empty or minimal input"
+    input:
+      file_path: agents/text_analyzer.py
+      method: analyze_text
+      input: 
+        - name: text_content
+          type: string
+          value: ""
+          
+      expected_output: 
+        sentiment_score: 0.0
+        key_phrases: []
+```
+
+### Configuration Sections Explained
+
+#### Basic Information
+- **`name`**: A descriptive name for your test suite
+- **`agent_type`**: Type of agent testing (e.g., `dynamic_region` for code-based agents)
+- **`file_path`**: Path to the main agent file being tested
+- **`description`**: Detailed description of what the agent does and what the tests cover
+
+#### Agent Configuration
+```yaml
+agent:
+  module: agents.text_analyzer    # Python module path
+  class: TextAnalyzer            # Class name to instantiate
+  method: analyze_text           # Method to call during testing
+```
+
+#### Evaluation Criteria
+**⚠️ CRITICAL: This section feeds directly into the LLM for automated evaluation. Write clear, specific criteria for best results.**
+
+The `evaluation` section defines how Kaizen's LLM evaluates your agent's performance. Each `evaluation_target` specifies what to check and how to score it.
+
+```yaml
+evaluation:
+  evaluation_targets:
+    - name: sentiment_score       # Name of the output to evaluate
+      source: variable            # Source: 'variable' (from agent output) or 'return' (from method return)
+      criteria: "Description of what constitutes a good result"
+      description: "Additional context about this evaluation target"
+      weight: 0.4                 # Relative importance (0.0 to 1.0)
+```
+
+**Key Components:**
+
+- **`name`**: Must match a field in your agent's output or return value
+- **`source`**: 
+  - `variable`: Extract from agent's output variables/attributes
+  - `return`: Use the method's return value
+- **`criteria`**: **Most important** - Instructions for the LLM evaluator
+- **`description`**: Additional context to help the LLM understand the evaluation
+- **`weight`**: Relative importance (0.0 to 1.0, total should equal 1.0)
+
+**Writing Effective Criteria:**
+
+**✅ Good Examples:**
+```yaml
+- name: sentiment_score
+  source: variable
+  criteria: "The sentiment_score must be a float between -1.0 and 1.0. Negative values indicate negative sentiment, positive values indicate positive sentiment. The score should accurately reflect the emotional tone of the input text."
+  weight: 0.4
+
+- name: response_quality
+  source: return
+  criteria: "The response should be professional, well-structured, and contain actionable insights. It must be free of grammatical errors and provide specific, relevant information that addresses the user's query directly."
+  weight: 0.6
+```
+
+**❌ Poor Examples:**
+```yaml
+- name: result
+  source: return
+  criteria: "Should be good"  # Too vague
+  weight: 1.0
+
+- name: accuracy
+  source: variable
+  criteria: "Check if it's correct"  # Not specific enough
+  weight: 1.0
+```
+
+**Tips for Better LLM Evaluation:**
+1. **Be Specific**: Include exact requirements, ranges, or formats
+2. **Provide Context**: Explain what "good" means in your domain
+3. **Include Examples**: Reference expected patterns or behaviors
+4. **Consider Edge Cases**: Mention how to handle unusual inputs
+5. **Use Clear Language**: Avoid ambiguous terms that LLMs might misinterpret
+
+#### Testing Configuration
+- **`max_retries`**: Number of retry attempts if a test fails
+- **`files_to_fix`**: Files that Kaizen can modify to fix issues
+- **`referenced_files`**: Additional files for context (not modified)
+
+#### Test Steps
+Each step defines a test case with:
+- **`name`**: Descriptive name for the test
+- **`description`**: What this test is checking
+- **`input`**: 
+  - `file_path`: Path to the agent file
+  - `method`: Method to call
+  - `input`: List of parameters with name, type, and value
+
+#### Input Types Supported
+Kaizen supports multiple input types for test parameters:
+
+**String Input:**
+```yaml
+- name: text_content
+  type: string
+  value: "Your text here"
+```
+
+**Dictionary Input:**
+```yaml
+- name: config
+  type: dict
+  value:
+    key1: "value1"
+    key2: "value2"
+```
+
+**Object Input:**
+```yaml
+- name: user_review
+  type: object
+  class_path: agents.review_processor.UserReview
+  args: 
+    text: "This product exceeded my expectations! The quality is outstanding."
+    rating: 5
+    category: "electronics"
+    helpful_votes: 12
+    verified_purchase: true
+```
+
+The `class_path` specifies the Python class to instantiate, and `args` provides the constructor arguments.
+
+- **`expected_output`**: Expected results for evaluation
+
+### Simple Configuration Template
+
+For quick testing, you can use this minimal template:
+
+```yaml
+name: My Agent Test
+file_path: my_agent.py
+description: "Test my AI agent"
+
+agent:
+  module: my_agent
+  class: MyAgent
+  method: process
+
+evaluation:
+  evaluation_targets:
+    - name: result
+      source: return
+      criteria: "The response should be accurate and helpful"
+      weight: 1.0
+
+files_to_fix:
+  - my_agent.py
+
+steps:
+  - name: Basic Test
+    input:
+      file_path: my_agent.py
+      method: process
+      input: 
+        - name: user_input
+          type: string
+          value: "Hello, how are you?"
+      expected_output: 
+        result: "I'm doing well, thank you!"
+```
+
+## CLI Commands
+
+```bash
+# Run tests
+kaizen test-all --config kaizen.yaml
+
+# With auto-fix
+kaizen test-all --config kaizen.yaml --auto-fix
+
+# Create PR with fixes
+kaizen test-all --config kaizen.yaml --auto-fix --create-pr
+
+# Save detailed logs
+kaizen test-all --config kaizen.yaml --save-logs
+
+# Environment setup
+kaizen setup check-env
 kaizen setup create-env-example
 
-# Validate environment (for CI/CD)
-kaizen setup validate-env --features core github
-```
-
-### GitHub Access Testing
-
-```bash
-# Navigate to the directory containing your config file first
-cd path/to/your/project
-
-# Test GitHub access with config file
-kaizen test-github-access --config test_config.yaml
-
-# Test specific repository
-kaizen test-github-access --repo owner/repo-name --base-branch main
-
-# Comprehensive diagnostics
+# GitHub access testing
+kaizen test-github-access --repo owner/repo-name
 kaizen diagnose-github-access --repo owner/repo-name
 ```
 
-## Configuration
 
-The test configuration file (YAML) supports the following structure:
-
-```yaml
-name: Test Suite Name
-file_path: path/to/main/code.py
-description: "Description of the test suite"
-
-# Package dependencies to import before test execution
-dependencies:
-  - "requests>=2.25.0"
-  - "pandas==1.3.0"
-  - "numpy"
-
-# Local files to import (relative to config file location)
-referenced_files:
-  - "utils/helper.py"
-  - "models/data_processor.py"
-
-# Files that should be fixed if tests fail
-files_to_fix:
-  - "main_code.py"
-  - "utils/helper.py"
-
-# Test configuration
-agent_type: "default"
-auto_fix: true
-create_pr: false
-max_retries: 3
-base_branch: "main"
-pr_strategy: "ANY_IMPROVEMENT"
-
-# Test regions to execute
-regions:
-  - "test_function"
-  - "test_class"
-
-# Test steps
-steps:
-  - name: Test Case Name
-    input:
-      method: run
-      input: "test input"
-    description: "Description of the test case"
-    timeout: 30
-    retries: 2
-
-# Evaluation criteria
-evaluation:
-  evaluation_targets:
-    - name: summary_text
-      source: variable
-      criteria: "Should include key insights from the data"
-      description: "Summary should highlight important patterns"
-      weight: 1.0
-    - name: return
-      source: return
-      criteria: "Should be a dictionary with 'status' and 'results' keys"
-      description: "Return value should have expected structure"
-      weight: 1.0
-
-# Metadata
-metadata:
-  version: "1.0.0"
-  author: "Test Author"
-  created_at: "2024-01-01T00:00:00Z"
-
-### Configuration Fields
-
-- `name`: Name of the test suite
-- `file_path`: Path to the main code file
-- `description`: Description of the test suite
-- `dependencies`: List of package dependencies
-- `referenced_files`: List of local files to import
-- `files_to_fix`: List of files that should be fixed if tests fail
-- `agent_type`: Type of agent to use (default: "default")
-- `auto_fix`: Whether to enable automatic fixing
-- `create_pr`: Whether to create pull requests
-- `max_retries`: Maximum number of fix attempts
-- `base_branch`: Base branch for pull requests
-- `pr_strategy`: Strategy for when to create PRs
-- `regions`: List of code regions to test
-- `steps`: List of test steps
-- `evaluation`: Evaluation criteria and settings
-- `metadata`: Additional metadata
-
-### Defining Code Regions
-
-To test specific parts of your code, you need to define regions using special comment markers. Kaizen Agent will only test the code within these marked regions.
-
-#### Region Markers
-
-Use these comment markers to define testable regions in your Python code:
-
-```python
-# kaizen:start:{region_name}
-# Your code here - this will be tested
-class MyAgent:
-    def __init__(self):
-        self.name = "My Agent"
-    
-    def process_data(self, data):
-        # This method will be tested
-        return {"status": "success", "data": data}
-# kaizen:end:{region_name}
-```
-
-#### Example: Complete Agent with Regions
-
-```python
-import json
-from typing import Dict, Any
-
-# kaizen:start:customer_support_agent
-class CustomerSupportAgent:
-    def __init__(self):
-        self.issue_analysis = ""
-        self.improvement_recommendations = ""
-        self.analysis_results = {}
-    
-    def analyze_customer_issues(self, *inputs):
-        """Analyze customer issues with multiple inputs."""
-        # Process different input types
-        user_query = None
-        customer_data = None
-        customer_feedback = None
-        
-        for input_item in inputs:
-            if isinstance(input_item, str):
-                user_query = input_item
-            elif isinstance(input_item, dict):
-                customer_data = input_item
-            elif hasattr(input_item, 'text'):
-                customer_feedback = input_item
-        
-        # Set variables that will be tracked for evaluation
-        self.issue_analysis = "Customers are experiencing performance issues."
-        self.improvement_recommendations = "Implement performance optimization."
-        self.analysis_results = {
-            "satisfaction_score": 2.5,
-            "main_issues": ["performance", "stability"],
-            "recommendations": ["optimize code", "add monitoring"]
-        }
-        
-        return {
-            "status": "completed",
-            "analysis": self.issue_analysis,
-            "recommendations": self.improvement_recommendations,
-            "details": self.analysis_results
-        }
-# kaizen:end:customer_support_agent
-
-# This code outside the region won't be tested
-def utility_function():
-    return "This won't be tested"
-```
-
-#### Configuration Reference
-
-In your YAML configuration, reference the region name:
-
-```yaml
-# Test regions to execute
-regions:
-  - "customer_support_agent"  # Matches the region name in your code
-```
-
-#### Best Practices
-
-- **Descriptive Names**: Use clear, descriptive region names (e.g., `customer_support_agent`, `data_processor`)
-- **Complete Classes**: Include entire classes or functions within a single region
-- **Avoid Nesting**: Don't nest regions within other regions
-- **Clean Boundaries**: Place markers at logical code boundaries (class/function level)
-- **Consistent Naming**: Use the same naming convention across your codebase
-
-#### Multiple Regions
-
-You can define multiple regions in the same file:
-
-```python
-# kaizen:start:data_processor
-class DataProcessor:
-    def process(self, data):
-        return {"processed": data}
-# kaizen:end:data_processor
-
-# kaizen:start:report_generator
-class ReportGenerator:
-    def generate(self, data):
-        return {"report": data}
-# kaizen:end:report_generator
-```
-
-Then reference both in your configuration:
-
-```yaml
-regions:
-  - "data_processor"
-  - "report_generator"
-```
-
-### Expected Outcomes
-
-You can define expected outcomes for your tests in several ways:
-
-#### 1. Simple Expected Output
-```yaml
-steps:
-  - name: Addition Test
-    input:
-      method: add
-      input: [5, 3]
-    expected_output: 8
-    description: "Test basic addition functionality"
-```
-
-#### 2. Structured Expected Output
-```yaml
-steps:
-  - name: User Creation Test
-    input:
-      method: create_user
-      input: {"name": "John Doe", "email": "john@example.com"}
-    expected_output:
-      status: "success"
-      user_id: "user_123"
-      message: "User created successfully"
-    description: "Test user creation API response"
-```
-
-#### 3. Advanced Evaluation Targets
-```yaml
-evaluation:
-  evaluation_targets:
-    - name: summary_text
-      source: variable
-      criteria: "Should include clarification about the compound's instability"
-      description: "The summary text should explain stability concerns"
-      weight: 1.0
-    - name: return
-      source: return
-      criteria: "Should be a dictionary with 'status' and 'summary' keys"
-      description: "The return value should have the expected structure"
-      weight: 1.0
-```
-
-## Multiple Inputs & Outputs
-
-Kaizen Agent supports advanced multiple inputs and multiple outputs evaluation, making it perfect for complex agent workflows and multi-step processes.
-
-### Multiple Inputs
-
-Kaizen Agent supports four types of inputs that can be combined in any configuration:
-
-#### 1. String Inputs
-```yaml
-steps:
-  - name: String Input Test
-    input:
-      method: process_text
-      input:
-        - name: user_query
-          type: string
-          value: "What are the main issues customers are reporting?"
-```
-
-#### 2. Dictionary Inputs
-```yaml
-steps:
-  - name: Dictionary Input Test
-    input:
-      method: analyze_conditions
-      input:
-        - name: customer_data
-          type: dict
-          value:
-            customer_id: "CUST123"
-            product: "Premium Widget"
-            subscription_tier: "Enterprise"
-            support_tickets: 3
-```
-
-#### 3. Object Inputs (with dynamic imports)
-```yaml
-steps:
-  - name: Object Input Test
-    input:
-      method: process_feedback
-      input:
-        - name: customer_feedback
-          type: object
-          class_path: "input_types.CustomerFeedback"
-          args:
-            text: "Product is too slow"
-            tags: ["performance", "speed"]
-            priority: "high"
-```
-
-#### 4. Inline Object Inputs (recommended)
-```yaml
-steps:
-  - name: Inline Object Test
-    input:
-      method: process_feedback
-      input:
-        - name: customer_feedback
-          type: inline_object
-          class_path: "input_types.CustomerFeedback"
-          attributes:
-            text: "Excellent customer service experience"
-            tags: ["service", "satisfaction"]
-            priority: "low"
-            source: "survey_response"
-```
-
-### Multiple Outputs Evaluation
-
-Evaluate multiple outputs from your agents including return values and specific variables:
-
-```yaml
-evaluation:
-  evaluation_targets:
-    - name: issue_analysis
-      source: variable
-      criteria: "Should identify the root cause of customer complaints"
-      description: "The analysis should explain why customers are dissatisfied"
-      weight: 1.0
-
-    - name: recommended_action
-      source: variable
-      criteria: "Should suggest specific improvements or solutions"
-      description: "The recommendation should be actionable and specific"
-      weight: 1.0
-
-    - name: return
-      source: return
-      criteria: "Should be a dictionary with 'status' and 'summary' keys"
-      description: "The return value should have the expected structure"
-      weight: 1.0
-```
-
-### Complete Example
-
-Here's a comprehensive example showing multiple inputs and outputs:
-
-```yaml
-name: Customer Support Analysis Test
-agent_type: dynamic_region
-file_path: support_agent.py
-description: Test customer support analysis with multiple input types and output evaluation
-
-evaluation:
-  evaluation_targets:
-    - name: issue_analysis
-      source: variable
-      criteria: "Should identify the main customer pain points and their causes"
-      description: "Analysis should cover customer satisfaction factors"
-      weight: 1.0
-
-    - name: improvement_recommendations
-      source: variable
-      criteria: "Should provide specific actionable recommendations for improvement"
-      description: "Recommendations should be practical and business-focused"
-      weight: 1.0
-
-    - name: return
-      source: return
-      criteria: "Should return a structured response with 'status', 'analysis', and 'recommendations' fields"
-      description: "Return value should be well-structured for API consumption"
-      weight: 1.0
-
-regions:
-  - SupportAgent
-
-max_retries: 2
-
-files_to_fix:
-  - support_agent.py
-
-steps:
-  - name: Complex Customer Query
-    description: Test handling of mixed input types with multiple outputs
-    input:
-      file_path: support_agent.py
-      method: analyze_customer_issues
-      input:
-        # String inputs
-        - name: user_query
-          type: string
-          value: "What are the main issues customers are reporting?"
-        
-        # Dictionary inputs
-        - name: customer_data
-          type: dict
-          value:
-            customer_id: "CUST123"
-            product: "Premium Widget"
-            subscription_tier: "Enterprise"
-            support_tickets: 3
-            satisfaction_score: 2.5
-        
-        # Inline object inputs (recommended)
-        - name: customer_feedback
-          type: inline_object
-          class_path: "input_types.CustomerFeedback"
-          attributes:
-            text: "Product is too slow and crashes frequently"
-            tags: ["performance", "stability", "frustration"]
-            priority: "high"
-            source: "support_ticket"
-    
-    evaluation:
-      type: llm
-```
-
-### Agent Implementation Example
-
-To use multiple inputs and outputs, implement your agent like this:
-
-```python
-from dataclasses import dataclass
-from typing import List, Optional
-
-@dataclass
-class CustomerFeedback:
-    text: str
-    tags: List[str]
-    priority: Optional[str] = None
-    source: Optional[str] = None
-    
-    def to_dict(self) -> dict:
-        return {
-            'text': self.text,
-            'tags': self.tags,
-            'priority': self.priority,
-            'source': self.source
-        }
-
-class SupportAgent:
-    def __init__(self):
-        # Variables that will be tracked for evaluation
-        self.issue_analysis = ""
-        self.improvement_recommendations = ""
-        self.analysis_results = {}
-    
-    def analyze_customer_issues(self, *inputs):
-        """Analyze customer issues with multiple inputs."""
-        # Process different input types
-        user_query = None
-        customer_data = None
-        customer_feedback = None
-        
-        for input_item in inputs:
-            if isinstance(input_item, str):
-                user_query = input_item
-            elif isinstance(input_item, dict):
-                customer_data = input_item
-            elif hasattr(input_item, 'text'):  # CustomerFeedback object
-                customer_feedback = input_item
-        
-        # Set variables that will be tracked for evaluation
-        self.issue_analysis = "Customers are experiencing performance issues and system crashes, leading to low satisfaction scores."
-        self.improvement_recommendations = "Implement performance optimization and add crash recovery mechanisms. Consider upgrading server infrastructure."
-        self.analysis_results = {
-            "satisfaction_score": 2.5,
-            "main_issues": ["performance", "stability"],
-            "recommendations": ["optimize code", "add monitoring", "improve error handling"]
-        }
-        
-        # Return structured result
-        return {
-            "status": "completed",
-            "analysis": self.issue_analysis,
-            "recommendations": self.improvement_recommendations,
-            "details": self.analysis_results
-        }
-```
-
-### Input Types Reference
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `string` | Simple text input | `{"type": "string", "value": "Hello world"}` |
-| `dict` | Structured data | `{"type": "dict", "value": {"key": "value"}}` |
-| `object` | Dynamic class instantiation | `{"type": "object", "class_path": "module.Class", "args": {...}}` |
-| `inline_object` | Direct object specification | `{"type": "inline_object", "class_path": "module.Class", "attributes": {...}}` |
-
-### Evaluation Sources Reference
-
-| Source | Description | Example |
-|--------|-------------|---------|
-| `return` | Function's return value | `{"source": "return", "name": "return"}` |
-| `variable` | Specific variable tracking | `{"source": "variable", "name": "summary_text"}` |
-
-## Save Logs Feature
-
-The `--save-logs` option allows you to save detailed test execution logs in JSON format for later analysis and debugging.
-
-### Usage
-
-```bash
-# Navigate to the directory containing your config file first
-cd path/to/your/project
-
-# Run tests with detailed logging
-kaizen test-all --config test_config.yaml --save-logs
-
-# Combine with other options
-kaizen test-all --config test_config.yaml --auto-fix --create-pr --save-logs
-```
-
-### Output Files
-
-When `--save-logs` is enabled, two files are created in the `test-logs/` directory:
-
-1. **Detailed Logs File**: `{test_name}_{timestamp}_detailed_logs.json`
-   - Complete test execution data
-   - Individual test case results with inputs/outputs
-   - LLM evaluation results and scores
-   - Auto-fix attempts and their outcomes
-   - Error details and stack traces
-   - Execution timing information
-
-2. **Summary File**: `{test_name}_{timestamp}_summary.json`
-   - Quick reference with key metrics
-   - Test name and status
-   - Execution timestamps
-   - Error messages
-   - Overall status summary
-
-## Development
-
-### Prerequisites
-
-- Python 3.8+
-- pip
-- git
-
-### Setup Development Environment
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/kaizen-agent.git
-cd kaizen-agent
-```
-
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install development dependencies:
-```bash
-pip install -e ".[dev]"
-```
-
-4. Install pre-commit hooks:
-```bash
-pre-commit install
-```
-
-### Running Tests
-
-```bash
-pytest
-```
-
-### Code Style
-
-We use [black](https://github.com/psf/black) for code formatting and [isort](https://pycqa.github.io/isort/) for import sorting. To format your code:
-
-```bash
-black .
-isort .
-```
-
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests (`pytest`)
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-- 📚 [Documentation](https://kaizen.readthedocs.io/)
-- 💬 [Discord Community](https://discord.gg/kaizen)
-- 🐛 [Issue Tracker](https://github.com/yourusername/kaizen-agent/issues)
-- 📧 [Email Support](mailto:support@kaizen.dev)
-
-## Acknowledgments
-
-- Thanks to all our contributors
-- Inspired by modern AI-powered development tools
-- Built with Python, Click, Rich, and Google AI APIs
+## System Requirements
+
+### Python Version
+- **Minimum**: Python 3.8+
+- **Recommended**: Python 3.9+ for best performance
+
+### Dependencies
+- `google-generativeai>=0.3.2` (for LLM operations)
+- `python-dotenv>=0.19.0` (for environment variables)
+- `click>=8.0.0` (for CLI)
+- `pyyaml>=6.0.0` (for YAML configuration)
+- `PyGithub>=2.6.1` (for GitHub integration)

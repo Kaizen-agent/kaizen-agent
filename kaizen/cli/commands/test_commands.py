@@ -239,42 +239,76 @@ class TestAllCommand(BaseTestCommand):
             if self.verbose:
                 self.logger.info(f"Added {len(imported_namespace)} imported dependencies to runner config")
         
-        if self.config.regions:
-            config['regions'] = self.config.regions
-            
-            # Create steps for each region
-            config_steps_temp = []
-            for region in self.config.regions:
-                config_steps_temp.append([
+        # Add agent entry point if present
+        if self.config.agent:
+            config['agent'] = {
+                'module': self.config.agent.module,
+                'class': self.config.agent.class_name,
+                'method': self.config.agent.method,
+                'fallback_to_function': self.config.agent.fallback_to_function
+            }
+            if self.verbose:
+                self.logger.info(f"Added agent entry point to runner config: {self.config.agent}")
+        
+        # Handle steps configuration
+        if self.config.steps:
+            if self.config.regions:
+                # Create steps for each region (legacy behavior)
+                config['regions'] = self.config.regions
+                
+                config_steps_temp = []
+                for region in self.config.regions:
+                    config_steps_temp.append([
+                        {
+                            'name': step.name,
+                            'description': step.description,
+                            'input': {
+                                'file_path': str(self.config.file_path),
+                                'region': region,
+                                'method': step.command,
+                                'input': step.input  # This now supports multiple inputs
+                            },
+                            'expected_output': step.expected_output,
+                            'evaluation': self.config.evaluation.__dict__ if self.config.evaluation else None
+                        }
+                        for step in self.config.steps
+                    ])
+                config['steps'] = [item for sublist in config_steps_temp for item in sublist]
+                
+                # DEBUG: Print the test configuration being created (only in verbose mode)
+                if self.verbose:
+                    self.logger.debug(f"DEBUG: Created {len(config['steps'])} test step(s) for runner (with regions)")
+                    for i, test in enumerate(config['steps']):
+                        self.logger.debug(f"DEBUG: Test {i}: {test['name']}")
+                        self.logger.debug(f"DEBUG: Test {i} input: {test['input']}")
+                        self.logger.debug(f"DEBUG: Test {i} method: {test['input'].get('method', 'NOT_FOUND')}")
+                        self.logger.debug(f"DEBUG: Test {i} expected_output: {test.get('expected_output', 'NOT_FOUND')}")
+                        self.logger.debug(f"DEBUG: Test {i} input type: {type(test['input'])}")
+                        if 'input' in test['input']:
+                            self.logger.debug(f"DEBUG: Test {i} nested input: {test['input']['input']}")
+                            self.logger.debug(f"DEBUG: Test {i} nested input type: {type(test['input']['input'])}")
+            else:
+                # Direct steps configuration (new behavior)
+                config['steps'] = [
                     {
                         'name': step.name,
                         'description': step.description,
-                        'input': {
-                            'file_path': str(self.config.file_path),
-                            'region': region,
-                            'method': step.command,
-                            'input': step.input  # This now supports multiple inputs
-                        },
+                        'input': step.input,  # Use step input directly
                         'expected_output': step.expected_output,
                         'evaluation': self.config.evaluation.__dict__ if self.config.evaluation else None
                     }
                     for step in self.config.steps
-                ])
-            config['steps'] = [item for sublist in config_steps_temp for item in sublist]
-            
-            # DEBUG: Print the test configuration being created (only in verbose mode)
-            if self.verbose:
-                self.logger.debug(f"DEBUG: Created {len(config['steps'])} test step(s) for runner")
-                for i, test in enumerate(config['steps']):
-                    self.logger.debug(f"DEBUG: Test {i}: {test['name']}")
-                    self.logger.debug(f"DEBUG: Test {i} input: {test['input']}")
-                    self.logger.debug(f"DEBUG: Test {i} method: {test['input'].get('method', 'NOT_FOUND')}")
-                    self.logger.debug(f"DEBUG: Test {i} expected_output: {test.get('expected_output', 'NOT_FOUND')}")
-                    self.logger.debug(f"DEBUG: Test {i} input type: {type(test['input'])}")
-                    if 'input' in test['input']:
-                        self.logger.debug(f"DEBUG: Test {i} nested input: {test['input']['input']}")
-                        self.logger.debug(f"DEBUG: Test {i} nested input type: {type(test['input']['input'])}")
-            
+                ]
+                
+                # DEBUG: Print the test configuration being created (only in verbose mode)
+                if self.verbose:
+                    self.logger.debug(f"DEBUG: Created {len(config['steps'])} test step(s) for runner (direct steps)")
+                    for i, test in enumerate(config['steps']):
+                        self.logger.debug(f"DEBUG: Test {i}: {test['name']}")
+                        self.logger.debug(f"DEBUG: Test {i} input: {test['input']}")
+                        self.logger.debug(f"DEBUG: Test {i} expected_output: {test.get('expected_output', 'NOT_FOUND')}")
+                        self.logger.debug(f"DEBUG: Test {i} input type: {type(test['input'])}")
+        
         return config
     
     def _handle_auto_fix(self, test_execution_result: TestExecutionResult, config: TestConfiguration, runner_config: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
