@@ -1032,7 +1032,7 @@ class LLMCodeFixer:
                 # Safely analyze changes
                 try:
                     changes = self.response_processor.analyze_changes(content, fixed_code)
-                    logger.info("Successfully analyzed changes", extra={'changes_type': type(changes)})
+                    logger.debug("Successfully analyzed changes", extra={'changes_type': type(changes)})
                 except Exception as e:
                     logger.error("Failed to analyze changes", extra={
                         'error': str(e),
@@ -1043,7 +1043,7 @@ class LLMCodeFixer:
                 # Safely extract explanation
                 try:
                     explanation = self.response_processor.extract_explanation(response)
-                    logger.info("Successfully extracted explanation", extra={'has_explanation': bool(explanation)})
+                    logger.debug("Successfully extracted explanation", extra={'has_explanation': bool(explanation)})
                 except Exception as e:
                     logger.error("Failed to extract explanation", extra={
                         'error': str(e),
@@ -1054,7 +1054,7 @@ class LLMCodeFixer:
                 # Safely calculate confidence
                 try:
                     confidence = self.response_processor.calculate_confidence(response)
-                    logger.info("Successfully calculated confidence", extra={'confidence': confidence})
+                    logger.debug("Successfully calculated confidence", extra={'confidence': confidence})
                 except Exception as e:
                     logger.error("Failed to calculate confidence", extra={
                         'error': str(e),
@@ -1067,7 +1067,7 @@ class LLMCodeFixer:
                     context_analysis = self.response_processor.analyze_context(
                         content, fixed_code, context_files
                     )
-                    logger.info("Successfully analyzed context", extra={'has_context_analysis': bool(context_analysis)})
+                    logger.debug("Successfully analyzed context", extra={'has_context_analysis': bool(context_analysis)})
                 except Exception as e:
                     logger.error("Failed to analyze context", extra={
                         'error': str(e),
@@ -1075,7 +1075,7 @@ class LLMCodeFixer:
                     })
                     context_analysis = {}
 
-                logger.info("Creating FixResult with processed data")
+                logger.debug("Creating FixResult with processed data")
                 return FixResult(
                     status=FixStatus.SUCCESS,
                     fixed_code=fixed_code,

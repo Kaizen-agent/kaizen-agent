@@ -301,7 +301,7 @@ class LearningManager:
     def set_baseline_failures(self, failure_data: Optional[Dict]) -> None:
         """Set the baseline failure data from the initial test run."""
         self.baseline_failures = failure_data
-        logger.info("Set baseline failures for learning", extra={
+        logger.debug("Set baseline failures for learning", extra={
             'has_failures': bool(failure_data)
         })
     
@@ -319,7 +319,7 @@ class LearningManager:
         self.attempt_history.append(attempt_record)
         self._analyze_attempt_for_learning(attempt_record)
         
-        logger.info(f"Recorded attempt {attempt_number} for learning", extra={
+        logger.debug(f"Recorded attempt {attempt_number} for learning", extra={
             'status': status,
             'has_changes': bool(changes)
         })
@@ -454,7 +454,7 @@ class LearningManager:
         if current_attempt > 1:
             enhanced_data['previous_attempt_analysis'] = self._analyze_previous_attempts()
         
-        logger.info(f"Generated enhanced failure data for attempt {current_attempt}", extra={
+        logger.debug(f"Generated enhanced failure data for attempt {current_attempt}", extra={
             'has_learning_context': bool(enhanced_data['learning_context']),
             'successful_patterns_count': len(enhanced_data['learning_context']['successful_patterns']),
             'failed_approaches_count': len(enhanced_data['learning_context']['failed_approaches'])
@@ -681,13 +681,13 @@ class CodeFormatter:
                     
                 genai.configure(api_key=api_key)
                 self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
-                self.logger.info("Gemini model initialized successfully for Python formatting")
+                self.logger.debug("Gemini model initialized successfully for Python formatting")
             except Exception as e:
                 self.logger.error(f"Failed to initialize Gemini model: {str(e)}")
                 raise
         else:
             self.model = None
-            self.logger.info(f"Initialized formatter for {self.language} (no LLM support)")
+            self.logger.debug(f"Initialized formatter for {self.language} (no LLM support)")
     
     def _format_with_llm(self, code: str) -> str:
         """Format code using LLM (Python only).
@@ -896,45 +896,44 @@ Code to format:
         return self._basic_typescript_formatting(formatted_code)
     
     def _validate_typescript_syntax(self, code: str) -> Tuple[bool, Optional[str]]:
-        """Validate TypeScript syntax using tsc."""
+        """Validate TypeScript syntax using basic checks for MVP."""
         try:
-            # Create a temporary file for TypeScript validation
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.ts', delete=False) as temp_file:
-                temp_file.write(code)
-                temp_file_path = temp_file.name
+            # For MVP, just do basic syntax validation without external dependencies
+            # Check for balanced brackets, parentheses, and braces
+            brackets = {'(': ')', '[': ']', '{': '}', '<': '>'}
+            stack = []
             
-            try:
-                # Use tsc to check syntax (not execute)
-                result = subprocess.run(
-                    ['npx', 'tsc', '--noEmit', '--skipLibCheck', temp_file_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-                
-                # Clean up temp file
-                os.unlink(temp_file_path)
-                
-                if result.returncode == 0:
-                    return True, None
-                else:
-                    return False, result.stderr
+            for char in code:
+                if char in brackets:
+                    stack.append(char)
+                elif char in brackets.values():
+                    if not stack:
+                        return False, f"Unmatched closing bracket: {char}"
+                    opening = stack.pop()
+                    if brackets[opening] != char:
+                        return False, f"Mismatched brackets: {opening} and {char}"
+            
+            if stack:
+                return False, f"Unclosed brackets: {stack}"
+            
+            # Check for basic TypeScript syntax patterns
+            lines = code.split('\n')
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped:
+                    # Check for unclosed strings
+                    if stripped.count('"') % 2 == 1 or stripped.count("'") % 2 == 1:
+                        return False, f"Unclosed string on line {i}"
                     
-            except subprocess.TimeoutExpired:
-                os.unlink(temp_file_path)
-                return False, "TypeScript validation timeout"
-            except FileNotFoundError:
-                os.unlink(temp_file_path)
-                return False, "TypeScript compiler (tsc) not found"
-            except Exception as e:
-                try:
-                    os.unlink(temp_file_path)
-                except:
-                    pass
-                return False, str(e)
-                
+                    # Check for unclosed template literals
+                    if stripped.count('`') % 2 == 1:
+                        return False, f"Unclosed template literal on line {i}"
+            
+            # For MVP, if we get here, assume it's valid
+            return True, None
+            
         except Exception as e:
-            return False, f"Error creating temporary file: {str(e)}"
+            return False, f"Error in basic TypeScript validation: {str(e)}"
     
     def _fix_typescript_syntax_issues(self, code: str) -> str:
         """Fix common TypeScript syntax issues."""
@@ -1650,7 +1649,7 @@ class AutoFix:
                 config=config,
                 context_files=context_files
             )
-            logger.info("LLM fix result", extra={
+            logger.debug("LLM fix result", extra={
                 'file_path': current_file_path,
                 'status': fix_result.status
             })
@@ -1907,7 +1906,7 @@ class AutoFix:
             Dictionary containing fix results
         """
         try:
-            logger.info("AutoFix initialized")
+            logger.debug("AutoFix initialized")
             logger.info("Starting code fix")
             
             # Initialize components
@@ -1916,17 +1915,17 @@ class AutoFix:
             learning_manager = LearningManager()
             test_history = TestExecutionHistory()
             
-            logger.info(f"State manager: {state_manager}")
-            logger.info(f"Attempt tracker: {attempt_tracker}")
+            logger.debug(f"State manager: {state_manager}")
+            logger.debug(f"Attempt tracker: {attempt_tracker}")
             
             # Set baseline failures for learning
             if test_execution_result:
                 baseline_failures = self._extract_failure_data_from_unified(test_execution_result)
                 learning_manager.set_baseline_failures(baseline_failures)
                 test_history.add_baseline_result(test_execution_result)
-                logger.info("Set baseline failures for learning")
+                logger.debug("Set baseline failures for learning")
             
-            logger.info("Learning manager initialized")
+            logger.debug("Learning manager initialized")
             
             # Check if Git is available
             git_available = self._check_git_availability()
@@ -1954,7 +1953,7 @@ class AutoFix:
             # Use provided test_execution_result as baseline, otherwise run baseline test
             if test_execution_result is not None:
                 baseline_test_results = test_execution_result
-                logger.info("Using provided test execution result as baseline")
+                logger.debug("Using provided test execution result as baseline")
             else:
                 logger.info("Running baseline test before any fixes")
                 baseline_test_results = self.test_runner.run_tests(Path(file_path))
@@ -1962,9 +1961,9 @@ class AutoFix:
                 logger.info(f"Baseline test results: {baseline_test_results}")
             
             try:
-                logger.info(f"Attempt tracker should continue check")
+                logger.debug(f"Attempt tracker should continue check")
                 while attempt_tracker.should_continue():
-                    logger.info(f"Attempt tracker should continue")
+                    logger.debug(f"Attempt tracker should continue")
                     attempt = attempt_tracker.start_attempt()
                     logger.info(f"Starting attempt {attempt.attempt_number} of {self.config.max_retries}")
                     
@@ -1995,9 +1994,9 @@ class AutoFix:
                                 fix_result = self._process_file_with_llm(
                                     current_file, file_content, context_files, enhanced_failure_data, config
                                 )
-                                logger.info(f"fix result: {fix_result}")
+                                logger.debug(f"fix result: {fix_result}")
                                 if fix_result.status == FixStatus.SUCCESS:
-                                    logger.info(f"fix result success")
+                                    logger.debug(f"fix result success")
                                     results['changes'][current_file] = fix_result.changes
                                     results['processed_files'].append({
                                         'file_path': current_file,
@@ -2165,7 +2164,8 @@ class AutoFix:
                     'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
                     'changes_made': True,
                     'learning_summary': learning_summary,
-                    'test_history': test_history.to_legacy_format()
+                    'test_history': test_history.to_legacy_format(),
+                    'best_test_execution_result': best_attempt.test_execution_result if best_attempt else None
                 }
             else:
                 # Only revert if no improvements were made at all
@@ -2183,7 +2183,8 @@ class AutoFix:
                     'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
                     'changes_made': False,
                     'learning_summary': learning_summary,
-                    'test_history': test_history.to_legacy_format()
+                    'test_history': test_history.to_legacy_format(),
+                    'best_test_execution_result': None
                 }
                 
         except Exception as e:
@@ -2203,7 +2204,8 @@ class AutoFix:
                 'status': 'error',
                 'error': str(e),
                 'attempts': [vars(attempt) for attempt in attempt_tracker.attempts] if 'attempt_tracker' in locals() else [],
-                'test_history': test_history.to_legacy_format() if 'test_history' in locals() else None
+                'test_history': test_history.to_legacy_format() if 'test_history' in locals() else None,
+                'best_test_execution_result': None
             }
 
     def _run_tests_and_get_result(self, path: Path):

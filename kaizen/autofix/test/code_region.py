@@ -3466,27 +3466,27 @@ console.log('Google object:', typeof google);
         )
         
         # Add comprehensive logging for Mastra execution
-        logger.info(f"🔍 MASTRA EXECUTION PREVIEW:")
-        logger.info(f"   📥 Input Data:")
-        logger.info(f"      Type: {type(input_data)}")
-        logger.info(f"      Length: {len(input_data) if isinstance(input_data, (list, tuple)) else 'N/A'}")
-        logger.info(f"      Content: {repr(input_data)}")
-        logger.info(f"   📄 Generated Mastra TypeScript Script Preview:")
-        logger.info(f"      Total length: {len(execution_script)} characters")
-        logger.info(f"      First 500 chars: {repr(execution_script[:500])}")
-        logger.info(f"      Last 200 chars: {repr(execution_script[-200:])}")
+        logger.debug(f"🔍 MASTRA EXECUTION PREVIEW:")
+        logger.debug(f"   📥 Input Data:")
+        logger.debug(f"      Type: {type(input_data)}")
+        logger.debug(f"      Length: {len(input_data) if isinstance(input_data, (list, tuple)) else 'N/A'}")
+        logger.debug(f"      Content: {repr(input_data)}")
+        logger.debug(f"   📄 Generated Mastra TypeScript Script Preview:")
+        logger.debug(f"      Total length: {len(execution_script)} characters")
+        logger.debug(f"      First 500 chars: {repr(execution_script[:500])}")
+        logger.debug(f"      Last 200 chars: {repr(execution_script[-200:])}")
         
         # Show the actual script content for debugging
-        logger.info(f"   📋 FULL MASTRA SCRIPT:")
-        logger.info(f"      {'='*80}")
+        logger.debug(f"   📋 FULL MASTRA SCRIPT:")
+        logger.debug(f"      {'='*80}")
         script_lines = execution_script.split('\n')
         for i, line in enumerate(script_lines, 1):
             if i <= 20:  # Show first 20 lines
-                logger.info(f"      {i:2d}: {line}")
+                logger.debug(f"      {i:2d}: {line}")
             elif i == 21:
-                logger.info(f"      ... (showing first 20 lines, script has {len(script_lines)} total lines)")
+                logger.debug(f"      ... (showing first 20 lines, script has {len(script_lines)} total lines)")
                 break
-        logger.info(f"      {'='*80}")
+        logger.debug(f"      {'='*80}")
         exec_file_path = self.workspace_root / f"temp_mastra_script_{region_info.name}_{int(time.time())}.ts"
         with open(exec_file_path, 'w') as exec_file:
             exec_file.write(execution_script)
@@ -3500,8 +3500,8 @@ console.log('Google object:', typeof google);
                 '--compiler-options', '{"module":"commonjs","target":"es2020","esModuleInterop":true,"skipLibCheck":true,"moduleResolution":"node16","allowImportingTsExtensions":true}',
                 str(exec_file_path)
             ]
-            logger.info(f"🚀 Starting Mastra-specific ts-node execution...")
-            logger.info(f"   Command: {' '.join(ts_node_cmd)}")
+            logger.debug(f"🚀 Starting Mastra-specific ts-node execution...")
+            logger.debug(f"   Command: {' '.join(ts_node_cmd)}")
             execution_start = time.time()
             result = subprocess.run(
                 ts_node_cmd,
@@ -3517,7 +3517,7 @@ console.log('Google object:', typeof google);
                 }
             )
             execution_time = time.time() - execution_start
-            logger.info(f"✅ Mastra-specific execution completed (took {execution_time:.2f}s)")
+            logger.debug(f"✅ Mastra-specific execution completed (took {execution_time:.2f}s)")
             if result.returncode != 0:
                 logger.error(f"❌ Mastra-specific execution failed!")
                 logger.error(f"   Return code: {result.returncode}")

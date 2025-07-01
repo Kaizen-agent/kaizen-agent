@@ -178,13 +178,12 @@ steps:
 Create `kaizen.yaml`:
 
 ```yaml
-name: Email Improvement Agent Test (TypeScript)
-file_path: my_agent.ts
+name: Email Improvement Agent Test
+file_path: src/mastra/agents/email-agent.ts
+language: typescript
 description: This agent improves email drafts by making them more professional, clear, and well-structured. It transforms casual or poorly written emails into polished, business-appropriate communications.
 agent:
-  module: my_agent
-  class: emailFixAgent
-  method: run
+  module: email-agent  # Just the file name without extension
 
 evaluation:
   evaluation_targets:
@@ -196,44 +195,21 @@ evaluation:
       source: return
       criteria: "The response should contain only the improved email content without any explanatory text, markdown formatting, or additional commentary. It should be a clean, standalone email draft ready for use."
       weight: 0.5
-    
 
 files_to_fix:
-  - my_agent.ts
+  - src/mastra/agents/email-agent.ts
+
+settings:
+  timeout: 180
 
 steps:
   - name: Professional Email Improvement
     input:
-      file_path: my_agent.ts
-      method: run
-      input: 
-        - name: messages
-          type: array
-          value:
-            - role: "user"
-              content: "hey boss, i need time off next week. thanks"
-  
-  - name: Edge Case - Empty Email
-    input:
-      file_path: my_agent.ts
-      method: run
-      input: 
-        - name: messages
-          type: array
-          value:
-            - role: "user"
-              content: ""
+      input: "hey boss, i need time off next week. thanks"
   
   - name: Edge Case - Very Informal Email
     input:
-      file_path: my_agent.ts
-      method: run
-      input: 
-        - name: messages
-          type: array
-          value:
-            - role: "user"
-              content: "yo dude, can't make it to the meeting tomorrow. got stuff to do. sorry!"
+      input: "yo dude, can't make it to the meeting tomorrow. got stuff to do. sorry!"
 ```
 
 ### 4. Run Tests
