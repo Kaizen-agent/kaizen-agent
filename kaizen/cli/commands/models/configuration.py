@@ -1,11 +1,11 @@
 """Test configuration model."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from kaizen.cli.commands.errors import ConfigurationError
-from ..types import PRStrategy, DEFAULT_MAX_RETRIES
+from ..types import PRStrategy, DEFAULT_MAX_RETRIES, Language, DEFAULT_LANGUAGE
 
 from .metadata import TestMetadata
 from .evaluation import TestEvaluation
@@ -51,6 +51,7 @@ class TestConfiguration:
         dependencies: List of required dependencies
         referenced_files: List of referenced files to import
         files_to_fix: List of files that should be fixed
+        language: Test language
     """
     # Required fields
     name: str
@@ -74,14 +75,63 @@ class TestConfiguration:
     dependencies: List[str] = field(default_factory=list)
     referenced_files: List[str] = field(default_factory=list)
     files_to_fix: List[str] = field(default_factory=list)
+    language: Language = DEFAULT_LANGUAGE
+
+    def with_cli_overrides(
+        self,
+        auto_fix: bool = False,
+        create_pr: bool = False,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        base_branch: str = 'main',
+        pr_strategy: str = 'ALL_PASSING',
+        language: Optional[str] = None
+    ) -> 'TestConfiguration':
+        """Create a new configuration with CLI overrides applied.
+        
+        This method efficiently creates a new configuration instance with
+        CLI-specific settings overridden, avoiding the need to manually
+        copy all fields.
+        
+        Args:
+            auto_fix: Whether to enable auto-fix
+            create_pr: Whether to create pull requests
+            max_retries: Maximum number of retry attempts
+            base_branch: Base branch for pull requests
+            pr_strategy: Strategy for when to create PRs
+            language: Language override (if provided)
+            
+        Returns:
+            New TestConfiguration instance with overrides applied
+        """
+        # Prepare override values
+        overrides = {
+            'auto_fix': auto_fix,
+            'create_pr': create_pr,
+            'max_retries': max_retries,
+            'base_branch': base_branch,
+            'pr_strategy': PRStrategy.from_str(pr_strategy)
+        }
+        
+        # Handle language override if provided
+        if language is not None and str(language).strip() != '':
+            overrides['language'] = Language.from_str(language)
+        
+        # Use dataclass replace for efficient field updates
+        return replace(self, **overrides)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], config_path: Path) -> 'TestConfiguration':
+    def from_dict(
+        cls, 
+        data: Dict[str, Any], 
+        config_path: Path,
+        cli_overrides: Optional[Dict[str, Any]] = None
+    ) -> 'TestConfiguration':
         """Create a TestConfiguration instance from a dictionary.
         
         Args:
             data: Dictionary containing configuration data
             config_path: Path to the configuration file
+            cli_overrides: Optional CLI parameter overrides
             
         Returns:
             TestConfiguration instance
@@ -90,6 +140,10 @@ class TestConfiguration:
             ConfigurationError: If configuration is invalid
             FileNotFoundError: If test file does not exist
         """
+        # Apply CLI overrides to data if provided
+        if cli_overrides:
+            data = {**data, **cli_overrides}
+        
         # Parse PR strategy
         pr_strategy = data.get('pr_strategy', 'ALL_PASSING')
         if isinstance(pr_strategy, str):
@@ -97,6 +151,25 @@ class TestConfiguration:
                 pr_strategy = PRStrategy.from_str(pr_strategy)
             except ValueError as e:
                 raise ConfigurationError(str(e))
+        
+        # Parse language
+        language = DEFAULT_LANGUAGE
+        if 'language' in data:
+            lang_val = data['language']
+            print(f"DEBUG: Processing language value: {lang_val} (type: {type(lang_val)})")
+            if isinstance(lang_val, Language):
+                language = lang_val
+                print(f"DEBUG: Using Language enum directly: {language}")
+            elif isinstance(lang_val, str):
+                try:
+                    language = Language.from_str(lang_val)
+                    print(f"DEBUG: Converted string to Language: {language}")
+                except ValueError as e:
+                    raise ConfigurationError(str(e))
+            else:
+                raise ConfigurationError(f"Invalid type for language: {type(lang_val)}")
+        else:
+            print(f"DEBUG: No language in data, using default: {language}")
         
         # Parse agent entry point if present
         agent_entry_point = None
@@ -129,5 +202,6 @@ class TestConfiguration:
             pr_strategy=pr_strategy,
             dependencies=data.get('dependencies', []),
             referenced_files=data.get('referenced_files', []),
-            files_to_fix=data.get('files_to_fix', [])
+            files_to_fix=data.get('files_to_fix', []),
+            language=language
         ) 

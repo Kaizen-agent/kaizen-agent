@@ -2075,7 +2075,203 @@ class CodeRegionExecutor:
         ]
         return any(pattern in code for pattern in mastra_patterns)
     
-
+    def _create_optimized_typescript_execution_script(
+        self, 
+        file_path: str, 
+        method_name: Optional[str], 
+        input_data: List[Any],
+        is_mastra: bool = False
+    ) -> str:
+        """Create an optimized TypeScript execution script for faster loading.
+        
+        Args:
+            file_path: Path to the TypeScript file to execute
+            method_name: Optional method name to call
+            input_data: Input data to pass to the method
+            is_mastra: Whether this is a Mastra agent (enables optimizations)
+            
+        Returns:
+            TypeScript execution script as a string
+        """
+        import json
+        import os
+        
+        # Convert to absolute path and then to relative path for import
+        # Use workspace_root as the base directory since that's where ts-node runs
+        abs_path = os.path.abspath(file_path)
+        rel_path = os.path.relpath(abs_path, str(self.workspace_root))
+        rel_path = rel_path.replace('\\', '/')
+        
+        # Add debugging for path resolution
+        logger.debug(f"DEBUG: Path resolution for TypeScript execution:")
+        logger.debug(f"   Original file_path: {file_path}")
+        logger.debug(f"   Absolute path: {abs_path}")
+        logger.debug(f"   Workspace root: {self.workspace_root}")
+        logger.debug(f"   Relative path: {rel_path}")
+        
+        # Ensure the import path starts with ./ for relative imports
+        if not rel_path.startswith('./') and not rel_path.startswith('../'):
+            rel_path = f"./{rel_path}"
+            logger.debug(f"   Final import path with ./ prefix: {rel_path}")
+        
+        # Convert input data to JSON string
+        input_json = json.dumps(input_data)
+        
+        # Add Mastra-specific optimizations
+        mastra_optimizations = ""
+        if is_mastra:
+            mastra_optimizations = """
+        // Mastra-specific optimizations
+        process.env.NODE_ENV = 'production';  // Disable development features
+        process.env.TS_NODE_CACHE = 'true';   // Enable TypeScript caching
+        process.env.TS_NODE_COMPILER_OPTIONS = JSON.stringify({
+            "module": "commonjs",
+            "target": "es2020", 
+            "esModuleInterop": true,
+            "skipLibCheck": true,  // Skip library type checking for speed
+            "noEmitOnError": false // Continue even with type errors
+        });
+"""
+        
+        # Create the execution script with optimizations
+        script = f"""
+// Optimized TypeScript execution script
+{mastra_optimizations}
+(async () => {{
+    try {{
+        // Dynamic import of the target module with error handling
+        let targetModule;
+        try {{
+            targetModule = await import('{rel_path}');
+        }} catch (importError) {{
+            // If dynamic import fails, try require (for CommonJS modules)
+            try {{
+                targetModule = require('{rel_path}');
+            }} catch (requireError) {{
+                throw new Error(`Failed to import module: ${{importError.message}} | ${{requireError.message}}`);
+            }}
+        }}
+        
+        // Input data
+        const inputData = {input_json};
+        
+        // Execute based on the module structure
+        let result = null;
+        
+        // If method_name is specified, try to call it
+        if ('{method_name}' && typeof targetModule['{method_name}'] === 'function') {{
+            result = await targetModule['{method_name}'](...inputData);
+        }}
+        // If the module itself is a function, call it
+        else if (typeof targetModule === 'function') {{
+            result = await targetModule(...inputData);
+        }}
+        // If the module has a default export that's a function
+        else if (targetModule.default && typeof targetModule.default === 'function') {{
+            result = await targetModule.default(...inputData);
+        }}
+        // If the module has a main function
+        else if (targetModule.main && typeof targetModule.main === 'function') {{
+            result = await targetModule.main(...inputData);
+        }}
+        // Handle modern agent frameworks (like Mastra) that export agent instances
+        else if (targetModule.default && typeof targetModule.default === 'object' && targetModule.default.run) {{
+            // Agent instance with run method (common pattern)
+            result = await targetModule.default.run(...inputData);
+        }}
+        else if (targetModule.default && typeof targetModule.default === 'object' && targetModule.default.process) {{
+            // Agent instance with process method
+            result = await targetModule.default.process(...inputData);
+        }}
+        else if (targetModule.default && typeof targetModule.default === 'object' && targetModule.default.execute) {{
+            // Agent instance with execute method
+            result = await targetModule.default.execute(...inputData);
+        }}
+        // Handle named exports for agent instances
+        else {{
+            // Look for any exported object that might be an agent
+            const exportedNames = Object.keys(targetModule);
+            let agentFound = false;
+            
+            // Debug: Log all exports and their types
+            console.error('DEBUG: Available exports:', exportedNames);
+            for (const name of exportedNames) {{
+                const exported = targetModule[name];
+                console.error(`DEBUG: ${name} type:`, typeof exported);
+                if (typeof exported === 'object' && exported !== null) {{
+                    console.error(`DEBUG: ${name} keys:`, Object.keys(exported));
+                    console.error(`DEBUG: ${name} methods:`, Object.getOwnPropertyNames(exported).filter(key => typeof exported[key] === 'function'));
+                }}
+            }}
+            
+            for (const name of exportedNames) {{
+                const exported = targetModule[name];
+                
+                // Check if it's a function (direct callable)
+                if (typeof exported === 'function') {{
+                    result = await exported(...inputData);
+                    agentFound = true;
+                    console.error(`DEBUG: Called function ${name}`);
+                    break;
+                }}
+                
+                // Check if it's an object with agent methods
+                if (typeof exported === 'object' && exported !== null) {{
+                    // Check for common agent method names
+                    if (typeof exported.run === 'function') {{
+                        result = await exported.run(...inputData);
+                        agentFound = true;
+                        console.error(`DEBUG: Called ${name}.run()`);
+                        break;
+                    }} else if (typeof exported.process === 'function') {{
+                        result = await exported.process(...inputData);
+                        agentFound = true;
+                        console.error(`DEBUG: Called ${name}.process()`);
+                        break;
+                    }} else if (typeof exported.execute === 'function') {{
+                        result = await exported.execute(...inputData);
+                        agentFound = true;
+                        console.error(`DEBUG: Called ${name}.execute()`);
+                        break;
+                    }} else if (typeof exported.invoke === 'function') {{
+                        result = await exported.invoke(...inputData);
+                        agentFound = true;
+                        console.error(`DEBUG: Called ${name}.invoke()`);
+                        break;
+                    }}
+                    
+                    // Check if it's a class constructor (new Agent pattern)
+                    if (exported.prototype && typeof exported.prototype.run === 'function') {{
+                        const instance = new exported();
+                        result = await instance.run(...inputData);
+                        agentFound = true;
+                        console.error(`DEBUG: Instantiated and called ${name}.run()`);
+                        break;
+                    }}
+                }}
+            }}
+            
+            if (!agentFound) {{
+                throw new Error('No callable function or agent instance found in module. Available exports: ' + exportedNames.join(', '));
+            }}
+        }}
+        
+        // Output the result
+        console.log(JSON.stringify({{
+            result: result,
+            tracked_values: {{}}
+        }}));
+        
+    }} catch (error) {{
+        console.error(JSON.stringify({{
+            error: error.message,
+            tracked_values: {{}}
+        }}));
+        process.exit(1);
+    }}
+}})();
+"""
+        return script
 
     def execute_region_with_tracking(
         self, 
@@ -2439,30 +2635,60 @@ class CodeRegionExecutor:
         else:
             logger.info(f"📝 Regular TypeScript code detected: {region_info.name}")
         
-        # Execute with Mastra-specific strategy
-        try:
-            logger.info(f"🤖 Using Mastra-specific execution strategy...")
-            strategy_start = time.time()
-            
-            result = self._execute_with_mastra_specific_handling(
-                region_info, method_name, input_data, tracked_variables, timeout, is_mastra
-            )
-            
-            strategy_time = time.time() - strategy_start
-            logger.info(f"✅ Mastra-specific execution succeeded (took {strategy_time:.2f}s)")
-            
-            # Cache successful results
-            self._execution_cache[cache_key] = result
-            return result
-            
-        except subprocess.TimeoutExpired as e:
-            strategy_time = time.time() - strategy_start
-            logger.error(f"⏰ Mastra-specific execution timed out (took {strategy_time:.2f}s)")
-            raise e
-        except Exception as e:
-            strategy_time = time.time() - strategy_start
-            logger.error(f"❌ Mastra-specific execution failed (took {strategy_time:.2f}s): {str(e)}")
-            raise e
+        # Try multiple execution strategies
+        execution_strategies = [
+            ("optimized_ts_node", self._execute_with_optimized_ts_node),
+            ("simple_ts_node", self._execute_with_simple_ts_node),
+            ("node_with_tsc", self._execute_with_node_and_tsc),
+        ]
+        
+        last_error = None
+        
+        for strategy_name, strategy_func in execution_strategies:
+            try:
+                logger.info(f"🔄 Trying execution strategy: {strategy_name}")
+                strategy_start = time.time()
+                
+                result = strategy_func(
+                    region_info, method_name, input_data, tracked_variables, timeout, is_mastra
+                )
+                
+                strategy_time = time.time() - strategy_start
+                logger.info(f"✅ Strategy '{strategy_name}' succeeded (took {strategy_time:.2f}s)")
+                
+                # Cache successful results
+                self._execution_cache[cache_key] = result
+                return result
+                
+            except subprocess.TimeoutExpired as e:
+                strategy_time = time.time() - strategy_start
+                logger.warning(f"⏰ Strategy '{strategy_name}' timed out (took {strategy_time:.2f}s)")
+                last_error = e
+                continue
+            except Exception as e:
+                strategy_time = time.time() - strategy_start
+                logger.warning(f"❌ Strategy '{strategy_name}' failed (took {strategy_time:.2f}s): {str(e)}")
+                last_error = e
+                continue
+        
+        # All strategies failed
+        total_time = time.time() - start_time
+        logger.error(f"💥 All TypeScript execution strategies failed!")
+        logger.error(f"   Total time elapsed: {total_time:.2f} seconds")
+        logger.error(f"   Last error: {str(last_error)}")
+        
+        error_result = {
+            'result': None,
+            'tracked_values': {},
+            'tracked_variables': tracked_variables,
+            'error': f"All TypeScript execution strategies failed after {total_time:.2f} seconds",
+            'error_details': f"Last error: {str(last_error)}",
+            'total_time': total_time,
+            'strategies_tried': [name for name, _ in execution_strategies]
+        }
+        
+        self._execution_cache[cache_key] = error_result
+        return error_result
 
     def _execute_with_entry_point(
         self,
@@ -3068,13 +3294,560 @@ class CodeRegionExecutor:
         self.clear_cache()
         logger.debug("CodeRegionExecutor cleanup completed")
 
+    def _execute_with_optimized_ts_node(
+        self, region_info: RegionInfo, method_name: Optional[str], 
+        input_data: List[Any], tracked_variables: Set[str], 
+        timeout: Optional[int], is_mastra: bool
+    ) -> Dict[str, Any]:
+        """Execute TypeScript with optimized ts-node settings."""
+        import tempfile
+        import json
+        import subprocess
+        import time
+        
+        logger.info(f"📁 Creating temporary TypeScript file in workspace root...")
+        temp_file_start = time.time()
+        
+        # Create temporary file in workspace root instead of system temp directory
+        import time
+        temp_file_path = self.workspace_root / f"temp_exec_{region_info.name}_{int(time.time())}.ts"
+        with open(temp_file_path, 'w') as temp_file:
+            temp_file.write(region_info.code)
+            temp_file.flush()  # Ensure content is written to disk
+            os.fsync(temp_file.fileno())  # Force sync to disk
+            
+            temp_file_time = time.time() - temp_file_start
+            logger.info(f"✅ Temporary file created: {temp_file_path} (took {temp_file_time:.2f}s)")
+            logger.debug(f"   File size: {os.path.getsize(temp_file_path)} bytes")
+            logger.debug(f"   Code length: {len(region_info.code)} characters")
+            
+            # Verify file contents
+            with open(temp_file_path, 'r') as verify_file:
+                actual_content = verify_file.read()
+                logger.debug(f"   Actual file content length: {len(actual_content)} characters")
+                if len(actual_content) != len(region_info.code):
+                    logger.warning(f"   ⚠️  File content length mismatch! Expected: {len(region_info.code)}, Got: {len(actual_content)}")
+                    # Try to write the file again with a different approach
+                    logger.info(f"   🔄 Retrying file write with explicit flush...")
+                    with open(temp_file_path, 'w') as retry_file:
+                        retry_file.write(region_info.code)
+                        retry_file.flush()
+                        os.fsync(retry_file.fileno())
+                    
+                    # Verify again
+                    with open(temp_file_path, 'r') as verify_file2:
+                        actual_content2 = verify_file2.read()
+                        logger.debug(f"   After retry - Actual file content length: {len(actual_content2)} characters")
+                        if len(actual_content2) == len(region_info.code):
+                            logger.info(f"   ✅ File content written correctly after retry")
+                        else:
+                            logger.error(f"   ❌ File content still incorrect after retry")
+                else:
+                    logger.debug(f"   ✅ File content written correctly")
+            
+            # Prepare the optimized execution script
+            logger.info(f"📝 Generating optimized execution script...")
+            script_start = time.time()
+            
+            execution_script = self._create_optimized_typescript_execution_script(
+                temp_file_path, method_name, input_data, is_mastra
+            )
+            
+            script_time = time.time() - script_start
+            logger.info(f"✅ Execution script generated (took {script_time:.2f}s)")
+            logger.debug(f"   Script length: {len(execution_script)} characters")
+            
+            # Write execution script to a temporary file in workspace root
+            logger.info(f"📄 Writing execution script to temporary file in workspace root...")
+            exec_file_start = time.time()
+            
+            exec_file_path = self.workspace_root / f"temp_exec_script_{region_info.name}_{int(time.time())}.ts"
+            with open(exec_file_path, 'w') as exec_file:
+                exec_file.write(execution_script)
+                exec_file.flush()  # Ensure content is written to disk
+                os.fsync(exec_file.fileno())  # Force sync to disk
+                
+                exec_file_time = time.time() - exec_file_start
+                logger.info(f"✅ Execution script written: {exec_file_path} (took {exec_file_time:.2f}s)")
+                logger.debug(f"   Script file size: {os.path.getsize(exec_file_path)} bytes")
+                
+                try:
+                    # Prepare ts-node command with optimizations
+                    logger.info(f"⚙️  Preparing ts-node command...")
+                    cmd_start = time.time()
+                    
+                    ts_node_cmd = ['npx', 'ts-node']
+                    
+                    # Add Mastra-specific optimizations
+                    if is_mastra:
+                        logger.info(f"🔧 Adding Mastra-specific optimizations...")
+                        ts_node_cmd.extend([
+                            '--transpile-only',  # Skip type checking for speed
+                            '--skip-project',    # Skip tsconfig.json for faster loading
+                            '--compiler-options', '{"module":"commonjs","target":"es2020","esModuleInterop":true,"skipLibCheck":true}'
+                        ])
+                        logger.info(f"   Added: --transpile-only, --skip-project, optimized compiler options")
+                    
+                    ts_node_cmd.append(str(exec_file_path))
+                    
+                    cmd_time = time.time() - cmd_start
+                    logger.info(f"✅ ts-node command prepared (took {cmd_time:.2f}s)")
+                    logger.info(f"   Command: {' '.join(ts_node_cmd)}")
+                    
+                    # Prepare environment variables
+                    logger.info(f"🌍 Setting up environment variables...")
+                    env_start = time.time()
+                    
+                    env_vars = {
+                        **os.environ,
+                        'NODE_ENV': 'production' if is_mastra else 'development',
+                        'TS_NODE_CACHE': 'true',
+                        'TS_NODE_CACHE_DIRECTORY': str(self._ts_node_cache_dir) if self._ts_node_cache_dir else '',
+                    }
+                    
+                    if is_mastra:
+                        env_vars.update({
+                            'TS_NODE_COMPILER_OPTIONS': '{"module":"commonjs","target":"es2020","esModuleInterop":true,"skipLibCheck":true,"noEmitOnError":false}'
+                        })
+                    
+                    env_time = time.time() - env_start
+                    logger.info(f"✅ Environment variables set (took {env_time:.2f}s)")
+                    logger.debug(f"   NODE_ENV: {env_vars.get('NODE_ENV')}")
+                    logger.debug(f"   TS_NODE_CACHE: {env_vars.get('TS_NODE_CACHE')}")
+                    logger.debug(f"   TS_NODE_CACHE_DIRECTORY: {env_vars.get('TS_NODE_CACHE_DIRECTORY')}")
+                    
+                    # Calculate timeout
+                    actual_timeout = timeout or (180 if is_mastra else 120)
+                    logger.info(f"⏱️  Setting execution timeout: {actual_timeout} seconds")
+                    
+                    # Execute with optimized settings
+                    logger.info(f"🚀 Starting ts-node execution...")
+                    logger.info(f"   This may take a while for first-time compilation...")
+                    logger.info(f"   Working directory: {self.workspace_root}")
+                    logger.info(f"   Temp file: {temp_file_path}")
+                    logger.info(f"   Exec script: {exec_file_path}")
+                    
+                    # Check if node_modules exists in workspace
+                    node_modules_path = self.workspace_root / 'node_modules'
+                    if node_modules_path.exists():
+                        logger.info(f"   node_modules found at: {node_modules_path}")
+                    else:
+                        logger.warning(f"   node_modules not found at: {node_modules_path}")
+                    
+                    execution_start = time.time()
+                    
+                    result = subprocess.run(
+                        ts_node_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=actual_timeout,
+                        cwd=str(self.workspace_root),  # Run in workspace root to find node_modules
+                        env=env_vars
+                    )
+                    
+                    execution_time = time.time() - execution_start
+                    logger.info(f"✅ ts-node execution completed (took {execution_time:.2f}s)")
+                    logger.info(f"   Return code: {result.returncode}")
+                    logger.debug(f"   stdout length: {len(result.stdout)} characters")
+                    logger.debug(f"   stderr length: {len(result.stderr)} characters")
+                    
+                    if result.returncode != 0:
+                        logger.error(f"❌ TypeScript execution failed!")
+                        logger.error(f"   Return code: {result.returncode}")
+                        logger.error(f"   stderr: {result.stderr}")
+                        logger.error(f"   stdout: {result.stdout}")
+                        
+                        raise Exception(f"TypeScript execution failed: {result.stderr}")
+                    
+                    # Parse the output as JSON
+                    logger.info(f"📊 Parsing execution output...")
+                    parse_start = time.time()
+                    
+                    # Check if stdout is empty
+                    if not result.stdout.strip():
+                        logger.error(f"❌ TypeScript execution produced no output!")
+                        logger.error(f"   stdout is empty")
+                        logger.error(f"   stderr: {result.stderr}")
+                        logger.error(f"   This usually means the TypeScript code failed to execute or didn't produce any console.log output")
+                        raise Exception(f"TypeScript execution produced no output. stderr: {result.stderr}")
+                    
+                    try:
+                        output_data = json.loads(result.stdout.strip())
+                        parse_time = time.time() - parse_start
+                        logger.info(f"✅ Output parsed successfully (took {parse_time:.2f}s)")
+                        logger.debug(f"   Parsed data: {output_data}")
+                        
+                        return {
+                            'result': output_data.get('result'),
+                            'tracked_values': output_data.get('tracked_values', {}),
+                            'tracked_variables': tracked_variables,
+                            'execution_time': execution_time
+                        }
+                        
+                    except json.JSONDecodeError as e:
+                        parse_time = time.time() - parse_start
+                        logger.error(f"❌ Failed to parse TypeScript output as JSON (took {parse_time:.2f}s)")
+                        logger.error(f"   JSON error: {str(e)}")
+                        logger.error(f"   Raw stdout: {repr(result.stdout)}")
+                        logger.error(f"   stdout length: {len(result.stdout)}")
+                        logger.error(f"   stderr: {result.stderr}")
+                        
+                        # Try to provide more helpful error information
+                        if result.stdout.strip():
+                            logger.error(f"   First 200 chars of stdout: {result.stdout[:200]}")
+                        
+                        raise Exception(f"Failed to parse output as JSON: {str(e)}. Raw output: {repr(result.stdout)}")
+                        
+                finally:
+                    # Clean up execution script
+                    logger.debug(f"🧹 Cleaning up execution script file...")
+                    try:
+                        exec_file_path.unlink()
+                        logger.debug(f"   Execution script cleaned up")
+                    except OSError as e:
+                        logger.warning(f"   Failed to clean up execution script: {str(e)}")
+                        
+        # Clean up temporary file
+        logger.debug(f"🧹 Cleaning up temporary TypeScript file...")
+        try:
+            temp_file_path.unlink()
+            logger.debug(f"   Temporary file cleaned up")
+        except OSError as e:
+            logger.warning(f"   Failed to clean up temporary file: {str(e)}")
 
+    def _execute_with_simple_ts_node(
+        self, region_info: RegionInfo, method_name: Optional[str], 
+        input_data: List[Any], tracked_variables: Set[str], 
+        timeout: Optional[int], is_mastra: bool
+    ) -> Dict[str, Any]:
+        """Execute TypeScript with simple ts-node (no optimizations)."""
+        import tempfile
+        import json
+        import subprocess
+        import time
+        
+        logger.info(f"📁 Creating temporary TypeScript file in workspace root (simple mode)...")
+        
+        # Create temporary file in workspace root instead of system temp directory
+        import time
+        temp_file_path = self.workspace_root / f"temp_simple_{region_info.name}_{int(time.time())}.ts"
+        with open(temp_file_path, 'w') as temp_file:
+            temp_file.write(region_info.code)
+            temp_file.flush()  # Ensure content is written to disk
+            os.fsync(temp_file.fileno())  # Force sync to disk
+        
+        # Create a simpler execution script
+        execution_script = self._create_simple_typescript_execution_script(
+            str(temp_file_path), method_name, input_data
+        )
+        
+        exec_file_path = self.workspace_root / f"temp_simple_script_{region_info.name}_{int(time.time())}.ts"
+        with open(exec_file_path, 'w') as exec_file:
+            exec_file.write(execution_script)
+            exec_file.flush()  # Ensure content is written to disk
+            os.fsync(exec_file.fileno())  # Force sync to disk
+        
+        try:
+            # Use simple ts-node without optimizations
+            ts_node_cmd = ['npx', 'ts-node', str(exec_file_path)]
+            
+            logger.info(f"🚀 Starting simple ts-node execution...")
+            logger.info(f"   Command: {' '.join(ts_node_cmd)}")
+            logger.info(f"   Working directory: {self.workspace_root}")
+            logger.info(f"   Temp file: {temp_file_path}")
+            logger.info(f"   Exec script: {exec_file_path}")
+            
+            execution_start = time.time()
+            
+            result = subprocess.run(
+                ts_node_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout or 120,
+                cwd=str(self.workspace_root),  # Run in workspace root to find node_modules
+                env=os.environ
+            )
+            
+            execution_time = time.time() - execution_start
+            logger.info(f"✅ Simple ts-node execution completed (took {execution_time:.2f}s)")
+            
+            if result.returncode != 0:
+                logger.error(f"❌ Simple TypeScript execution failed!")
+                logger.error(f"   Return code: {result.returncode}")
+                logger.error(f"   stderr: {result.stderr}")
+                logger.error(f"   stdout: {result.stdout}")
+                raise Exception(f"Simple TypeScript execution failed: {result.stderr}")
+            
+            # Check if stdout is empty
+            if not result.stdout.strip():
+                logger.error(f"❌ Simple TypeScript execution produced no output!")
+                logger.error(f"   stdout is empty")
+                logger.error(f"   stderr: {result.stderr}")
+                raise Exception(f"Simple TypeScript execution produced no output. stderr: {result.stderr}")
+            
+            # Parse the output
+            output_data = json.loads(result.stdout.strip())
+            
+            return {
+                'result': output_data.get('result'),
+                'tracked_values': output_data.get('tracked_values', {}),
+                'tracked_variables': tracked_variables,
+                'execution_time': execution_time
+            }
+            
+        finally:
+            try:
+                exec_file_path.unlink()
+            except OSError:
+                pass
+                    
+        try:
+            temp_file_path.unlink()
+        except OSError:
+            pass
 
+    def _execute_with_node_and_tsc(
+        self, region_info: RegionInfo, method_name: Optional[str], 
+        input_data: List[Any], tracked_variables: Set[str], 
+        timeout: Optional[int], is_mastra: bool
+    ) -> Dict[str, Any]:
+        """Execute TypeScript by compiling to JavaScript first, then running with Node.js."""
+        import tempfile
+        import json
+        import subprocess
+        import time
+        
+        logger.info(f"📁 Creating temporary TypeScript file in workspace root (compile mode)...")
+        
+        # Create temporary file in workspace root instead of system temp directory
+        import time
+        temp_file_path = self.workspace_root / f"temp_compile_{region_info.name}_{int(time.time())}.ts"
+        with open(temp_file_path, 'w') as temp_file:
+            temp_file.write(region_info.code)
+            temp_file.flush()  # Ensure content is written to disk
+            os.fsync(temp_file.fileno())  # Force sync to disk
+        
+        # Create execution script
+        execution_script = self._create_simple_typescript_execution_script(
+            str(temp_file_path), method_name, input_data
+        )
+        
+        exec_file_path = self.workspace_root / f"temp_compile_script_{region_info.name}_{int(time.time())}.ts"
+        with open(exec_file_path, 'w') as exec_file:
+            exec_file.write(execution_script)
+            exec_file.flush()  # Ensure content is written to disk
+            os.fsync(exec_file.fileno())  # Force sync to disk
+        
+        try:
+            # Compile TypeScript to JavaScript
+            logger.info(f"🔨 Compiling TypeScript to JavaScript...")
+            compile_start = time.time()
+            
+            js_file_path = exec_file_path.with_suffix('.js')
+            
+            compile_result = subprocess.run(
+                ['npx', 'tsc', str(exec_file_path), '--outDir', str(self.workspace_root)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=str(self.workspace_root)  # Run in workspace root to find node_modules
+            )
+            
+            compile_time = time.time() - compile_start
+            logger.info(f"✅ TypeScript compilation completed (took {compile_time:.2f}s)")
+            
+            if compile_result.returncode != 0:
+                logger.error(f"❌ TypeScript compilation failed!")
+                logger.error(f"   Return code: {compile_result.returncode}")
+                logger.error(f"   stderr: {compile_result.stderr}")
+                logger.error(f"   stdout: {compile_result.stdout}")
+                raise Exception(f"TypeScript compilation failed: {compile_result.stderr}")
+            
+            # Run the compiled JavaScript with Node.js
+            logger.info(f"🚀 Running compiled JavaScript with Node.js...")
+            logger.info(f"   Command: node {js_file_path}")
+            
+            execution_start = time.time()
+            
+            result = subprocess.run(
+                ['node', str(js_file_path)],
+                capture_output=True,
+                text=True,
+                timeout=timeout or 120,
+                cwd=str(self.workspace_root),  # Run in workspace root to find node_modules
+                env=os.environ
+            )
+            
+            execution_time = time.time() - execution_start
+            logger.info(f"✅ Node.js execution completed (took {execution_time:.2f}s)")
+            
+            if result.returncode != 0:
+                logger.error(f"❌ Node.js execution failed!")
+                logger.error(f"   Return code: {result.returncode}")
+                logger.error(f"   stderr: {result.stderr}")
+                logger.error(f"   stdout: {result.stdout}")
+                raise Exception(f"Node.js execution failed: {result.stderr}")
+            
+            # Check if stdout is empty
+            if not result.stdout.strip():
+                logger.error(f"❌ Node.js execution produced no output!")
+                logger.error(f"   stdout is empty")
+                logger.error(f"   stderr: {result.stderr}")
+                raise Exception(f"Node.js execution produced no output. stderr: {result.stderr}")
+            
+            # Parse the output
+            output_data = json.loads(result.stdout.strip())
+            
+            return {
+                'result': output_data.get('result'),
+                'tracked_values': output_data.get('tracked_values', {}),
+                'tracked_variables': tracked_variables,
+                'execution_time': execution_time
+            }
+            
+        finally:
+            # Clean up
+            try:
+                exec_file_path.unlink()
+                if js_file_path.exists():
+                    js_file_path.unlink()
+            except OSError:
+                pass
+                    
+        try:
+            temp_file_path.unlink()
+        except OSError:
+            pass
 
-
-
-
-
+    def _create_simple_typescript_execution_script(
+        self, file_path: str, method_name: Optional[str], input_data: List[Any]
+    ) -> str:
+        """Create a simple TypeScript execution script."""
+        import json
+        import os
+        
+        # Convert to absolute path and then to relative path for import
+        # Use workspace_root as the base directory since that's where ts-node runs
+        abs_path = os.path.abspath(file_path)
+        rel_path = os.path.relpath(abs_path, str(self.workspace_root))
+        rel_path = rel_path.replace('\\', '/')
+        
+        # Add debugging for path resolution
+        logger.debug(f"DEBUG: Path resolution for TypeScript execution:")
+        logger.debug(f"   Original file_path: {file_path}")
+        logger.debug(f"   Absolute path: {abs_path}")
+        logger.debug(f"   Workspace root: {self.workspace_root}")
+        logger.debug(f"   Relative path: {rel_path}")
+        
+        # Ensure the import path starts with ./ for relative imports
+        if not rel_path.startswith('./') and not rel_path.startswith('../'):
+            rel_path = f"./{rel_path}"
+            logger.debug(f"   Final import path with ./ prefix: {rel_path}")
+        
+        # Convert input data to JSON string
+        input_json = json.dumps(input_data)
+        
+        # Create a simpler execution script
+        script = f"""
+// Simple TypeScript execution script
+(async () => {{
+    try {{
+        const targetModule = await import('{rel_path}');
+        const inputData = {input_json};
+        
+        let result = null;
+        
+        // Try different execution patterns
+        if ('{method_name}' && typeof targetModule['{method_name}'] === 'function') {{
+            result = await targetModule['{method_name}'](...inputData);
+        }} else if (typeof targetModule === 'function') {{
+            result = await targetModule(...inputData);
+        }} else if (targetModule.default && typeof targetModule.default === 'function') {{
+            result = await targetModule.default(...inputData);
+        }} else if (targetModule.main && typeof targetModule.main === 'function') {{
+            result = await targetModule.main(...inputData);
+        }} else {{
+            // Look for any exported function or agent
+            const exportedNames = Object.keys(targetModule);
+            let found = false;
+            
+            // Debug: Log all exports and their types
+            console.error('DEBUG: Available exports:', exportedNames);
+            for (const name of exportedNames) {{
+                const exported = targetModule[name];
+                console.error(`DEBUG: ${name} type:`, typeof exported);
+                if (typeof exported === 'object' && exported !== null) {{
+                    console.error(`DEBUG: ${name} keys:`, Object.keys(exported));
+                    console.error(`DEBUG: ${name} methods:`, Object.getOwnPropertyNames(exported).filter(key => typeof exported[key] === 'function'));
+                }}
+            }}
+            
+            for (const name of exportedNames) {{
+                const exported = targetModule[name];
+                
+                // Check if it's a function (direct callable)
+                if (typeof exported === 'function') {{
+                    result = await exported(...inputData);
+                    found = true;
+                    console.error(`DEBUG: Called function ${name}`);
+                    break;
+                }}
+                
+                // Check if it's an object with agent methods
+                if (typeof exported === 'object' && exported !== null) {{
+                    if (typeof exported.run === 'function') {{
+                        result = await exported.run(...inputData);
+                        found = true;
+                        console.error(`DEBUG: Called ${name}.run()`);
+                        break;
+                    }} else if (typeof exported.process === 'function') {{
+                        result = await exported.process(...inputData);
+                        found = true;
+                        console.error(`DEBUG: Called ${name}.process()`);
+                        break;
+                    }} else if (typeof exported.execute === 'function') {{
+                        result = await exported.execute(...inputData);
+                        found = true;
+                        console.error(`DEBUG: Called ${name}.execute()`);
+                        break;
+                    }} else if (typeof exported.invoke === 'function') {{
+                        result = await exported.invoke(...inputData);
+                        found = true;
+                        console.error(`DEBUG: Called ${name}.invoke()`);
+                        break;
+                    }}
+                    
+                    // Check if it's a class constructor (new Agent pattern)
+                    if (exported.prototype && typeof exported.prototype.run === 'function') {{
+                        const instance = new exported();
+                        result = await instance.run(...inputData);
+                        found = true;
+                        console.error(`DEBUG: Instantiated and called ${name}.run()`);
+                        break;
+                    }}
+                }}
+            }}
+            
+            if (!found) {{
+                throw new Error('No callable function found. Available exports: ' + exportedNames.join(', '));
+            }}
+        }}
+        
+        console.log(JSON.stringify({{
+            result: result,
+            tracked_values: {{}}
+        }}));
+        
+    }} catch (error) {{
+        console.error(JSON.stringify({{
+            error: error.message,
+            tracked_values: {{}}
+        }}));
+        process.exit(1);
+    }}
+}})();
+"""
+        return script
 
     def diagnose_typescript_environment(self) -> Dict[str, Any]:
         """Diagnose TypeScript environment issues that might cause timeouts."""
@@ -3442,106 +4215,3 @@ console.log('Google object:', typeof google);
             logger.info("✅ No import resolution issues found")
         
         return diagnostics
-
-    def _execute_with_mastra_specific_handling(
-        self, region_info: 'RegionInfo', method_name: 'Optional[str]', 
-        input_data: 'List[Any]', tracked_variables: 'Set[str]', 
-        timeout: 'Optional[int]', is_mastra: bool
-    ) -> dict:
-        """Execute TypeScript with Mastra-specific handling and enhanced debug logging."""
-        import json
-        import subprocess
-        import time
-        import os
-        logger.info(f"🤖 Using Mastra-specific execution strategy...")
-        temp_file_path = self.workspace_root / f"temp_mastra_{region_info.name}_{int(time.time())}.ts"
-        with open(temp_file_path, 'w') as temp_file:
-            temp_file.write(region_info.code)
-            temp_file.flush()
-            os.fsync(temp_file.fileno())
-        # Create execution script using the enhanced code region module
-        from .enhanced_code_region import create_enhanced_typescript_execution_script
-        execution_script = create_enhanced_typescript_execution_script(
-            str(temp_file_path), method_name, input_data, self.workspace_root, is_mastra=True
-        )
-        
-        # Add comprehensive logging for Mastra execution
-        logger.debug(f"🔍 MASTRA EXECUTION PREVIEW:")
-        logger.debug(f"   📥 Input Data:")
-        logger.debug(f"      Type: {type(input_data)}")
-        logger.debug(f"      Length: {len(input_data) if isinstance(input_data, (list, tuple)) else 'N/A'}")
-        logger.debug(f"      Content: {repr(input_data)}")
-        logger.debug(f"   📄 Generated Mastra TypeScript Script Preview:")
-        logger.debug(f"      Total length: {len(execution_script)} characters")
-        logger.debug(f"      First 500 chars: {repr(execution_script[:500])}")
-        logger.debug(f"      Last 200 chars: {repr(execution_script[-200:])}")
-        
-        # Show the actual script content for debugging
-        logger.debug(f"   📋 FULL MASTRA SCRIPT:")
-        logger.debug(f"      {'='*80}")
-        script_lines = execution_script.split('\n')
-        for i, line in enumerate(script_lines, 1):
-            if i <= 20:  # Show first 20 lines
-                logger.debug(f"      {i:2d}: {line}")
-            elif i == 21:
-                logger.debug(f"      ... (showing first 20 lines, script has {len(script_lines)} total lines)")
-                break
-        logger.debug(f"      {'='*80}")
-        exec_file_path = self.workspace_root / f"temp_mastra_script_{region_info.name}_{int(time.time())}.ts"
-        with open(exec_file_path, 'w') as exec_file:
-            exec_file.write(execution_script)
-            exec_file.flush()
-            os.fsync(exec_file.fileno())
-        try:
-            ts_node_cmd = [
-                'npx', 'ts-node',
-                '--transpile-only',
-                '--skip-project',
-                '--compiler-options', '{"module":"commonjs","target":"es2020","esModuleInterop":true,"skipLibCheck":true,"moduleResolution":"node16","allowImportingTsExtensions":true}',
-                str(exec_file_path)
-            ]
-            logger.debug(f"🚀 Starting Mastra-specific ts-node execution...")
-            logger.debug(f"   Command: {' '.join(ts_node_cmd)}")
-            execution_start = time.time()
-            result = subprocess.run(
-                ts_node_cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout or 180,
-                cwd=str(self.workspace_root),
-                env={
-                    **os.environ,
-                    'NODE_ENV': 'production',
-                    'TS_NODE_CACHE': 'true',
-                    'TS_NODE_CACHE_DIRECTORY': str(self._ts_node_cache_dir) if self._ts_node_cache_dir else '',
-                }
-            )
-            execution_time = time.time() - execution_start
-            logger.debug(f"✅ Mastra-specific execution completed (took {execution_time:.2f}s)")
-            if result.returncode != 0:
-                logger.error(f"❌ Mastra-specific execution failed!")
-                logger.error(f"   Return code: {result.returncode}")
-                logger.error(f"   stderr: {result.stderr}")
-                logger.error(f"   stdout: {result.stdout}")
-                raise Exception(f"Mastra-specific execution failed: {result.stderr}")
-            if not result.stdout.strip():
-                logger.error(f"❌ Mastra-specific execution produced no output!")
-                logger.error(f"   stdout is empty")
-                logger.error(f"   stderr: {result.stderr}")
-                raise Exception(f"Mastra-specific execution produced no output. stderr: {result.stderr}")
-            output_data = json.loads(result.stdout.strip())
-            return {
-                'result': output_data.get('result'),
-                'tracked_values': output_data.get('tracked_values', {}),
-                'tracked_variables': tracked_variables,
-                'execution_time': execution_time
-            }
-        finally:
-            try:
-                exec_file_path.unlink()
-            except OSError:
-                pass
-            try:
-                temp_file_path.unlink()
-            except OSError:
-                pass

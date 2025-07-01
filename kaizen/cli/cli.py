@@ -4,6 +4,7 @@ import click
 from rich.console import Console
 
 from .commands.test import test_all
+from .commands.debug_typescript import debug_typescript
 
 console = Console()
 
@@ -14,6 +15,7 @@ def cli():
 
 # Register commands
 cli.add_command(test_all)
+cli.add_command(debug_typescript)
 
 if __name__ == '__main__':
     cli() 

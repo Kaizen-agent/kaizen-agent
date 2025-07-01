@@ -301,7 +301,7 @@ class LearningManager:
     def set_baseline_failures(self, failure_data: Optional[Dict]) -> None:
         """Set the baseline failure data from the initial test run."""
         self.baseline_failures = failure_data
-        logger.info("Set baseline failures for learning", extra={
+        logger.debug("Set baseline failures for learning", extra={
             'has_failures': bool(failure_data)
         })
     
@@ -319,7 +319,7 @@ class LearningManager:
         self.attempt_history.append(attempt_record)
         self._analyze_attempt_for_learning(attempt_record)
         
-        logger.info(f"Recorded attempt {attempt_number} for learning", extra={
+        logger.debug(f"Recorded attempt {attempt_number} for learning", extra={
             'status': status,
             'has_changes': bool(changes)
         })
@@ -454,7 +454,7 @@ class LearningManager:
         if current_attempt > 1:
             enhanced_data['previous_attempt_analysis'] = self._analyze_previous_attempts()
         
-        logger.info(f"Generated enhanced failure data for attempt {current_attempt}", extra={
+        logger.debug(f"Generated enhanced failure data for attempt {current_attempt}", extra={
             'has_learning_context': bool(enhanced_data['learning_context']),
             'successful_patterns_count': len(enhanced_data['learning_context']['successful_patterns']),
             'failed_approaches_count': len(enhanced_data['learning_context']['failed_approaches'])
@@ -661,31 +661,47 @@ class FixResultDict(TypedDict):
 
 
 class CodeFormatter:
-    """Handles code formatting and syntax fixes."""
+    """Handles code formatting and syntax fixes for multiple languages."""
     
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        try:
-            api_key = os.environ.get("GOOGLE_API_KEY")
-            if not api_key:
-                raise ValueError("GOOGLE_API_KEY environment variable not set")
-                
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
-            self.logger.info("Gemini model initialized successfully")
-        except Exception as e:
-            self.logger.error(f"Failed to initialize Gemini model: {str(e)}")
-            raise
-    
-    def _format_with_llm(self, code: str) -> str:
-        """Format Python code using LLM.
+    def __init__(self, language: str = 'python'):
+        """Initialize CodeFormatter with language support.
         
         Args:
-            code: The Python code to format
+            language: Programming language ('python' or 'typescript')
+        """
+        self.language = language.lower()
+        self.logger = logging.getLogger(__name__)
+        
+        # Only initialize Gemini for Python formatting (LLM-based)
+        if self.language == 'python':
+            try:
+                api_key = os.environ.get("GOOGLE_API_KEY")
+                if not api_key:
+                    raise ValueError("GOOGLE_API_KEY environment variable not set")
+                    
+                genai.configure(api_key=api_key)
+                self.model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+                self.logger.debug("Gemini model initialized successfully for Python formatting")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize Gemini model: {str(e)}")
+                raise
+        else:
+            self.model = None
+            self.logger.debug(f"Initialized formatter for {self.language} (no LLM support)")
+    
+    def _format_with_llm(self, code: str) -> str:
+        """Format code using LLM (Python only).
+        
+        Args:
+            code: The code to format
             
         Returns:
             Formatted code string
         """
+        if self.language != 'python':
+            self.logger.warning(f"LLM formatting not supported for {self.language}")
+            return code
+            
         try:
             # Prepare prompt for LLM
             prompt = f"""You are a Python code formatter. Your task is to format the following Python code according to PEP 8 style guidelines.
@@ -767,72 +783,284 @@ Code to format:
             ValueError: If formatting fails
         """
         try:
-            self.logger.info("Starting code formatting", extra={'code_length': len(code)})
-            
-            ## LLM FIXER
-            # First try LLM-based formatting
-            try:
-                llm_formatted = self._format_with_llm(code)
-                if llm_formatted and llm_formatted != code:
-                    self.logger.info("LLM formatting successful")
-                    code = llm_formatted
-                    self.logger.info(f"LLM formatted code: {code}")
-            except Exception as e:
-                self.logger.warning(f"LLM formatting failed, falling back to standard formatting: {str(e)}")
-            
-            # Check if code is already valid
-            is_valid, _ = self._validate_syntax(code)
-            self.logger.info(f"Code is valid: {is_valid}")
-            if is_valid:
-                self.logger.info("Code already valid, applying basic formatting")
-                return self._basic_formatting(code)
-            
-            # First try common syntax fixes
-            self.logger.info("Starting common syntax fixes")
-            formatted_code = self.fix_common_syntax_issues(code)
-            self.logger.info(f"Common syntax fixes completed: {formatted_code}")
-            
-            # Validate after common fixes
-            self.logger.info("Validating after common fixes")
-            is_valid, error = self._validate_syntax(formatted_code)
-            if is_valid:
-                self.logger.debug("Common fixes successful")
-                return self._basic_formatting(formatted_code)
-            self.logger.info(f"Common fixes successful")
-            # If common fixes don't work, try aggressive fixes
-            if formatted_code == code:
-                self.logger.info("Common fixes had no effect, trying aggressive fixes")
-                formatted_code = self.fix_aggressive_syntax_issues(code)
-            else:
-                self.logger.info("Common fixes changed code but still invalid, trying aggressive fixes")
-                formatted_code = self.fix_aggressive_syntax_issues(formatted_code)
-            
-            # Final validation
-            is_valid, error = self._validate_syntax(formatted_code)
-            if not is_valid:
-                self.logger.error("Formatted code has syntax errors", extra={
-                    'error': str(error),
-                    'error_type': 'SyntaxError'
-                })
-                # Return original code instead of raising exception
-                self.logger.warning("Returning original code due to failed formatting")
-                return code
-            
-            self.logger.info("Code formatting completed", extra={
-                'original_length': len(code),
-                'formatted_length': len(formatted_code)
+            self.logger.info("Starting code formatting", extra={
+                'code_length': len(code),
+                'language': self.language
             })
             
-            return self._basic_formatting(formatted_code)
+            if self.language == 'python':
+                return self._format_python_code(code)
+            elif self.language == 'typescript':
+                return self._format_typescript_code(code)
+            else:
+                self.logger.warning(f"Unsupported language: {self.language}, returning original code")
+                return code
             
         except Exception as e:
             self.logger.error("Error formatting code", extra={
                 'error': str(e),
-                'error_type': type(e).__name__
+                'error_type': type(e).__name__,
+                'language': self.language
             })
             # Return original code instead of raising exception
             return code
     
+    def _format_python_code(self, code: str) -> str:
+        """Format Python code using progressive approach."""
+        # First try LLM-based formatting
+        try:
+            llm_formatted = self._format_with_llm(code)
+            if llm_formatted and llm_formatted != code:
+                self.logger.info("LLM formatting successful")
+                code = llm_formatted
+                self.logger.info(f"LLM formatted code: {code}")
+        except Exception as e:
+            self.logger.warning(f"LLM formatting failed, falling back to standard formatting: {str(e)}")
+        
+        # Check if code is already valid
+        is_valid, _ = self._validate_syntax(code)
+        self.logger.info(f"Code is valid: {is_valid}")
+        if is_valid:
+            self.logger.info("Code already valid, applying basic formatting")
+            return self._basic_formatting(code)
+        
+        # First try common syntax fixes
+        self.logger.info("Starting common syntax fixes")
+        formatted_code = self.fix_common_syntax_issues(code)
+        self.logger.info(f"Common syntax fixes completed: {formatted_code}")
+        
+        # Validate after common fixes
+        self.logger.info("Validating after common fixes")
+        is_valid, error = self._validate_syntax(formatted_code)
+        if is_valid:
+            self.logger.debug("Common fixes successful")
+            return self._basic_formatting(formatted_code)
+        self.logger.info(f"Common fixes successful")
+        # If common fixes don't work, try aggressive fixes
+        if formatted_code == code:
+            self.logger.info("Common fixes had no effect, trying aggressive fixes")
+            formatted_code = self.fix_aggressive_syntax_issues(code)
+        else:
+            self.logger.info("Common fixes changed code but still invalid, trying aggressive fixes")
+            formatted_code = self.fix_aggressive_syntax_issues(formatted_code)
+        
+        # Final validation
+        is_valid, error = self._validate_syntax(formatted_code)
+        if not is_valid:
+            self.logger.error("Formatted code has syntax errors", extra={
+                'error': str(error),
+                'error_type': 'SyntaxError'
+            })
+            # Return original code instead of raising exception
+            self.logger.warning("Returning original code due to failed formatting")
+            return code
+        
+        self.logger.info("Code formatting completed", extra={
+            'original_length': len(code),
+            'formatted_length': len(formatted_code)
+        })
+        
+        return self._basic_formatting(formatted_code)
+    
+    def _format_typescript_code(self, code: str) -> str:
+        """Format TypeScript code using progressive approach."""
+        self.logger.info("Starting TypeScript code formatting")
+        
+        # Clean markdown first
+        code = self._clean_markdown_notations(code)
+        
+        # Check if code is already valid
+        is_valid, _ = self._validate_typescript_syntax(code)
+        if is_valid:
+            self.logger.info("TypeScript code already valid, applying basic formatting")
+            return self._basic_typescript_formatting(code)
+        
+        # Apply TypeScript-specific fixes
+        formatted_code = self._fix_typescript_syntax_issues(code)
+        
+        # Final validation
+        is_valid, error = self._validate_typescript_syntax(formatted_code)
+        if not is_valid:
+            self.logger.error("Formatted TypeScript code has syntax errors", extra={
+                'error': str(error),
+                'error_type': 'TypeScriptSyntaxError'
+            })
+            self.logger.warning("Returning original TypeScript code due to failed formatting")
+            return code
+        
+        self.logger.info("TypeScript code formatting completed", extra={
+            'original_length': len(code),
+            'formatted_length': len(formatted_code)
+        })
+        
+        return self._basic_typescript_formatting(formatted_code)
+    
+    def _validate_typescript_syntax(self, code: str) -> Tuple[bool, Optional[str]]:
+        """Validate TypeScript syntax using basic checks for MVP."""
+        try:
+            # For MVP, just do basic syntax validation without external dependencies
+            # Check for balanced brackets, parentheses, and braces
+            brackets = {'(': ')', '[': ']', '{': '}', '<': '>'}
+            stack = []
+            
+            for char in code:
+                if char in brackets:
+                    stack.append(char)
+                elif char in brackets.values():
+                    if not stack:
+                        return False, f"Unmatched closing bracket: {char}"
+                    opening = stack.pop()
+                    if brackets[opening] != char:
+                        return False, f"Mismatched brackets: {opening} and {char}"
+            
+            if stack:
+                return False, f"Unclosed brackets: {stack}"
+            
+            # Check for basic TypeScript syntax patterns
+            lines = code.split('\n')
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped:
+                    # Check for unclosed strings
+                    if stripped.count('"') % 2 == 1 or stripped.count("'") % 2 == 1:
+                        return False, f"Unclosed string on line {i}"
+                    
+                    # Check for unclosed template literals
+                    if stripped.count('`') % 2 == 1:
+                        return False, f"Unclosed template literal on line {i}"
+            
+            # For MVP, if we get here, assume it's valid
+            return True, None
+            
+        except Exception as e:
+            return False, f"Error in basic TypeScript validation: {str(e)}"
+    
+    def _fix_typescript_syntax_issues(self, code: str) -> str:
+        """Fix common TypeScript syntax issues."""
+        try:
+            self.logger.debug("Starting TypeScript syntax fixes", extra={'code_length': len(code)})
+            
+            original_code = code
+            
+            # Fix 1: Missing semicolons
+            lines = code.split('\n')
+            fixed_lines = []
+            
+            for line in lines:
+                stripped = line.strip()
+                if stripped and not stripped.endswith(';') and not stripped.endswith('{') and not stripped.endswith('}') and not stripped.endswith(':') and not stripped.startswith('//') and not stripped.startswith('/*') and not stripped.startswith('*'):
+                    # Don't add semicolon if line ends with certain characters
+                    if not any(stripped.endswith(char) for char in ['(', '[', '{', ':', ',', ';', '}', ']', ')']):
+                        line = line.rstrip() + ';'
+                fixed_lines.append(line)
+            
+            code = '\n'.join(fixed_lines)
+            
+            # Fix 2: Basic indentation
+            code = self._fix_typescript_indentation(code)
+            
+            # Fix 3: Unclosed strings and template literals
+            code = self._fix_typescript_strings(code)
+            
+            # Fix 4: Missing imports for common modules
+            code = self._add_typescript_imports(code)
+            
+            self.logger.debug("TypeScript syntax fixes completed", extra={
+                'fixed_code_length': len(code),
+                'changes_made': code != original_code
+            })
+            
+            return code
+            
+        except Exception as e:
+            self.logger.error(f"Error in TypeScript syntax fixes: {str(e)}")
+            return code
+    
+    def _fix_typescript_indentation(self, code: str) -> str:
+        """Fix TypeScript indentation issues."""
+        lines = code.split('\n')
+        fixed_lines = []
+        indent_level = 0
+        
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            
+            if not stripped:
+                fixed_lines.append('')
+                continue
+            
+            # Get previous line for context
+            prev_line = lines[i-1].strip() if i > 0 else ''
+            
+            # Decrease indent for dedent keywords
+            if stripped.startswith(('else', 'catch', 'finally')):
+                indent_level = max(0, indent_level - 1)
+            
+            # Apply current indentation
+            proper_indent = '    ' * indent_level
+            fixed_lines.append(proper_indent + stripped)
+            
+            # Increase indent after control structures
+            if stripped.endswith('{') or any(keyword in stripped for keyword in 
+                ['if', 'else', 'for', 'while', 'function', 'class', 'try', 'catch', 'finally']):
+                indent_level += 1
+        
+        return '\n'.join(fixed_lines)
+    
+    def _fix_typescript_strings(self, code: str) -> str:
+        """Fix TypeScript string and template literal issues."""
+        lines = code.split('\n')
+        fixed_lines = []
+        
+        for line in lines:
+            # Count unescaped quotes and backticks
+            double_quotes = line.count('"') - line.count('\\"')
+            single_quotes = line.count("'") - line.count("\\'")
+            backticks = line.count('`') - line.count('\\`')
+            
+            # Fix unclosed double quotes
+            if double_quotes % 2 == 1 and not line.strip().startswith('//'):
+                line = line + '"'
+            # Fix unclosed single quotes
+            elif single_quotes % 2 == 1 and not line.strip().startswith('//'):
+                line = line + "'"
+            # Fix unclosed backticks (template literals)
+            elif backticks % 2 == 1 and not line.strip().startswith('//'):
+                line = line + '`'
+            
+            fixed_lines.append(line)
+        
+        return '\n'.join(fixed_lines)
+    
+    def _add_typescript_imports(self, code: str) -> str:
+        """Add missing imports for commonly used TypeScript modules."""
+        import_map = {
+            'console.': 'import { console } from "console";',
+            'process.': 'import { process } from "process";',
+            'Buffer.': 'import { Buffer } from "buffer";',
+            'setTimeout': 'import { setTimeout } from "timers";',
+            'setInterval': 'import { setInterval } from "timers";',
+            'clearTimeout': 'import { clearTimeout } from "timers";',
+            'clearInterval': 'import { clearInterval } from "timers";',
+        }
+        
+        needed_imports = []
+        for pattern, import_stmt in import_map.items():
+            if pattern in code and import_stmt not in code:
+                needed_imports.append(import_stmt)
+        
+        if needed_imports:
+            imports = '\n'.join(needed_imports) + '\n\n'
+            code = imports + code
+        
+        return code
+    
+    def _basic_typescript_formatting(self, code: str) -> str:
+        """Apply basic TypeScript formatting rules."""
+        # For now, return the code as-is since TypeScript has its own formatter (prettier)
+        # In a production environment, you might want to integrate with prettier
+        return code
+
     def fix_common_syntax_issues(self, code: str) -> str:
         """
         Fix common syntax issues in the code with improved logic.
@@ -959,31 +1187,145 @@ Code to format:
             return False, str(e)
     
     def _clean_markdown_notations(self, code: str) -> str:
-        """Remove markdown notations from code."""
+        """Remove markdown notations from code based on language."""
+        if self.language == 'python':
+            return self._clean_markdown_notations_python(code)
+        elif self.language == 'typescript':
+            return self._clean_markdown_notations_typescript(code)
+        else:
+            # Fallback to generic cleaning for other languages
+            return self._clean_markdown_notations_generic(code)
+    
+    def _clean_markdown_notations_generic(self, code: str) -> str:
+        """Remove common markdown notations that work across languages."""
         # Remove markdown code block notations
+        code = re.sub(r'^```\w*\s*\n?', '', code, flags=re.MULTILINE)
+        code = re.sub(r'\n?\s*```\s*$', '', code, flags=re.MULTILINE)
+        
+        # Remove markdown headers at start of lines
+        code = re.sub(r'^#+\s+', '', code, flags=re.MULTILINE)
+        
+        # Remove basic markdown formatting (be careful not to break code)
+        lines = code.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Remove markdown formatting only if not in string literals
+            if not self._is_in_string_literal(line):
+                # Remove markdown formatting
+                line = re.sub(r'\*\*(.*?)\*\*', r'\1', line)  # Bold
+                line = re.sub(r'\*(.*?)\*', r'\1', line)      # Italic
+                line = re.sub(r'`(.*?)`', r'\1', line)        # Inline code
+            
+            cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines).strip()
+    
+    def _clean_markdown_notations_python(self, code: str) -> str:
+        """Remove markdown notations from Python code."""
+        # Remove Python-specific markdown code block notations
         code = re.sub(r'^```(?:python|py)?\s*\n?', '', code, flags=re.MULTILINE)
         code = re.sub(r'\n?\s*```\s*$', '', code, flags=re.MULTILINE)
         
         # Remove markdown headers at start of lines
         code = re.sub(r'^#+\s+', '', code, flags=re.MULTILINE)
         
-        # Remove markdown formatting (be careful not to break code)
+        # Remove markdown formatting (be careful not to break Python code)
         lines = code.split('\n')
         cleaned_lines = []
         
         for line in lines:
-            # Skip if line appears to be in a string literal
-            if not (line.strip().startswith(('"""', "'''", '"', "'")) or 
-                   '"""' in line or "'''" in line):
+            # Skip if line appears to be in a Python string literal
+            if not self._is_in_python_string_literal(line):
                 # Remove markdown formatting
                 line = re.sub(r'\*\*(.*?)\*\*', r'\1', line)  # Bold
                 line = re.sub(r'\*(.*?)\*', r'\1', line)      # Italic
+                # Be extra careful with backticks in Python (could be f-strings)
                 if not line.strip().startswith('f'):
                     line = re.sub(r'`(.*?)`', r'\1', line)    # Inline code
             
             cleaned_lines.append(line)
         
         return '\n'.join(cleaned_lines).strip()
+    
+    def _clean_markdown_notations_typescript(self, code: str) -> str:
+        """Remove markdown notations from TypeScript code."""
+        # Remove TypeScript-specific markdown code block notations
+        code = re.sub(r'^```(?:typescript|ts|tsx)?\s*\n?', '', code, flags=re.MULTILINE)
+        code = re.sub(r'\n?\s*```\s*$', '', code, flags=re.MULTILINE)
+        
+        # Remove markdown headers at start of lines
+        code = re.sub(r'^#+\s+', '', code, flags=re.MULTILINE)
+        
+        # Remove markdown formatting (be careful not to break TypeScript code)
+        lines = code.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Skip if line appears to be in a TypeScript string literal
+            if not self._is_in_typescript_string_literal(line):
+                # Remove markdown formatting
+                line = re.sub(r'\*\*(.*?)\*\*', r'\1', line)  # Bold
+                line = re.sub(r'\*(.*?)\*', r'\1', line)      # Italic
+                # Be careful with backticks in TypeScript (could be template literals)
+                if not self._is_template_literal_context(line):
+                    line = re.sub(r'`(.*?)`', r'\1', line)    # Inline code
+            
+            cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines).strip()
+    
+    def _is_in_string_literal(self, line: str) -> bool:
+        """Check if a line appears to be in a string literal (generic)."""
+        # Simple heuristic: check for unescaped quotes
+        double_quotes = line.count('"') - line.count('\\"')
+        single_quotes = line.count("'") - line.count("\\'")
+        backticks = line.count('`') - line.count('\\`')
+        
+        # If we have an odd number of any quote type, we might be in a string
+        return (double_quotes % 2 == 1 or single_quotes % 2 == 1 or backticks % 2 == 1)
+    
+    def _is_in_python_string_literal(self, line: str) -> bool:
+        """Check if a line appears to be in a Python string literal."""
+        stripped = line.strip()
+        
+        # Check for Python-specific string indicators
+        if (stripped.startswith(('"""', "'''", '"', "'")) or 
+            '"""' in line or "'''" in line):
+            return True
+        
+        # Check for f-strings and other Python string patterns
+        if stripped.startswith('f"') or stripped.startswith("f'"):
+            return True
+        
+        return self._is_in_string_literal(line)
+    
+    def _is_in_typescript_string_literal(self, line: str) -> bool:
+        """Check if a line appears to be in a TypeScript string literal."""
+        stripped = line.strip()
+        
+        # Check for TypeScript-specific string indicators
+        if (stripped.startswith(('"', "'", '`')) or 
+            '"' in line or "'" in line or '`' in line):
+            return True
+        
+        # Check for template literals
+        if self._is_template_literal_context(line):
+            return True
+        
+        return self._is_in_string_literal(line)
+    
+    def _is_template_literal_context(self, line: str) -> bool:
+        """Check if line is in a TypeScript template literal context."""
+        # Look for template literal patterns
+        if '${' in line and '}' in line:
+            return True
+        
+        # Check if line starts with backtick or contains template literal syntax
+        if line.strip().startswith('`') or '`${' in line:
+            return True
+        
+        return False
     
     def _fix_basic_indentation(self, code: str) -> str:
         """Fix basic indentation issues."""
@@ -1157,51 +1499,7 @@ Code to format:
         return '\n'.join(fixed_lines)
     
     def _basic_formatting(self, code: str) -> str:
-        # """Apply basic formatting rules."""
-        # lines = code.split('\n')
-        # formatted_lines = []
-        # current_indent = 0
-        # indent_stack = []
-        
-        # for line in lines:
-        #     stripped = line.strip()
-            
-        #     # Skip empty lines
-        #     if not stripped:
-        #         formatted_lines.append('')
-        #         continue
-                
-        #     # Handle dedent keywords
-        #     if stripped.startswith(('else:', 'elif', 'except', 'finally:')):
-        #         if indent_stack:
-        #             current_indent = indent_stack[-1]
-        #     elif stripped.startswith(('return', 'break', 'continue', 'pass')):
-        #         if indent_stack:
-        #             current_indent = indent_stack.pop()
-            
-        #     # Apply current indentation
-        #     formatted_line = '    ' * current_indent + stripped
-        #     formatted_lines.append(formatted_line)
-            
-        #     # Handle indent increase
-        #     if stripped.endswith(':'):
-        #         indent_stack.append(current_indent)
-        #         current_indent += 1
-        
-        # # Remove excessive blank lines
-        # result = []
-        # prev_empty = False
-        # for line in formatted_lines:
-        #     if line.strip() == '':
-        #         if not prev_empty:
-        #             result.append(line)
-        #         prev_empty = True
-        #     else:
-        #         result.append(line)
-        #         prev_empty = False
-        
-        # return '\n'.join(result)
-        
+        """Apply basic formatting rules."""
         return code
 
 class AutoFix:
@@ -1351,21 +1649,29 @@ class AutoFix:
                 config=config,
                 context_files=context_files
             )
-            logger.info("LLM fix result", extra={
+            logger.debug("LLM fix result", extra={
                 'file_path': current_file_path,
                 'status': fix_result.status
             })
 
             # Format the fixed code
-            formatter = CodeFormatter()
+            # Get language from config
+            language = 'python'  # default
+            if config and hasattr(config, 'language') and config.language:
+                if hasattr(config.language, 'value'):
+                    language = config.language.value
+                else:
+                    language = str(config.language)
+            
+            formatter = CodeFormatter(language=language)
             fixed_code = formatter.format_code(fix_result.fixed_code)
 
             
             if fix_result.status == FixStatus.SUCCESS:
-                return self._handle_successful_fix(current_file_path, fixed_code)
+                return self._handle_successful_fix(current_file_path, fixed_code, language)
             else: 
                 fixed_code = formatter.format_code(fixed_code)
-                return self._handle_successful_fix(current_file_path, fixed_code)
+                return self._handle_successful_fix(current_file_path, fixed_code, language)
             
         except ValueError as e:
             logger.error(f"Error formatting fixed code for {current_file_path}", extra={
@@ -1388,12 +1694,13 @@ class AutoFix:
                 error=f"Unexpected error: {str(e)}"
             )
 
-    def _handle_successful_fix(self, current_file_path: str, fixed_code: str) -> FixResult:
+    def _handle_successful_fix(self, current_file_path: str, fixed_code: str, language: str = 'python') -> FixResult:
         """Handle successful LLM fix.
         
         Args:
             current_file_path: Path to the file being processed
-            fix_result: Dictionary containing fix results
+            fixed_code: The fixed code string
+            language: Programming language ('python' or 'typescript')
             
         Returns:
             FixResult object
@@ -1403,15 +1710,25 @@ class AutoFix:
             IOError: If there are issues writing to the file
         """
         try:
-            ast.parse(fixed_code)
-            logger.info(f"Successfully parsed fixed code with ast")
+            # Validate syntax based on language
+            if language == 'python':
+                ast.parse(fixed_code)
+                logger.info(f"Successfully parsed fixed Python code with ast")
+            elif language == 'typescript':
+                # For TypeScript, we'll skip AST validation since we don't have a TypeScript AST parser
+                # The syntax validation is already done in the formatter
+                logger.info(f"Fixed TypeScript code validated by formatter")
+            else:
+                logger.warning(f"Unknown language {language}, skipping syntax validation")
+            
             self._apply_code_changes(current_file_path, fixed_code)
             return self._create_success_result(fixed_code)
         except (ValueError, IOError) as e:
             logger.error(f"Failed to apply successful fix to {current_file_path}", extra={
                 'error': str(e),
                 'error_type': type(e).__name__,
-                'fix_result': fixed_code
+                'fix_result': fixed_code,
+                'language': language
             })
             raise
 
@@ -1456,21 +1773,29 @@ class AutoFix:
             confidence=None
         )
 
-    def _handle_failed_fix(self, current_file_path: str, file_content: str) -> FixResult:
+    def _handle_failed_fix(self, current_file_path: str, file_content: str, language: str = 'python') -> FixResult:
         """Handle failed LLM fix by attempting common fixes.
         
         Args:
             current_file_path: Path to the file being processed
             file_content: Content of the file
+            language: Programming language ('python' or 'typescript')
             
         Returns:
             FixResult object
         """
         try:
-            fixed_content = self._attempt_common_fixes(current_file_path, file_content)
+            fixed_content = self._attempt_common_fixes(current_file_path, file_content, language)
             if fixed_content != file_content:
-                ast.parse(fixed_content)
-                logger.info(f"Successfully parsed fixed code with ast")
+                # Validate syntax based on language
+                if language == 'python':
+                    ast.parse(fixed_content)
+                    logger.info(f"Successfully parsed fixed Python code with ast")
+                elif language == 'typescript':
+                    logger.info(f"Fixed TypeScript code validated by formatter")
+                else:
+                    logger.warning(f"Unknown language {language}, skipping syntax validation")
+                
                 self._apply_code_changes(current_file_path, fixed_content)
                 return FixResult(
                     status=FixStatus.SUCCESS,
@@ -1479,7 +1804,8 @@ class AutoFix:
         except Exception as e:
             logger.error(f"Failed to apply common fixes to {current_file_path}", extra={
                 'error': str(e),
-                'error_type': type(e).__name__
+                'error_type': type(e).__name__,
+                'language': language
             })
             raise
         
@@ -1490,23 +1816,22 @@ class AutoFix:
             error=self.ERROR_MSG_FIX_FAILED
         )
         
-    def _attempt_common_fixes(self, current_file_path: str, file_content: str) -> str:
+    def _attempt_common_fixes(self, current_file_path: str, file_content: str, language: str = 'python') -> str:
         """Attempt common fixes on the file content.
         
         Args:
             current_file_path: Path to the file being processed
             file_content: Content of the file
+            language: Programming language ('python' or 'typescript')
             
         Returns:
             Fixed content string
         """
-        logger.info("Attempting common fixes", extra={'file_path': current_file_path})
-        fixed_content = fix_common_syntax_issues(file_content)
+        logger.info("Attempting common fixes", extra={'file_path': current_file_path, 'language': language})
         
-        if fixed_content == file_content:
-            logger.info("Common fixes had no effect, trying aggressive fixes", 
-                       extra={'file_path': current_file_path})
-            fixed_content = fix_aggressive_syntax_issues(file_content)
+        # Use language-specific formatter for fixes
+        formatter = CodeFormatter(language=language)
+        fixed_content = formatter.format_code(file_content)
         
         return fixed_content
     
@@ -1581,7 +1906,7 @@ class AutoFix:
             Dictionary containing fix results
         """
         try:
-            logger.info("AutoFix initialized")
+            logger.debug("AutoFix initialized")
             logger.info("Starting code fix")
             
             # Initialize components
@@ -1590,17 +1915,17 @@ class AutoFix:
             learning_manager = LearningManager()
             test_history = TestExecutionHistory()
             
-            logger.info(f"State manager: {state_manager}")
-            logger.info(f"Attempt tracker: {attempt_tracker}")
+            logger.debug(f"State manager: {state_manager}")
+            logger.debug(f"Attempt tracker: {attempt_tracker}")
             
             # Set baseline failures for learning
             if test_execution_result:
                 baseline_failures = self._extract_failure_data_from_unified(test_execution_result)
                 learning_manager.set_baseline_failures(baseline_failures)
                 test_history.add_baseline_result(test_execution_result)
-                logger.info("Set baseline failures for learning")
+                logger.debug("Set baseline failures for learning")
             
-            logger.info("Learning manager initialized")
+            logger.debug("Learning manager initialized")
             
             # Check if Git is available
             git_available = self._check_git_availability()
@@ -1628,7 +1953,7 @@ class AutoFix:
             # Use provided test_execution_result as baseline, otherwise run baseline test
             if test_execution_result is not None:
                 baseline_test_results = test_execution_result
-                logger.info("Using provided test execution result as baseline")
+                logger.debug("Using provided test execution result as baseline")
             else:
                 logger.info("Running baseline test before any fixes")
                 baseline_test_results = self.test_runner.run_tests(Path(file_path))
@@ -1636,9 +1961,9 @@ class AutoFix:
                 logger.info(f"Baseline test results: {baseline_test_results}")
             
             try:
-                logger.info(f"Attempt tracker should continue check")
+                logger.debug(f"Attempt tracker should continue check")
                 while attempt_tracker.should_continue():
-                    logger.info(f"Attempt tracker should continue")
+                    logger.debug(f"Attempt tracker should continue")
                     attempt = attempt_tracker.start_attempt()
                     logger.info(f"Starting attempt {attempt.attempt_number} of {self.config.max_retries}")
                     
@@ -1669,9 +1994,9 @@ class AutoFix:
                                 fix_result = self._process_file_with_llm(
                                     current_file, file_content, context_files, enhanced_failure_data, config
                                 )
-                                logger.info(f"fix result: {fix_result}")
+                                logger.debug(f"fix result: {fix_result}")
                                 if fix_result.status == FixStatus.SUCCESS:
-                                    logger.info(f"fix result success")
+                                    logger.debug(f"fix result success")
                                     results['changes'][current_file] = fix_result.changes
                                     results['processed_files'].append({
                                         'file_path': current_file,
@@ -1839,7 +2164,8 @@ class AutoFix:
                     'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
                     'changes_made': True,
                     'learning_summary': learning_summary,
-                    'test_history': test_history.to_legacy_format()
+                    'test_history': test_history.to_legacy_format(),
+                    'best_test_execution_result': best_attempt.test_execution_result if best_attempt else None
                 }
             else:
                 # Only revert if no improvements were made at all
@@ -1857,7 +2183,8 @@ class AutoFix:
                     'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
                     'changes_made': False,
                     'learning_summary': learning_summary,
-                    'test_history': test_history.to_legacy_format()
+                    'test_history': test_history.to_legacy_format(),
+                    'best_test_execution_result': None
                 }
                 
         except Exception as e:
@@ -1877,7 +2204,8 @@ class AutoFix:
                 'status': 'error',
                 'error': str(e),
                 'attempts': [vars(attempt) for attempt in attempt_tracker.attempts] if 'attempt_tracker' in locals() else [],
-                'test_history': test_history.to_legacy_format() if 'test_history' in locals() else None
+                'test_history': test_history.to_legacy_format() if 'test_history' in locals() else None,
+                'best_test_execution_result': None
             }
 
     def _run_tests_and_get_result(self, path: Path):

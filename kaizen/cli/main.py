@@ -15,6 +15,7 @@ from kaizen.autofix.pr.manager import PRManager
 from kaizen.autofix.main import AutoFix
 from .utils.env_setup import check_environment_setup, display_environment_status
 from .commands.setup import setup
+from .commands.debug_typescript import debug_typescript
 from kaizen.cli.commands.models.test_execution_result import TestStatus
 
 # Configure logging
@@ -242,6 +243,9 @@ cli.add_command(setup)
 # Add analyze-logs command
 from .commands.analyze_logs import analyze_logs
 cli.add_command(analyze_logs)
+
+# Add debug-typescript command
+cli.add_command(debug_typescript)
 
 def main() -> None:
     """Main entry point."""

@@ -47,7 +47,9 @@ from .types import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_BASE_BRANCH,
     PRStrategy,
-    TestStatus
+    TestStatus,
+    Language,
+    DEFAULT_LANGUAGE
 )
 from .models import TestResult
 
@@ -377,9 +379,14 @@ def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) 
 @click.option('--base-branch', default=DEFAULT_BASE_BRANCH, help=f'Base branch for pull request (default: {DEFAULT_BASE_BRANCH})')
 @click.option('--pr-strategy', type=click.Choice([s.value for s in PRStrategy]), 
               default=PRStrategy.ANY_IMPROVEMENT.value, help='Strategy for when to create PRs (default: ANY_IMPROVEMENT)')
+@click.option('--language', type=click.Choice([l.value for l in Language]), 
+              default=DEFAULT_LANGUAGE.value, help=f'Programming language for test execution (default: {DEFAULT_LANGUAGE.value})')
 @click.option('--test-github-access', is_flag=True, help='Test GitHub access and permissions before running tests')
 @click.option('--save-logs', is_flag=True, help='Save detailed test logs in JSON format for later analysis')
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed debug information and verbose logging')
+@click.option('--clear-ts-cache', is_flag=True, help='Clear TypeScript compilation cache before running tests')
+@click.option('--show-cache-stats', is_flag=True, help='Show TypeScript cache statistics')
+@click.option('--debug-ts', is_flag=True, help='Enable detailed TypeScript execution debugging')
 @click.option('--no-confirm', is_flag=True, help='Skip confirmation prompts (useful for non-interactive use)')
 def test_all(
     config: str,
@@ -388,9 +395,13 @@ def test_all(
     max_retries: int,
     base_branch: str,
     pr_strategy: str,
+    language: str,
     test_github_access: bool,
     save_logs: bool,
     verbose: bool,
+    clear_ts_cache: bool,
+    show_cache_stats: bool,
+    debug_ts: bool,
     no_confirm: bool
 ) -> None:
     """Run all tests specified in the configuration file.
@@ -418,9 +429,13 @@ def test_all(
         max_retries: Maximum number of retry attempts for auto-fix
         base_branch: Base branch for pull request
         pr_strategy: Strategy for when to create PRs
+        language: Programming language for test execution
         test_github_access: Whether to test GitHub access and permissions before running tests
         save_logs: Whether to save detailed test logs in JSON format for later analysis
         verbose: Whether to show detailed debug information and verbose logging
+        clear_ts_cache: Whether to clear TypeScript compilation cache before running tests
+        show_cache_stats: Whether to show TypeScript cache statistics
+        debug_ts: Whether to enable detailed TypeScript execution debugging
         no_confirm: Whether to skip confirmation prompts (useful for non-interactive use)
         
     When --save-logs is enabled, the following files are created in the test-logs/ directory:
@@ -444,6 +459,7 @@ def test_all(
         ...     max_retries=2,
         ...     base_branch="main",
         ...     pr_strategy="ANY_IMPROVEMENT",
+        ...     language="python",
         ...     test_github_access=True,
         ...     save_logs=True,
         ...     verbose=False
@@ -451,6 +467,16 @@ def test_all(
     """
     # Initialize clean logger
     logger = CleanLogger(verbose=verbose)
+    
+    # Enable detailed TypeScript debugging if requested
+    if debug_ts:
+        logger.print_progress("Enabling detailed TypeScript debugging...")
+        # Set TypeScript logger to DEBUG level
+        ts_logger = logging.getLogger("kaizen.autofix.test.code_region")
+        ts_logger.setLevel(logging.DEBUG)
+        # Also enable debug for the main test logger
+        logging.getLogger("kaizen").setLevel(logging.DEBUG)
+        logger.print_success("TypeScript debugging enabled")
     
     try:
         # Load configuration
@@ -470,6 +496,25 @@ def test_all(
         
         config = config_result.value
         logger.print_success(f"Configuration loaded: {config.name}")
+        logger.info(f"Language: {config.language.value}")
+        
+        # Handle TypeScript cache management
+        if clear_ts_cache or show_cache_stats:
+            from kaizen.autofix.test.code_region import CodeRegionExecutor
+            temp_executor = CodeRegionExecutor(Path.cwd())
+            
+            if clear_ts_cache:
+                logger.print_progress("Clearing TypeScript compilation cache...")
+                temp_executor.clear_cache()
+                logger.print_success("TypeScript cache cleared")
+            
+            if show_cache_stats:
+                stats = temp_executor.get_cache_stats()
+                logger.print("\n[bold]TypeScript Cache Statistics:[/bold]")
+                logger.print(f"  • Execution cache entries: {stats['execution_cache_size']}")
+                logger.print(f"  • Compiled modules: {stats['compiled_modules_size']}")
+                logger.print(f"  • Cache directory: {stats['ts_cache_directory']}")
+                logger.print("")
         
         # Confirm auto-fix operation if enabled
         if auto_fix:

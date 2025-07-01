@@ -27,7 +27,7 @@ from kaizen.cli.commands.models import (
 )
 from kaizen.cli.commands.models.settings import TestSettings
 from kaizen.cli.commands.result import Result
-from kaizen.cli.commands.types import PRStrategy, DEFAULT_MAX_RETRIES
+from kaizen.cli.commands.types import PRStrategy, DEFAULT_MAX_RETRIES, Language, DEFAULT_LANGUAGE
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ class ConfigurationManager:
         base_branch: str = 'main',
         pr_strategy: str = 'ALL_PASSING'
     ) -> Result[TestConfiguration]:
-        """Load and validate test configuration.
+        """Load and validate test configuration, allowing CLI overrides except for language.
         
         Args:
             config_path: Path to the configuration file
@@ -63,7 +63,6 @@ class ConfigurationManager:
             max_retries: Maximum number of retry attempts
             base_branch: Base branch for pull requests
             pr_strategy: Strategy for when to create PRs
-            
         Returns:
             Result containing the validated configuration or an error
         """
@@ -72,44 +71,32 @@ class ConfigurationManager:
             load_result = self.loader.load_from_file(config_path)
             if not load_result.is_success:
                 return load_result
-            
+
             config_data = load_result.value
-            logger.info(f"Loaded configuration data: {config_data}")
-            
-            # Parse configuration data
-            parse_result = self.parser.parse_configuration(config_data)
-            if not parse_result.is_success:
-                return parse_result
-            
-            # Create configuration object with all fields at once
-            config = TestConfiguration.from_dict(config_data, config_path)
-            
-            # Override CLI-specific settings
-            config = TestConfiguration(
-                name=config.name,
-                file_path=config.file_path,
-                config_path=config.config_path,
-                agent_type=config.agent_type,
-                description=config.description,
-                metadata=config.metadata,
-                evaluation=config.evaluation,
-                regions=config.regions,
-                agent=config.agent,  # Include the agent field
-                steps=config.steps,
-                settings=config.settings,
-                auto_fix=auto_fix,
-                create_pr=create_pr,
-                max_retries=max_retries,
-                base_branch=base_branch,
-                pr_strategy=PRStrategy.from_str(pr_strategy),
-                dependencies=config.dependencies,
-                referenced_files=config.referenced_files,
-                files_to_fix=config.files_to_fix
-            )
-            
+            logger.debug(f"Loaded configuration data: {config_data}")
+
+            # Prepare CLI overrides (except language)
+            cli_overrides = {
+                'auto_fix': auto_fix,
+                'create_pr': create_pr,
+                'max_retries': max_retries,
+                'base_branch': base_branch,
+                'pr_strategy': pr_strategy
+            }
+
+            logger.debug(f"Original config_data language: {config_data.get('language', 'NOT_SET')}")
+            logger.debug(f"CLI overrides: {cli_overrides}")
+
+            # Create configuration object with CLI overrides (except language)
+            try:
+                config = TestConfiguration.from_dict(config_data, config_path, cli_overrides)
+                logger.debug(f"Final config language: {config.language}")
+            except ValueError as e:
+                return Result.failure(ConfigurationError(str(e)))
+
             logger.info(f"Created configuration object: {config}")
             return Result.success(config)
-            
+
         except Exception as e:
             logger.error(f"Error loading configuration: {str(e)}", exc_info=True)
             return Result.failure(

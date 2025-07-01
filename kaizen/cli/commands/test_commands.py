@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, List, Protocol, runtime_checkable
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from ...autofix.test.runner import TestRunner
+from kaizen.autofix.test.runner import TestRunner
 from ...utils.test_utils import get_failed_tests_dict_from_unified
 from .models import TestConfiguration, TestResult, Result, TestExecutionResult, TestStatus
 from .errors import TestExecutionError, AutoFixError, DependencyError
@@ -115,26 +115,42 @@ class TestAllCommand(BaseTestCommand):
             
             # Handle auto-fix if enabled and tests failed
             test_attempts = None
+            best_test_execution_result = test_execution_result  # Track best result after auto-fix
             if self.config.auto_fix and not test_execution_result.is_successful():
                 failed_count = test_execution_result.get_failure_count()
                 self.logger.info(f"Auto-fix enabled: attempting to fix {failed_count} failed tests (max retries: {self.config.max_retries})")
-                test_attempts = self._handle_auto_fix(test_execution_result, self.config, runner_config)
+                fix_results = self._handle_auto_fix(test_execution_result, self.config, runner_config)
                 
-                if test_attempts:
+                if fix_results and fix_results.get('attempts'):
+                    test_attempts = fix_results['attempts']
                     self.logger.info(f"Auto-fix completed: {len(test_attempts)} attempts made")
+                    
+                    # Get the best test results after auto-fix
+                    if fix_results.get('best_test_execution_result'):
+                        best_test_execution_result = fix_results['best_test_execution_result']
+                        self.logger.info(f"Using best test results after auto-fix: {best_test_execution_result.get_failure_count()}/{best_test_execution_result.summary.total_tests} tests failed")
+                    else:
+                        # Fallback: run tests again to get the current state
+                        self.logger.info("No test results found in auto-fix results, running tests again to get current state")
+                        try:
+                            fallback_runner = TestRunner(runner_config)
+                            best_test_execution_result = fallback_runner.run_tests(self.config.file_path)
+                            self.logger.info(f"Current test run results: {best_test_execution_result.get_failure_count()}/{best_test_execution_result.summary.total_tests} tests failed")
+                        except Exception as e:
+                            self.logger.warning(f"Failed to run current tests: {str(e)}, using original results")
                 else:
                     self.logger.info("Auto-fix completed: no attempts were made")
             
             # Create TestResult object for backward compatibility
             now = datetime.now()
             
-            # Determine overall status
-            overall_status = 'passed' if test_execution_result.is_successful() else 'failed'
+            # Determine overall status using best test results (after auto-fix if applicable)
+            overall_status = 'passed' if best_test_execution_result.is_successful() else 'failed'
             
-            # Show final results summary
-            total_tests = test_execution_result.summary.total_tests
-            passed_tests = test_execution_result.summary.passed_tests
-            failed_tests = test_execution_result.summary.failed_tests
+            # Show best results summary using best test results
+            total_tests = best_test_execution_result.summary.total_tests
+            passed_tests = best_test_execution_result.summary.passed_tests
+            failed_tests = best_test_execution_result.summary.failed_tests
             self.logger.info(f"Test execution completed: {passed_tests}/{total_tests} tests passed")
             
             result = TestResult(
@@ -144,10 +160,10 @@ class TestAllCommand(BaseTestCommand):
                 start_time=now,
                 end_time=now,
                 status=overall_status,
-                results=test_execution_result.to_legacy_format(),  # Convert to legacy format for backward compatibility
-                error=None if test_execution_result.is_successful() else f"{test_execution_result.get_failure_count()} tests failed",
+                results=best_test_execution_result.to_legacy_format(),  # Convert to legacy format for backward compatibility
+                error=None if best_test_execution_result.is_successful() else f"{best_test_execution_result.get_failure_count()} tests failed",
                 steps=[],  # TODO: Add step results if available
-                unified_result=test_execution_result,
+                unified_result=best_test_execution_result,
                 test_attempts=test_attempts
             )
             
@@ -231,7 +247,13 @@ class TestAllCommand(BaseTestCommand):
             'agent_type': self.config.agent_type,
             'description': self.config.description,
             'metadata': self.config.metadata.__dict__ if self.config.metadata else None,
+            'language': self.config.language.value,
         }
+        
+        if self.verbose:
+            self.logger.debug(f"DEBUG: Created runner config with language: {config['language']} (type: {type(config['language'])})")
+            self.logger.debug(f"DEBUG: Original config language: {self.config.language} (type: {type(self.config.language)})")
+            self.logger.debug(f"DEBUG: Original config language value: {self.config.language.value} (type: {type(self.config.language.value)})")
         
         # Add imported dependencies to the configuration
         if imported_namespace:
@@ -311,7 +333,7 @@ class TestAllCommand(BaseTestCommand):
         
         return config
     
-    def _handle_auto_fix(self, test_execution_result: TestExecutionResult, config: TestConfiguration, runner_config: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    def _handle_auto_fix(self, test_execution_result: TestExecutionResult, config: TestConfiguration, runner_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Handle auto-fix for failed tests.
         
         Args:
@@ -320,7 +342,7 @@ class TestAllCommand(BaseTestCommand):
             runner_config: Runner configuration
             
         Returns:
-            List of fix attempts if any were made, None otherwise
+            Dictionary containing fix results including attempts and best test execution result, or None if no fixes were attempted
             
         Raises:
             AutoFixError: If auto-fix process fails
@@ -345,14 +367,7 @@ class TestAllCommand(BaseTestCommand):
             else:
                 raise AutoFixError("No files to fix were provided")
             
-            # Process and return attempts
-            attempts = fix_results.get('attempts', [])
-            if not attempts:
-                self.logger.warning("No fix attempts were made")
-                return None
-                
-            
-            return attempts
+            return fix_results
             
         except Exception as e:
             self.logger.error(f"Error during auto-fix process: {str(e)}")

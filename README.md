@@ -86,6 +86,8 @@ export GOOGLE_API_KEY="your_api_key_here"
 
 ### 2. Create Your Agent
 
+#### Python Version
+
 Create `my_agent.py`:
 
 ```python
@@ -105,14 +107,31 @@ class EmailAgent:
         return response.text
 ```
 
+#### TypeScript Version (Mastra)
+
+Create `my_agent.ts`:
+
+```typescript
+import { google } from '@ai-sdk/google';
+import { Agent } from '@mastra/core/agent';
+
+export const emailFixAgent = new Agent({
+  name: 'Email Fix Agent',
+  instructions: `You are an email assistant. Improve this email draft.`,
+  model: google('gemini-2.5-flash-preview-05-20'),
+});
+```
+
 ### 3. Create Test Config
 
-**🎯 No Python Test Code Required!** 
+**🎯 No Test Code Required!** 
 
-Kaizen Agent uses YAML configuration instead of traditional Python test files. This is a new, simpler way to test AI agents:
+Kaizen Agent uses YAML configuration instead of traditional test files. This is a new, simpler way to test AI agents:
 
-- **❌ Traditional approach**: Write Python test files with `unittest` or `pytest`
-- **✅ Kaizen approach**: Define tests in YAML - no Python test code needed!
+- **❌ Traditional approach**: Write test files with `unittest`, `pytest`, or `jest`
+- **✅ Kaizen approach**: Define tests in YAML - no test code needed!
+
+#### Python Version
 
 Create `kaizen.yaml`:
 
@@ -148,6 +167,45 @@ steps:
   - name: Edge Case - Empty Email
     input:
       input: ""
+  
+  - name: Edge Case - Very Informal Email
+    input:
+      input: "yo dude, can't make it to the meeting tomorrow. got stuff to do. sorry!"
+```
+
+#### TypeScript Version
+
+Create `kaizen.yaml`:
+
+```yaml
+name: Email Improvement Agent Test
+file_path: src/mastra/agents/email-agent.ts
+language: typescript
+description: This agent improves email drafts by making them more professional, clear, and well-structured. It transforms casual or poorly written emails into polished, business-appropriate communications.
+agent:
+  module: email-agent  # Just the file name without extension
+
+evaluation:
+  evaluation_targets:
+    - name: quality
+      source: return
+      criteria: "The email should be professional, polite, and well-structured with proper salutations and closings"
+      weight: 0.5
+    - name: format
+      source: return
+      criteria: "The response should contain only the improved email content without any explanatory text, markdown formatting, or additional commentary. It should be a clean, standalone email draft ready for use."
+      weight: 0.5
+
+files_to_fix:
+  - src/mastra/agents/email-agent.ts
+
+settings:
+  timeout: 180
+
+steps:
+  - name: Professional Email Improvement
+    input:
+      input: "hey boss, i need time off next week. thanks"
   
   - name: Edge Case - Very Informal Email
     input:
