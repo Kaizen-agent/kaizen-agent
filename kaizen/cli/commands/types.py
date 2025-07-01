@@ -4,21 +4,82 @@ This module defines enums and constants used throughout the test command system.
 These values are used for configuration and control flow in the test execution process.
 
 The module provides:
+- Language: Enum for supported programming languages
 - PRStrategy: Enum for pull request creation strategies
 - TestStatus: Enum for test execution statuses
 - STATUS_EMOJI: Mapping of status values to emoji representations
 - Default configuration values
 
 Example:
-    >>> from kaizen.cli.commands.types import PRStrategy, TestStatus
+    >>> from kaizen.cli.commands.types import Language, PRStrategy, TestStatus
+    >>> language = Language.PYTHON
     >>> strategy = PRStrategy.ALL_PASSING
     >>> status = TestStatus.PASSED
-    >>> print(f"Strategy: {strategy.value}, Status: {status.value}")
-    Strategy: ALL_PASSING, Status: passed
+    >>> print(f"Language: {language.value}, Strategy: {strategy.value}, Status: {status.value}")
+    Language: python, Strategy: ALL_PASSING, Status: passed
 """
 
+import logging
 from enum import Enum
 from typing import Dict, List, Final
+
+logger = logging.getLogger(__name__)
+
+class Language(str, Enum):
+    """Supported programming languages for test execution.
+    
+    This enum defines the different programming languages that can be used
+    for test execution and code analysis.
+    
+    Attributes:
+        PYTHON: Python programming language
+        TYPESCRIPT: TypeScript programming language
+    
+    Example:
+        >>> language = Language.from_str("python")
+        >>> print(language.value)  # "python"
+    """
+    
+    PYTHON = 'python'
+    TYPESCRIPT = 'typescript'
+
+    @classmethod
+    def from_str(cls, value: str) -> 'Language':
+        """Convert string to Language enum.
+        
+        Args:
+            value: String value to convert (case-insensitive)
+            
+        Returns:
+            Language enum value
+            
+        Raises:
+            ValueError: If value is not a valid language
+            
+        Example:
+            >>> language = Language.from_str("typescript")
+            >>> print(language)  # Language.TYPESCRIPT
+        """
+        logger.debug(f"Converting language string: '{value}' (type: {type(value)})")
+        
+        if not isinstance(value, str):
+            logger.error(f"Invalid input type for language conversion: {type(value)}, value: {value}")
+            raise ValueError(f"Language value must be a string, got {type(value)}")
+        
+        normalized_value = value.lower().strip()
+        logger.debug(f"Normalized language value: '{normalized_value}'")
+        
+        try:
+            result = cls(normalized_value)
+            logger.debug(f"Successfully converted '{value}' to {result}")
+            return result
+        except ValueError as e:
+            valid_values = [l.value for l in cls]
+            logger.error(f"Failed to convert language '{value}' (normalized: '{normalized_value}'). Valid values: {valid_values}")
+            raise ValueError(
+                f"Invalid language: {value}. "
+                f"Must be one of {valid_values}"
+            ) from e
 
 class PRStrategy(str, Enum):
     """Strategy for when to create pull requests.
@@ -105,4 +166,5 @@ STATUS_EMOJI: Final[Dict[str, str]] = {
 
 # Default values for test configuration
 DEFAULT_MAX_RETRIES: Final[int] = 2
-DEFAULT_BASE_BRANCH: Final[str] = 'main' 
+DEFAULT_BASE_BRANCH: Final[str] = 'main'
+DEFAULT_LANGUAGE: Final[Language] = Language.PYTHON 

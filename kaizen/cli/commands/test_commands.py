@@ -231,7 +231,13 @@ class TestAllCommand(BaseTestCommand):
             'agent_type': self.config.agent_type,
             'description': self.config.description,
             'metadata': self.config.metadata.__dict__ if self.config.metadata else None,
+            'language': self.config.language.value,
         }
+        
+        if self.verbose:
+            self.logger.debug(f"DEBUG: Created runner config with language: {config['language']} (type: {type(config['language'])})")
+            self.logger.debug(f"DEBUG: Original config language: {self.config.language} (type: {type(self.config.language)})")
+            self.logger.debug(f"DEBUG: Original config language value: {self.config.language.value} (type: {type(self.config.language.value)})")
         
         # Add imported dependencies to the configuration
         if imported_namespace:

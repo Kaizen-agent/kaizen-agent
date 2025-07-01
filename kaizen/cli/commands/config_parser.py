@@ -16,7 +16,7 @@ from .models import (
     TestConfiguration,
     Result
 )
-from .types import DEFAULT_MAX_RETRIES
+from .types import DEFAULT_MAX_RETRIES, DEFAULT_LANGUAGE
 
 @dataclass
 class ParseResult:
@@ -98,6 +98,16 @@ class ConfigurationParser:
                     return Result.failure(str(steps_result.error))
                 steps = steps_result.value
             
+            # Parse language from config data
+            language = DEFAULT_LANGUAGE
+            if 'language' in config_data:
+                try:
+                    from .types import Language
+                    language = Language.from_str(config_data['language'])
+                    
+                except ValueError as e:
+                    return Result.failure(f"Invalid language: {str(e)}")
+            
             # Create configuration
             config = TestConfiguration(
                 name=config_data['name'],
@@ -116,7 +126,8 @@ class ConfigurationParser:
                 evaluation=evaluation,
                 dependencies=config_data.get('dependencies', []),
                 referenced_files=config_data.get('referenced_files', []),
-                files_to_fix=config_data.get('files_to_fix', [])
+                files_to_fix=config_data.get('files_to_fix', []),
+                language=language
             )
             
             return Result.success(config)

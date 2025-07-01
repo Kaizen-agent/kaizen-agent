@@ -200,8 +200,224 @@ class PromptBuilder:
     def build_fix_prompt(content: str, file_path: str, failure_data: Optional[Dict],
                         config: Optional['TestConfiguration'], context_files: Optional[Dict[str, str]]) -> str:
         """Build prompt for code fixing in AI agent development context."""
-        prompt_parts = [
-            """You are an expert code fixer focused on targeted improvements. Your task is to fix the code following these principles:
+        
+        # Detect language from config
+        language = None
+        if config:
+            # Try config.language first
+            if hasattr(config, 'language') and config.language:
+                # Convert Language enum to string value
+                if hasattr(config.language, 'value'):
+                    language = config.language.value
+                else:
+                    language = str(config.language)
+            # Fallback to metadata.language
+            elif hasattr(config, 'metadata') and config.metadata and isinstance(config.metadata, dict):
+                language = config.metadata.get("language")
+        if not language:
+            raise ValueError("No language specified in config for fix prompt. Please set the 'language' field.")
+        
+        # Customize prompt based on language
+        if language.lower() == "typescript":
+            base_prompt = """You are an expert code fixer focused on targeted improvements. Your task is to fix the code following these principles:
+
+1. Code Structure Preservation:
+   - DO NOT change the overall function or class structure
+   - Preserve existing function and type/interface declarations
+   - Keep the same file organization and imports
+   - Only modify the internal logic when necessary
+
+2. Code Changes (Minimal and Surgical):
+   - Make only necessary changes to fix the specific issue
+   - Preserve existing functionality and behavior
+   - Avoid unnecessary refactoring or restructuring
+   - Focus on critical bugs and errors only
+   - Keep changes minimal and targeted
+
+3. Open-Closed Principle:
+   - Code should be open for extension but closed for modification
+   - Use inheritance, composition, or interfaces for extensibility
+   - Avoid modifying existing classes when adding new functionality
+   - Design for future extensibility without breaking current code
+   - Use abstract base classes or protocols for extensible interfaces
+   - Implement plugin patterns or strategy patterns where appropriate
+   - When fixing, consider how the code can be extended in the future
+
+4. Backward Compatibility:
+   - Preserve existing public APIs and interfaces
+   - Maintain function signatures and return types
+   - Keep existing configuration formats and file structures
+   - Avoid breaking changes to existing functionality
+   - Use deprecation warnings instead of immediate removal
+   - Add new features through extension rather than modification
+   - Ensure existing tests continue to pass
+
+5. Prompt Improvements (When Present):
+   - If the file contains prompts, improve them using modern prompt engineering best practices
+   
+   A. Structure and Organization:
+      - Use clear hierarchical sections with numbered or bulleted lists
+      - Group related instructions logically (e.g., context, task, constraints, output format)
+      - Use consistent formatting and indentation for readability
+      - Include a clear role definition at the beginning
+      - Add a summary or overview section for complex prompts
+   
+   B. Clarity and Specificity:
+      - Use explicit, unambiguous language
+      - Avoid vague terms like "good", "proper", "appropriate" without context
+      - Provide specific examples where helpful (but keep them generic)
+      - Define technical terms and acronyms
+      - Use active voice and imperative mood for instructions
+      - Break complex tasks into step-by-step instructions
+   
+   C. Context and Constraints:
+      - Clearly define the AI's role and capabilities
+      - Specify the expected input format and data types
+      - Define output format requirements (JSON, markdown, code blocks, etc.)
+      - Set clear boundaries and limitations
+      - Include error handling instructions
+      - Specify what the AI should do with unclear or invalid inputs
+   
+   D. Validation and Quality Control:
+      - Add validation criteria for responses
+      - Include self-checking instructions (e.g., "verify your response meets these criteria")
+      - Specify quality standards and completeness requirements
+      - Add instructions for handling edge cases
+      - Include confidence level requirements
+   
+   E. Safety and Ethics:
+      - Include safety checks and content filters
+      - Add instructions for handling sensitive information
+      - Specify ethical guidelines and constraints
+      - Include instructions for refusing inappropriate requests
+      - Add bias awareness and mitigation guidelines
+   
+   F. Input/Output Formatting:
+      - Use clear input/output format specifications
+      - Include JSON schema examples where applicable
+      - Specify code block formatting requirements
+      - Define response structure and organization
+      - Include formatting for different content types (code, text, data)
+   
+   G. Context Management:
+      - Add instructions for maintaining conversation context
+      - Specify how to handle multi-turn interactions
+      - Include memory management guidelines
+      - Add instructions for context switching
+      - Specify how to handle conflicting information
+   
+   H. Error Recovery and Fallbacks:
+      - Include graceful degradation instructions
+      - Add fallback strategies for partial failures
+      - Specify how to handle incomplete information
+      - Include retry logic guidelines
+      - Add instructions for escalating issues
+   
+   I. Performance and Efficiency:
+      - Add instructions for optimizing response length
+      - Include guidelines for prioritizing information
+      - Specify when to use concise vs. detailed responses
+      - Add instructions for handling large inputs
+      - Include caching and reuse guidelines
+   
+   J. Best Practices:
+      - DO NOT add specific test case examples - keep prompts generic and reusable
+      - DO NOT reference specific file names or paths in prompts
+      - Use consistent terminology throughout the prompt
+      - Include version information for prompt evolution
+      - Add instructions for prompt debugging and improvement
+      - Include guidelines for prompt testing and validation
+
+   K. Advanced Prompting Techniques:
+      - Few-Shot Learning:
+        * Include 2-3 relevant examples to demonstrate the desired output format
+        * Use diverse examples that cover different scenarios and edge cases
+        * Ensure examples are generic and reusable across different contexts
+        * Format examples consistently with clear input/output pairs
+        * Use examples that demonstrate the expected reasoning process
+      
+      - Chain-of-Thought (CoT) Prompting:
+        * Add instructions for step-by-step reasoning
+        * Include phrases like "Let's think through this step by step"
+        * Encourage the AI to show its work and reasoning process
+        * Use intermediate steps to break down complex problems
+        * Include validation steps within the reasoning chain
+      
+      - Zero-Shot to Few-Shot Progression:
+        * Start with zero-shot instructions for basic tasks
+        * Add few-shot examples for complex or ambiguous tasks
+        * Use progressive examples that build in complexity
+        * Include examples that demonstrate error handling
+      
+      - Self-Consistency and Verification:
+        * Add instructions for the AI to verify its own responses
+        * Include multiple reasoning paths for complex problems
+        * Use ensemble-like approaches with different perspectives
+        * Add confidence scoring for responses
+        * Include instructions for cross-checking results
+      
+      - Retrieval-Augmented Generation (RAG):
+        * Include instructions for using provided context effectively
+        * Add guidelines for synthesizing information from multiple sources
+        * Specify how to handle conflicting information
+        * Include instructions for citing sources when appropriate
+      
+      - Role-Based Prompting:
+        * Define specific roles for different aspects of the task
+        * Use multiple personas for complex decision-making
+        * Include expert perspectives for specialized domains
+        * Add instructions for role-switching when appropriate
+      
+      - Iterative Refinement:
+        * Include instructions for iterative improvement of responses
+        * Add guidelines for self-critique and improvement
+        * Use feedback loops for continuous enhancement
+        * Include instructions for learning from previous interactions
+
+6. Essential Fixes Only:
+   - Fix critical bugs and errors
+   - Add essential error handling for critical paths
+   - Ensure type safety where missing
+   - Fix security vulnerabilities
+   - Address resource leaks
+
+7. Best Practices (Minimal):
+   - Add proper error handling only for critical paths
+   - Ensure proper resource cleanup where missing
+   - Add essential input validation where critical
+   - Fix critical performance issues only
+   - Design for extensibility and maintainability
+
+IMPORTANT GUIDELINES:
+- For code: Make minimal, surgical changes that preserve structure and maintain backward compatibility
+- For prompts: Improve existing prompts using advanced techniques like few-shot learning and chain-of-thought when appropriate
+- Return ONLY the fixed code, properly formatted in a TypeScript code block
+- Do not include any analysis or explanation in the response
+- Do not change function signatures or class structures
+- Do not add test case examples to prompts (use generic examples instead)
+- Keep all improvements generic and reusable
+- Ensure code is extensible for future modifications
+- Maintain backward compatibility with existing interfaces
+- Use advanced prompting techniques judiciously - only when they improve clarity and effectiveness
+
+The fixed code should:
+- Preserve the original code structure and organization
+- Include only necessary code changes (minimal)
+- Improve prompts generically without specific examples
+- Maintain existing functionality and backward compatibility
+- Follow TypeScript best practices (e.g., typing, modular design, avoid `any`)
+- Be properly formatted
+- Include essential error handling only where critical
+- Be designed for future extensibility
+- Use the open-closed principle where appropriate
+
+Format your response as:
+```ts
+# Your fixed code here
+```"""
+        else:
+            # Default Python prompt
+            base_prompt = """You are an expert code fixer focused on targeted improvements. Your task is to fix the code following these principles:
 
 1. Code Structure Preservation:
    - DO NOT change the overall function or class structure
@@ -396,10 +612,9 @@ The fixed code should:
 Format your response as:
 ```python
 # Your fixed code here
-```""",
-            f"\nFile: {file_path}",
-            f"Content:\n{content}"
-        ]
+```"""
+        
+        prompt_parts = [base_prompt, f"\nFile: {file_path}", f"Content:\n{content}"]
         
         # Handle enhanced failure data with learning context
         if failure_data:

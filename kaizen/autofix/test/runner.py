@@ -155,6 +155,17 @@ class TestRunner:
         try:
             logger.info(f"Running test case: {test_case.get('name', 'Unknown')}")
             
+            # Get language from test config, require it to be set
+            language = self.test_config.get("language")
+            if not language:
+                raise ValueError("No language specified in test configuration. Please set the 'language' field.")
+            if self.verbose:
+                logger.debug(f"DEBUG: Using language: {language} (type: {type(language)})")
+                logger.debug(f"DEBUG: Language comparison - language == 'typescript': {language == 'typescript'}")
+                logger.debug(f"DEBUG: Language comparison - language == 'python': {language == 'python'}")
+                logger.debug(f"DEBUG: Test config keys: {list(self.test_config.keys())}")
+                logger.debug(f"DEBUG: Full test config: {self.test_config}")
+            
             # DEBUG: Print the raw test case
             if self.verbose:
                 logger.debug(f"DEBUG: Raw test case: {test_case}")
@@ -189,14 +200,27 @@ class TestRunner:
                     logger.debug(f"DEBUG: Using agent entry point system: {agent_entry_point}")
                 
                 # Validate the entry point
-                if not self.code_region_extractor.validate_entry_point(agent_entry_point, test_file_path):
-                    raise ValueError(f"Invalid agent entry point: {agent_entry_point}")
+                logger.debug(f"DEBUG: About to validate entry point. Language: '{language}' (type: {type(language)})")
+                if language == "typescript":
+                    logger.debug(f"DEBUG: Using TypeScript validation")
+                    if not self.code_region_extractor.validate_entry_point_ts(agent_entry_point, test_file_path):
+                        raise ValueError(f"Invalid agent entry point(ts): {agent_entry_point}")
+                else:
+                    logger.debug(f"DEBUG: Using Python validation")
+                    if not self.code_region_extractor.validate_entry_point(agent_entry_point, test_file_path):
+                        raise ValueError(f"Invalid agent entry point(python): {agent_entry_point}")
                 
-                # Extract region using entry point
-                region_info = self.code_region_extractor.extract_region_by_entry_point(
-                    test_file_path, 
-                    agent_entry_point
-                )
+                # Extract region using entry point based on language
+                if language == "typescript":
+                    region_info = self.code_region_extractor.extract_region_by_entry_point_ts(
+                        test_file_path, 
+                        agent_entry_point
+                    )
+                else:
+                    region_info = self.code_region_extractor.extract_region_by_entry_point(
+                        test_file_path, 
+                        agent_entry_point
+                    )
                 region_name = f"{agent_entry_point.module}.{agent_entry_point.class_name or agent_entry_point.method}"
             
             else:
@@ -219,27 +243,45 @@ class TestRunner:
                                 raise ValueError("No method specified in test step and no regions configured")
                             if self.verbose:
                                 logger.debug(f"DEBUG: Extracting function '{method_name}' from test file")
-                            region_info = self.code_region_extractor.extract_region(
-                                test_file_path, 
-                                method_name
-                            )
+                            if language == "typescript":
+                                region_info = self.code_region_extractor.extract_region_ts_by_name(
+                                    test_file_path, 
+                                    method_name
+                                )
+                            else:
+                                region_info = self.code_region_extractor.extract_region(
+                                    test_file_path, 
+                                    method_name
+                                )
                             region_name = method_name
                     else:
                         region_name = regions[0]
                         logger.info(f"No region specified in test step; using first region from top-level: {region_name}")
                         if self.verbose:
                             logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
+                        if language == "typescript":
+                            region_info = self.code_region_extractor.extract_region_ts(
+                                test_file_path, 
+                                region_name
+                            )
+                        else:
+                            region_info = self.code_region_extractor.extract_region(
+                                test_file_path, 
+                                region_name
+                            )
+                else:
+                    if self.verbose:
+                        logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
+                    if language == "typescript":
+                        region_info = self.code_region_extractor.extract_region_ts(
+                            test_file_path, 
+                            region_name
+                        )
+                    else:
                         region_info = self.code_region_extractor.extract_region(
                             test_file_path, 
                             region_name
                         )
-                else:
-                    if self.verbose:
-                        logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
-                    region_info = self.code_region_extractor.extract_region(
-                        test_file_path, 
-                        region_name
-                    )
             
             if self.verbose:
                 logger.debug(f"DEBUG: Region extraction completed. Region info: {region_info}")
@@ -287,15 +329,35 @@ class TestRunner:
             else:
                 parsed_inputs = []
             
-            # Execute the code region with parsed inputs
+            # Execute the code region with parsed inputs based on language
             if self.verbose:
                 logger.debug(f"DEBUG: About to execute code region...")
-            execution_result = self.code_region_executor.execute_region_with_tracking(
-                region_info, 
-                method_name=method_name,
-                input_data=parsed_inputs,
-                tracked_variables=set()  # Empty set for no specific tracking
-            )
+            
+            # Get timeout from test configuration
+            timeout = test_case.get('timeout')
+            
+            # Precompile Mastra agents for faster execution
+            if language == "typescript":
+                # Check if this is a Mastra agent and precompile if needed
+                if hasattr(self.code_region_executor, 'precompile_mastra_agent'):
+                    precompiled = self.code_region_executor.precompile_mastra_agent(region_info)
+                    if precompiled and self.verbose:
+                        logger.debug(f"DEBUG: Precompiled Mastra agent: {region_info.name}")
+                
+                execution_result = self.code_region_executor.execute_typescript_region_with_tracking(
+                    region_info, 
+                    method_name=method_name,
+                    input_data=parsed_inputs,
+                    tracked_variables=set(),  # Empty set for no specific tracking
+                    timeout=timeout
+                )
+            else:
+                execution_result = self.code_region_executor.execute_region_with_tracking(
+                    region_info, 
+                    method_name=method_name,
+                    input_data=parsed_inputs,
+                    tracked_variables=set()  # Empty set for no specific tracking
+                )
             actual_output = execution_result['result']
             tracked_values = execution_result['tracked_values']
             if self.verbose:
