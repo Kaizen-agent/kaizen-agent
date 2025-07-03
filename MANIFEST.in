@@ -1,6 +1,0 @@
-include README.md
-include LICENSE
-include *.png
-recursive-include kaizen *.yaml
-recursive-include kaizen *.md
-recursive-include kaizen *.png 
