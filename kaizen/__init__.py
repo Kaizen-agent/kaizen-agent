@@ -8,7 +8,7 @@ from .autofix.test.runner import TestRunner
 from .autofix.pr.manager import PRManager
 from .cli import cli
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 __all__ = [
     'AutoFix',
     'PromptDetector',
