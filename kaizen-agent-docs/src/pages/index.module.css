@@ -1,0 +1,122 @@
+/**
+ * CSS files with the .module.css suffix will be treated as CSS modules
+ * and scoped locally.
+ */
+
+.heroBanner {
+  padding: 4rem 0;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 2rem;
+  }
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.features {
+  display: flex;
+  align-items: center;
+  padding: 4rem 0;
+  width: 100%;
+}
+
+.docs {
+  display: flex;
+  align-items: center;
+  padding: 4rem 0;
+  width: 100%;
+  background-color: var(--ifm-color-emphasis-100);
+}
+
+.external {
+  display: flex;
+  align-items: center;
+  padding: 4rem 0;
+  width: 100%;
+}
+
+.externalLink {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  padding: 1rem;
+  border-radius: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.externalLink:hover {
+  background-color: var(--ifm-color-emphasis-100);
+  text-decoration: none;
+  color: inherit;
+}
+
+.card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.card__footer {
+  margin-top: auto;
+  padding-top: 1rem;
+}
+
+.heroLogo {
+  margin-bottom: 2rem;
+}
+
+.featureImage {
+  margin-bottom: 1rem;
+  max-width: 100%;
+  height: auto;
+}
+
+.demo {
+  display: flex;
+  align-items: center;
+  padding: 4rem 0;
+  width: 100%;
+  background-color: var(--ifm-color-emphasis-50);
+}
+
+.workflowContainer {
+  width: 100%;
+  max-width: 700px;
+  margin: 0 auto 3rem auto;
+  text-align: center;
+}
+
+.workflowImage {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.videoContainer {
+  position: relative;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  aspect-ratio: 16 / 9;
+}
+
+.demoVideo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
