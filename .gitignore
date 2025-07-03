@@ -155,3 +155,20 @@ test-report.xml
 # Local development
 *.local
 local.* 
+
+# Node.js
+node_modules/
+build/
+.cache/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS/System files
+.DS_Store
+Thumbs.db
+
+# dotenv or secrets (if any)
+.env
