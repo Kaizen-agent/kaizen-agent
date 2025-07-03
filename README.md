@@ -20,7 +20,7 @@
 
 Kaizen Agent acts as an AI debugging engineer that continuously tests, analyzes, and improves your AI agents and LLM applications. Here's how it works at a high level:
 
-![Kaizen Agent Architecture](kaizen_agent_workflow.png)
+![Kaizen Agent Architecture](https://raw.githubusercontent.com/Kaizen-agent/kaizen-agent/main/kaizen_agent_workflow.png)
 
 ## When Kaizen Agent is Useful
 
@@ -61,19 +61,16 @@ After writing your agent code, you typically need to:
 ### 1. Install & Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/Kaizen-agent/kaizen-agent.git
-
 # Create a test directory for your specific agent
 mkdir my-email-agent-test
 cd my-email-agent-test
 
-# Create a virtual environment for this test
+# Create a virtual environment (recommended)
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install Kaizen Agent in this isolated environment
-pip install -e "../kaizen-agent[dev]"
+# Install Kaizen Agent from PyPI
+pip install kaizen-agent
 
 # Create .env file with your Google API key
 cat > .env << EOF
