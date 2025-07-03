@@ -5,7 +5,7 @@
 
 **Test, debug, and improve your AI agents automatically.** Kaizen Agent runs your agents, analyzes failures, and fixes code and prompts using AI.
 
-📚 **[View Full Documentation](https://kaizen-agent.github.io)** - Complete guides, examples, and API reference
+📚 **[View Full Documentation](https://kaizen-agent.github.io/kaizen-agent/)** - Complete guides, examples, and API reference
 
 ## Community & Support
 

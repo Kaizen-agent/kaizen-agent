@@ -2,6 +2,7 @@ import type {ReactNode} from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 
@@ -13,7 +14,7 @@ function HomepageHeader() {
     <header className={clsx('hero hero--primary', styles.heroBanner)}>
       <div className="container">
         <img 
-          src="/img/kaizen_logo_smaller.png" 
+          src={useBaseUrl('/img/kaizen_logo_smaller.png')} 
           alt="Kaizen Agent Logo" 
           className={styles.heroLogo}
           width="120"
@@ -45,7 +46,7 @@ function HomepageFeatures() {
           <div className="col col--6">
             <div className="text--center padding-horiz--md">
               <img 
-                src="/img/undraw_docusaurus_react.svg" 
+                src={useBaseUrl('/img/undraw_docusaurus_react.svg')} 
                 alt="AI Testing" 
                 className={styles.featureImage}
                 width="200"
@@ -61,7 +62,7 @@ function HomepageFeatures() {
           <div className="col col--6">
             <div className="text--center padding-horiz--md">
               <img 
-                src="/img/undraw_docusaurus_mountain.svg" 
+                src={useBaseUrl('/img/undraw_docusaurus_mountain.svg')} 
                 alt="Automatic Fixes" 
                 className={styles.featureImage}
                 width="200"
