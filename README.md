@@ -1,9 +1,9 @@
-# Kaizen Agent - AI Debugging Engineer for AI Agents
+# Kaizen Agent - The AI Agent That Improves Your LLM App
 
-[![Python Versions](https://img.shields.io/pypi/pyversions/kaizen.svg)](https://pypi.org/project/kaizen/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/kaizen.svg)](https://pypi.org/project/kaizen-agent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Test, debug, and improve your AI agents automatically.** Kaizen Agent runs your agents, analyzes failures, and fixes code and prompts using AI.
+**Kaizen Agent autonomously tests your app using input and ideal output pairs, detects failures, suggests fixes, and opens PRs — so your LLM gets better with every iteration.**
 
 📚 **[View Full Documentation](https://kaizen-agent.github.io/kaizen-agent/)** - Complete guides, examples, and API reference
 
@@ -24,39 +24,45 @@
     </a>
   </div>
 
-Kaizen Agent acts as an AI debugging engineer that continuously tests, analyzes, and improves your AI agents and LLM applications. Here's how it works at a high level:
+Kaizen Agent acts as your AI development partner that continuously evolves and improves your AI agents and LLM applications. Here's how it works at a high level:
 
 ![Kaizen Agent Architecture](https://raw.githubusercontent.com/Kaizen-agent/kaizen-agent/main/kaizen_agent_workflow.png)
 
-## When Kaizen Agent is Useful
+## Why Kaizen Agent Transforms Your Development
 
 **Kaizen Agent is most valuable during the development phase of your AI agents, right after you've written the initial code but before deployment.**
 
-### Perfect Timing: Pre-Deployment Testing & Tuning
+### The Continuous Improvement Advantage
 
-After writing your agent code, you typically need to:
-- **Test with various inputs** to ensure reliability
-- **Tweak prompts** for better performance  
-- **Debug edge cases** and failure scenarios
-- **Optimize code** based on test results
+Traditional AI development is reactive — you build, test manually, find issues, and fix them. Kaizen Agent flips this to proactive improvement:
 
-**Kaizen Agent automates this entire process.** Instead of manually writing test cases and debugging failures, you simply:
-1. Define your test inputs and evaluation criteria in YAML
-2. Run `kaizen test-all --auto-fix`
-3. Let Kaizen automatically test, analyze failures, and improve your code
+- **🎯 Define your vision** with input/output pairs that represent ideal behavior
+- **🔄 Let Kaizen iterate** through thousands of test scenarios automatically  
+- **📈 Watch your agent evolve** as Kaizen suggests and implements improvements
+- **🚀 Deploy with confidence** knowing your agent has been battle-tested
 
-### Ideal Use Cases
+**The result?** Your AI applications improve continuously, catching edge cases you never thought of and optimizing performance beyond what manual testing could achieve.
 
-- **🔄 Iterative Development**: Test and improve agents during development cycles
-- **🚀 Pre-Deployment Validation**: Ensure your agent works reliably before going live
-- **🐛 Bug Detection**: Catch and fix issues you might miss with manual testing
-- **📈 Performance Optimization**: Continuously improve prompts and code based on test results
-- **🛡️ Quality Assurance**: Maintain high standards as your agent evolves
+### Perfect for Every Development Stage
 
-### When NOT to Use
+- **🚀 Rapid Prototyping**: Get from idea to working agent in minutes, then let Kaizen refine it
+- **🔄 Iterative Enhancement**: Continuously improve existing agents with new test cases
+- **📊 Performance Optimization**: Discover and fix bottlenecks automatically
+- **🛡️ Production Readiness**: Ensure your agent handles real-world scenarios reliably
+- **🎯 Feature Expansion**: Add new capabilities while maintaining existing quality
 
-- **Production environments** - Kaizen is for development/testing, not live systems
-- **Simple, stable agents** - If your agent is already working perfectly, you might not need it
+### When Kaizen Agent Shines
+
+- **AI Agents & LLM Applications** - Any system that processes natural language or makes decisions
+- **Customer Support Bots** - Ensure consistent, helpful responses across all scenarios
+- **Content Generation Tools** - Maintain quality and style consistency
+- **Data Analysis Agents** - Validate accuracy and edge case handling
+- **Workflow Automation** - Test complex decision trees and business logic
+
+### When to Consider Alternatives
+
+- **Production environments** - Kaizen is for development/improvement, not live systems
+- **Simple, stable applications** - If your agent is already performing perfectly, you might not need continuous improvement
 - **Non-AI applications** - Kaizen is specifically designed for AI agents and LLM applications
 
 ## Quick Start (1 minute)
@@ -125,14 +131,14 @@ export const emailFixAgent = new Agent({
 });
 ```
 
-### 3. Create Test Config
+### 3. Define Your Agent's Vision
 
 **🎯 No Test Code Required!** 
 
-Kaizen Agent uses YAML configuration instead of traditional test files. This is a new, simpler way to test AI agents:
+Kaizen Agent uses YAML configuration to define your agent's ideal behavior. This is a new, more intuitive way to specify what your AI should do:
 
 - **❌ Traditional approach**: Write test files with `unittest`, `pytest`, or `jest`
-- **✅ Kaizen approach**: Define tests in YAML - no test code needed!
+- **✅ Kaizen approach**: Define your vision in YAML - describe the ideal behavior!
 
 #### Python Version
 
@@ -215,21 +221,21 @@ steps:
       input: "yo dude, can't make it to the meeting tomorrow. got stuff to do. sorry!"
 ```
 
-### 4. Run Tests
+### 4. Watch Your Agent Evolve
 
 ```bash
-# Run tests with auto-fix and save detailed logs
+# Start the continuous improvement process
 kaizen test-all --config kaizen.yaml --auto-fix --save-logs
 ```
 
 This will:
 - Test your email improvement agent with realistic scenarios
-- Automatically improve the simple prompt to handle different email types
-- Save detailed logs to `test-logs/` so you can see the before/after improvements
+- Automatically enhance the simple prompt to handle different email types
+- Save detailed logs to `test-logs/` so you can see the evolution of your agent
 
 ## GitHub Setup (for Pull Requests)
 
-To create pull requests with fixes, you need to set up GitHub access:
+To enable Kaizen to automatically create pull requests with improvements, you need to set up GitHub access:
 
 ### 1. Create GitHub Personal Access Token
 
@@ -258,17 +264,17 @@ EOF
 # Test GitHub access
 kaizen test-github-access --repo your-username/your-repo-name
 
-# Run tests with PR creation
+# Start continuous improvement with automated PRs
 kaizen test-all --config kaizen.yaml --auto-fix --create-pr
 ```
 
-## How to Create a Test Configuration File
+## How to Define Your Agent's Vision
 
-Kaizen Agent uses YAML configuration files to define test suites for your AI agents. This approach eliminates the need for traditional Python test files while providing powerful testing capabilities.
+Kaizen Agent uses YAML configuration files to define your agent's ideal behavior and improvement goals. This approach eliminates the need for traditional test files while providing powerful continuous improvement capabilities.
 
-### Sample Configuration File
+### Sample Vision Definition
 
-Here's a complete example that demonstrates all available configuration options:
+Here's a complete example that demonstrates how to define your agent's ideal behavior:
 
 ```yaml
 name: Text Analysis Agent Test Suite
@@ -402,10 +408,10 @@ steps:
 ### Configuration Sections Explained
 
 #### Basic Information
-- **`name`**: A descriptive name for your test suite
-- **`agent_type`**: Type of agent testing (e.g., `dynamic_region` for code-based agents)
-- **`file_path`**: Path to the main agent file being tested
-- **`description`**: Detailed description of what the agent does and what the tests cover
+- **`name`**: A descriptive name for your agent's improvement journey
+- **`agent_type`**: Type of agent (e.g., `dynamic_region` for code-based agents)
+- **`file_path`**: Path to the main agent file being improved
+- **`description`**: Detailed description of what the agent does and how it should evolve
 
 #### Agent Configuration
 ```yaml
@@ -475,15 +481,15 @@ evaluation:
 4. **Consider Edge Cases**: Mention how to handle unusual inputs
 5. **Use Clear Language**: Avoid ambiguous terms that LLMs might misinterpret
 
-#### Testing Configuration
-- **`max_retries`**: Number of retry attempts if a test fails
-- **`files_to_fix`**: Files that Kaizen can modify to fix issues
+#### Improvement Configuration
+- **`max_retries`**: Number of retry attempts if an improvement attempt fails
+- **`files_to_fix`**: Files that Kaizen can modify to enhance performance
 - **`referenced_files`**: Additional files for context (not modified)
 
-#### Test Steps
-Each step defines a test case with:
-- **`name`**: Descriptive name for the test
-- **`description`**: What this test is checking
+#### Improvement Scenarios
+Each step defines a scenario for improvement with:
+- **`name`**: Descriptive name for the scenario
+- **`description`**: What this scenario is checking
 - **`input`**: 
   - `file_path`: Path to the agent file
   - `method`: Method to call
@@ -525,14 +531,14 @@ The `class_path` specifies the Python class to instantiate, and `args` provides 
 
 - **`expected_output`**: Expected results for evaluation
 
-### Simple Configuration Template
+### Simple Vision Template
 
-For quick testing, you can use this minimal template:
+For quick improvement, you can use this minimal template:
 
 ```yaml
-name: My Agent Test
+name: My Agent Improvement
 file_path: my_agent.py
-description: "Test my AI agent"
+description: "Improve my AI agent"
 
 agent:
   module: my_agent
@@ -550,7 +556,7 @@ files_to_fix:
   - my_agent.py
 
 steps:
-  - name: Basic Test
+  - name: Basic Scenario
     input:
       file_path: my_agent.py
       method: process
@@ -565,13 +571,13 @@ steps:
 ## CLI Commands
 
 ```bash
-# Run tests
+# Start continuous improvement
 kaizen test-all --config kaizen.yaml
 
-# With auto-fix
+# With automatic enhancements
 kaizen test-all --config kaizen.yaml --auto-fix
 
-# Create PR with fixes
+# Create PR with improvements
 kaizen test-all --config kaizen.yaml --auto-fix --create-pr
 
 # Save detailed logs

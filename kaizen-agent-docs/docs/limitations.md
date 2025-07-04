@@ -48,7 +48,7 @@ We're building toward a general-purpose debugging agent for any LLM application.
 
 ---
 
-Our long-term vision is to create an **AI debugging engineer** that improves any AI agent automatically, so humans can design high-level behavior — and Kaizen Agent handles everything else to reach production-level reliability.
+Our long-term vision is to create an **AI development teammate** that accelerates LLM development automatically, so humans can focus on building features — and Kaizen Agent handles everything else to reach production-level reliability.
 
 ---
 

@@ -24,7 +24,10 @@ function HomepageHeader() {
           Kaizen Agent
         </Heading>
         <p className="hero__subtitle">
-          Test, debug, and improve your AI agents automatically
+          The AI Agent That Improves Your LLM App
+        </p>
+        <p className="hero__subtitle" style={{fontSize: '1.1rem', marginTop: '0.5rem'}}>
+          Ship reliable LLM features faster with autonomous testing, smart fixes, and automated PRs
         </p>
         <div className={styles.buttons}>
           <Link
@@ -52,10 +55,10 @@ function HomepageFeatures() {
                 width="200"
                 height="150"
               />
-              <Heading as="h3">🤖 AI-Powered Testing</Heading>
+              <Heading as="h3">🚀 Accelerate Development</Heading>
               <p>
                 Automatically test your AI agents with realistic scenarios and AI-powered evaluation.
-                No test code required - just define your criteria in YAML.
+                No test code required - just define your criteria in YAML and ship faster.
               </p>
             </div>
           </div>
@@ -68,10 +71,10 @@ function HomepageFeatures() {
                 width="200"
                 height="150"
               />
-              <Heading as="h3">🔧 Automatic Fixes</Heading>
+              <Heading as="h3">🔧 Smart Improvements</Heading>
               <p>
-                Kaizen analyzes failures and automatically improves your prompts and code.
-                Get better results without manual debugging.
+                Kaizen analyzes performance and automatically improves your prompts and code.
+                Level up your agent's capabilities without manual debugging.
               </p>
             </div>
           </div>
@@ -87,7 +90,7 @@ function DocumentationLinks() {
       <div className="container">
         <div className="text--center margin-bottom--lg">
           <Heading as="h2">Documentation</Heading>
-          <p>Everything you need to get started with Kaizen Agent</p>
+          <p>Everything you need to accelerate your LLM development</p>
         </div>
         <div className="row">
           <div className="col col--4">
@@ -232,7 +235,7 @@ function DemoVideo() {
       <div className="container">
         <div className="text--center margin-bottom--lg">
           <Heading as="h2">🎬 See Kaizen Agent in Action</Heading>
-          <p>Watch how Kaizen Agent automatically tests and improves AI agents</p>
+          <p>Watch how Kaizen Agent accelerates your LLM development</p>
         </div>
         <div className={styles.workflowContainer}>
           <img 
@@ -259,8 +262,8 @@ export default function Home(): ReactNode {
   const {siteConfig} = useDocusaurusContext();
   return (
     <Layout
-      title="Kaizen Agent - AI Debugging Engineer for AI Agents"
-      description="Test, debug, and improve your AI agents automatically. Kaizen Agent runs your agents, analyzes failures, and fixes code and prompts using AI.">
+      title="Kaizen Agent - The AI Agent That Improves Your LLM App"
+      description="Ship reliable LLM features faster with autonomous testing, smart fixes, and automated PRs. Kaizen Agent is your AI development teammate.">
       <HomepageHeader />
       <main>
         <HomepageFeatures />

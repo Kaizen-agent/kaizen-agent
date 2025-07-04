@@ -6,18 +6,18 @@ Find answers to common questions about Kaizen Agent, troubleshooting tips, and g
 
 ### What is Kaizen Agent?
 
-Kaizen Agent is an AI-powered debugging engineer that automatically tests, analyzes, and improves your AI agents and LLM applications. Instead of manually writing test cases and debugging failures, you define your test inputs and evaluation criteria in YAML, and Kaizen handles the rest.
+Kaizen Agent is your AI development teammate that levels up your LLM applications. Instead of manually testing and iterating on your agents, you define your test inputs and evaluation criteria in YAML, and Kaizen handles the rest.
 
 ### When should I use Kaizen Agent?
 
-**Kaizen Agent is most valuable during the development phase of your AI agents, right after you've written the initial code but before deployment.**
+**Kaizen Agent is most valuable when you want to ship reliable LLM features faster.**
 
 Perfect use cases:
-- **🔄 Iterative Development**: Test and improve agents during development cycles
-- **🚀 Pre-Deployment Validation**: Ensure your agent works reliably before going live
-- **🐛 Bug Detection**: Catch and fix issues you might miss with manual testing
-- **📈 Performance Optimization**: Continuously improve prompts and code based on test results
+- **🚀 Rapid Development**: Test and improve agents during development cycles
+- **⚡ Pre-Deployment Validation**: Ensure your agent works reliably before going live
+- **🔧 Continuous Improvement**: Continuously enhance prompts and code based on test results
 - **🛡️ Quality Assurance**: Maintain high standards as your agent evolves
+- **📈 Performance Optimization**: Level up your agent's capabilities systematically
 
 ### When should I NOT use Kaizen Agent?
 

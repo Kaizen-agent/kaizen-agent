@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="kaizen-agent",
-    version="0.1.3",
+    version="0.1.4",
     author="Yuto Suzuki",
     author_email="mokkumokku99@gmail.com",
     description="An AI debugging engineer that continuously tests, analyzes, and improves your AI agents and LLM applications",

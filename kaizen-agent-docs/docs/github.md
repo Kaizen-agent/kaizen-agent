@@ -4,7 +4,7 @@ Learn how to set up GitHub integration with Kaizen Agent to automatically create
 
 ## Overview
 
-Kaizen Agent can automatically create pull requests with fixes and improvements to your code. This is especially useful for:
+Kaizen Agent can automatically create pull requests with fixes and improvements to your code, accelerating your development workflow. This is especially useful for:
 
 - **Automated code improvements** without manual intervention
 - **Team collaboration** through pull request reviews
