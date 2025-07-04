@@ -1,10 +1,10 @@
 # Usage Guide
 
-Learn how to configure and use Kaizen Agent effectively. This guide covers YAML configuration structure, CLI commands, and advanced features.
+Learn how to configure and use Kaizen Agent effectively to accelerate your LLM development. This guide covers YAML configuration structure, CLI commands, and advanced features that help you ship reliable AI features faster.
 
 ## YAML Configuration Structure
 
-Kaizen Agent uses YAML configuration files to define test suites for your AI agents. This approach eliminates the need for traditional Python test files while providing powerful testing capabilities.
+Kaizen Agent uses YAML configuration files to define test suites for your AI agents. This approach eliminates the need for traditional Python test files while providing powerful testing capabilities that help you iterate quickly and build more reliable LLM applications.
 
 ### Complete Configuration Example
 
@@ -427,4 +427,4 @@ Use the log analyzer to understand test failures:
 kaizen analyze-logs test-logs/latest_test.json
 ```
 
-For more help, see our [FAQ](./faq.md) or join our [Discord community](https://discord.gg/2A5Genuh). 
+For more help, see our [FAQ](./faq.md) or join our [Discord community](https://discord.gg/2A5Genuh).

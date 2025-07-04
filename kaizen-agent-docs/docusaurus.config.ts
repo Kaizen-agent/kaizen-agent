@@ -6,7 +6,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'Kaizen Agent',
-  tagline: 'AI Debugging Engineer for AI Agents',
+  tagline: 'The AI Agent That Improves Your LLM App',
   favicon: 'img/favicon.ico',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future

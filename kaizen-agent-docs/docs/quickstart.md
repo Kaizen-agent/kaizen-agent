@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get up and running with Kaizen Agent in under 5 minutes! This guide will walk you through installing Kaizen Agent, creating a simple AI agent, and running your first automated test.
+Get up and running with Kaizen Agent in under 5 minutes! This guide will walk you through installing Kaizen Agent, creating a simple AI agent, and running your first automated test to accelerate your LLM development.
 
 ## Prerequisites
 

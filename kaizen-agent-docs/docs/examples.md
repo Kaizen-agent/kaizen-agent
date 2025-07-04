@@ -1,10 +1,10 @@
 # Examples
 
-Explore real-world examples of AI agents and their Kaizen Agent test configurations. These examples demonstrate different use cases, input types, and evaluation strategies.
+Explore real-world examples of AI agents and their Kaizen Agent test configurations. These examples demonstrate different use cases, input types, and evaluation strategies that help you ship reliable LLM features faster.
 
 ## Email Improvement Agent
 
-A simple agent that improves email drafts by making them more professional and well-structured.
+A simple agent that improves email drafts by making them more professional and well-structured. This example shows how Kaizen can transform a basic prompt into a robust, production-ready agent.
 
 ### Python Version
 
@@ -120,7 +120,7 @@ steps:
 
 ## Text Analysis Agent
 
-A more complex agent that performs sentiment analysis and extracts key information from text.
+A more complex agent that performs sentiment analysis and extracts key information from text. This example demonstrates how Kaizen can handle sophisticated agents with multiple evaluation criteria.
 
 ### Agent Code
 
