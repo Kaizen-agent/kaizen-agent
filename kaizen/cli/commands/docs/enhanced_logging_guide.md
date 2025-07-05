@@ -15,234 +15,201 @@ When you run tests with `--save-logs`, the system saves:
 - **Error Messages**: Detailed error information if tests fail
 - **Metadata**: Additional context about test execution
 
-### 2. **Two Types of Log Files**
-- **Detailed Logs**: Complete test data in `{test_name}_{timestamp}_detailed_logs.json`
-- **Summary Logs**: Quick reference in `{test_name}_{timestamp}_summary.json`
+### 2. **Auto-Fix Attempt Tracking**
+For tests with auto-fix enabled:
+- **Complete attempt history**: All fix attempts and their results
+- **Code changes**: What changes were made in each attempt
+- **Improvement tracking**: How test results improved over attempts
+- **Learning insights**: Patterns and strategies that worked
 
-### 3. **Easy Analysis Tools**
-- **CLI Command**: `kaizen analyze-logs` for quick analysis
-- **Rich Display**: Color-coded output with tables and panels
-- **Flexible Detail Levels**: Summary-only or detailed views
+### 3. **Multiple Output Formats**
+The system generates three types of files:
+- **Detailed JSON logs**: Complete test execution data for programmatic analysis
+- **Summary JSON**: Quick reference with key metrics
+- **Markdown reports**: Human-readable summaries (same format as PR descriptions)
 
-## Usage
+### 4. **GitHub Token Independence**
+- **Summary reports work without GitHub token**: Generate detailed test summaries locally
+- **Perfect for local development**: No need for GitHub integration to get comprehensive reports
+- **CI/CD friendly**: Works in any environment without GitHub access
 
-### Running Tests with Enhanced Logging
+## Usage Examples
 
+### Basic Logging
 ```bash
-# Run tests and save detailed logs
-kaizen test-all --config test_config.yaml --save-logs
-
-# Run with auto-fix and save logs
-kaizen test-all --config test_config.yaml --auto-fix --save-logs
-
-# Run with verbose output and save logs
-kaizen test-all --config test_config.yaml --save-logs --verbose
+# Save detailed logs for a test run
+kaizen test --config test_config.yaml --save-logs
 ```
 
-### Analyzing Saved Logs
-
+### With Auto-Fix
 ```bash
-# Quick summary of test results
-kaizen analyze-logs test-logs/my_test_20241201_120000_detailed_logs.json
-
-# Detailed view with all inputs, outputs, and evaluations
-kaizen analyze-logs test-logs/my_test_20241201_120000_detailed_logs.json --details
-
-# Summary only (no test case details)
-kaizen analyze-logs test-logs/my_test_20241201_120000_detailed_logs.json --summary-only
+# Save logs including auto-fix attempts
+kaizen test --config test_config.yaml --auto-fix --save-logs
 ```
 
-## Log File Structure
-
-### Detailed Logs (`*_detailed_logs.json`)
-
-```json
-{
-  "metadata": {
-    "test_name": "My Test Suite",
-    "file_path": "/path/to/test_file.py",
-    "config_path": "/path/to/config.yaml",
-    "start_time": "2024-12-01T12:00:00",
-    "end_time": "2024-12-01T12:01:30",
-    "status": "failed",
-    "config": {
-      "auto_fix": true,
-      "create_pr": false,
-      "max_retries": 2
-    }
-  },
-  "unified_test_results": {
-    "test_summary": {
-      "total_test_cases": 5,
-      "passed_test_cases": 3,
-      "failed_test_cases": 2,
-      "error_test_cases": 0,
-      "regions": ["function_1", "function_2"]
-    },
-    "test_cases_detailed": [
-      {
-        "name": "test_basic_functionality",
-        "status": "passed",
-        "region": "function_1",
-        "input": "test input data",
-        "expected_output": "expected result",
-        "actual_output": "expected result",
-        "evaluation": {
-          "score": 0.95,
-          "reason": "Output matches expected exactly"
-        },
-        "summary": {
-          "passed": true,
-          "has_evaluation": true,
-          "input_type": "str",
-          "output_type": "str"
-        }
-      }
-    ]
-  },
-  "auto_fix_attempts": [
-    {
-      "status": "failed",
-      "test_cases": [...]
-    }
-  ]
-}
-```
-
-### Summary Logs (`*_summary.json`)
-
-```json
-{
-  "test_name": "My Test Suite",
-  "status": "failed",
-  "test_cases_summary": {
-    "total": 5,
-    "passed": 3,
-    "failed": 2,
-    "error": 0,
-    "regions": ["function_1", "function_2"]
-  },
-  "failed_test_cases": [
-    {
-      "name": "test_edge_case",
-      "region": "function_2",
-      "status": "failed",
-      "input": "edge case input",
-      "expected_output": "expected",
-      "actual_output": "actual",
-      "error_message": "Test failed: output does not match",
-      "evaluation_score": 0.3
-    }
-  ]
-}
-```
-
-## Analysis Examples
-
-### 1. **Quick Overview**
+### Without GitHub Integration
 ```bash
-kaizen analyze-logs test-logs/my_test_20241201_120000_detailed_logs.json
+# Generate summary reports without GitHub token
+kaizen test --config test_config.yaml --auto-fix --save-logs
+# No GITHUB_TOKEN required - summary reports generated locally
 ```
 
-**Output:**
-```
-Test Log Analysis: my_test_20241201_120000_detailed_logs.json
-================================================================================
-
-Test Metadata:
-┌─────────────┬─────────────────────────────────────┐
-│ Property    │ Value                               │
-├─────────────┼─────────────────────────────────────┤
-│ Test Name   │ My Test Suite                       │
-│ Status      │ failed                              │
-│ Total Tests │ 5                                   │
-│ Passed      │ 3                                   │
-│ Failed      │ 2                                   │
-└─────────────┴─────────────────────────────────────┘
-```
-
-### 2. **Detailed Analysis**
+### Complete Workflow
 ```bash
-kaizen analyze-logs test-logs/my_test_20241201_120000_detailed_logs.json --details
+# Full workflow with logging
+kaizen test --config test_config.yaml --auto-fix --create-pr --save-logs
 ```
 
-**Output:**
+## Output File Structure
+
 ```
-Test Case 1: test_basic_functionality [green]passed[/green]
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Region: function_1                                                          │
-│                                                                             │
-│ Input:                                                                      │
-│ "test input data"                                                           │
-│                                                                             │
-│ Expected Output:                                                            │
-│ "expected result"                                                           │
-│                                                                             │
-│ Actual Output:                                                              │
-│ "expected result"                                                           │
-│                                                                             │
-│ Evaluation:                                                                 │
-│ {                                                                           │
-│   "score": 0.95,                                                            │
-│   "reason": "Output matches expected exactly"                               │
-│ }                                                                           │
-└─────────────────────────────────────────────────────────────────────────────┘
+test-logs/
+├── example_test_20240115_103045_detailed_logs.json
+├── example_test_20240115_103045_summary.json
+└── test_report_20240115_103045.md
 ```
+
+### File Descriptions
+
+1. **Detailed Logs** (`*_detailed_logs.json`)
+   - Complete test execution data
+   - All test cases with inputs/outputs
+   - Auto-fix attempt history
+   - Error details and stack traces
+   - Execution timing information
+
+2. **Summary** (`*_summary.json`)
+   - Quick reference with key metrics
+   - Test status and error messages
+   - Reference to detailed logs
+   - Compact format for quick analysis
+
+3. **Summary Report** (`test_report_*.md`)
+   - Human-readable test summary
+   - Same format as PR descriptions
+   - **Includes baseline results** (before any fixes)
+   - **Shows actual outputs** (not just N/A)
+   - Executive summary with improvements
+   - Detailed test results table
+   - Improvement analysis
+   - **Works without GitHub token**
+
+## Analyzing the Data
+
+### JSON Logs Analysis
+```python
+import json
+
+# Load detailed logs
+with open('test-logs/example_test_20240115_103045_detailed_logs.json', 'r') as f:
+    logs = json.load(f)
+
+# Analyze test results
+test_results = logs['test_results']
+for region, region_data in test_results.items():
+    if region != 'overall_status':
+        print(f"Region: {region}")
+        for test_case in region_data['test_cases']:
+            print(f"  {test_case['name']}: {test_case['status']}")
+
+# Analyze auto-fix attempts
+if 'auto_fix_attempts' in logs:
+    for attempt in logs['auto_fix_attempts']:
+        print(f"Attempt {attempt['attempt']}: {attempt['status']}")
+```
+
+### Markdown Report Analysis
+The Markdown reports provide:
+- **Executive Summary**: High-level results and improvements
+- **Test Results Table**: All test cases with status changes
+- **Detailed Results**: Complete test case information
+- **Improvement Analysis**: What was fixed and how
+
+## Benefits for Different Use Cases
+
+### 1. **Development and Debugging**
+- **Complete visibility**: See exactly what inputs produced what outputs
+- **Error analysis**: Detailed error messages and stack traces
+- **Reproducibility**: All test data preserved for later analysis
+- **No GitHub required**: Generate reports locally without GitHub integration
+
+### 2. **CI/CD Integration**
+- **Automated analysis**: JSON format allows programmatic processing
+- **Artifact preservation**: Save logs as build artifacts
+- **Failure investigation**: Detailed logs help debug CI failures
+- **Summary reports**: Human-readable summaries for notifications
+
+### 3. **Team Collaboration**
+- **Shared understanding**: Markdown reports provide clear summaries
+- **PR consistency**: Same format as PR descriptions
+- **Historical tracking**: Keep logs for important test runs
+- **No dependencies**: Works without GitHub token or internet access
+
+### 4. **Performance Analysis**
+- **Timing data**: Execution time for each test case
+- **Resource usage**: Track performance over time
+- **Optimization insights**: Identify slow tests and bottlenecks
 
 ## Best Practices
 
 ### 1. **When to Use Enhanced Logging**
-- **Debugging**: When tests fail and you need to understand why
-- **Quality Assurance**: To verify that outputs meet expectations
-- **Performance Analysis**: To track how outputs change over time
-- **Documentation**: To create examples of system behavior
+- **Debugging test failures**: Enable for troubleshooting
+- **Performance analysis**: Track execution times
+- **Auto-fix development**: Understand fix attempts
+- **Documentation**: Generate reports for team sharing
+- **CI/CD integration**: Automated test result analysis
 
 ### 2. **File Management**
-- Log files can be large, so consider cleanup strategies
-- Use meaningful test names to make logs easier to find
-- Keep logs for important test runs and delete old ones
+- **Organize by date**: Use timestamps to avoid conflicts
+- **Archive important runs**: Keep logs for significant executions
+- **Monitor disk usage**: Large log files may accumulate
+- **Clean up regularly**: Remove old logs to save space
 
-### 3. **Analysis Workflow**
-1. Run tests with `--save-logs`
-2. Use `kaizen analyze-logs` for quick overview
-3. Use `--details` flag for deep analysis
-4. Check summary file for failed test cases
-5. Open JSON directly for programmatic analysis
+### 3. **Security Considerations**
+- **Sensitive data**: Logs may contain test inputs/outputs
+- **Selective sharing**: Share summary reports rather than detailed logs
+- **Access control**: Restrict access to detailed logs in shared environments
+
+### 4. **Integration Tips**
+- **GitHub Actions**: Upload logs as artifacts
+- **Slack/Teams**: Share summary reports in notifications
+- **JIRA**: Attach summary reports to tickets
+- **Documentation**: Include summary reports in test documentation
 
 ## Troubleshooting
 
 ### Common Issues
 
-**1. Log files not created**
-- Ensure you're using `--save-logs` flag
-- Check that the test-logs directory is writable
-- Verify that unified test results are available
+1. **Large log files**
+   - **Cause**: Verbose test output or many auto-fix attempts
+   - **Solution**: Monitor file sizes and clean up old logs
 
-**2. Large log files**
-- Consider using `--summary-only` for quick analysis
-- Log files include all test data, so they can be large
-- Use the summary file for quick reference
+2. **Missing summary report**
+   - **Cause**: No test results available
+   - **Solution**: Summary reports are generated for any test run, including baseline results without auto-fix
 
-**3. Missing test case details**
-- Ensure you're using the latest version of Kaizen
-- Check that tests are using the unified test result format
-- Verify that the test runner is properly configured
+3. **GitHub token errors**
+   - **Cause**: Missing GITHUB_TOKEN when using --create-pr
+   - **Solution**: Summary reports work without GitHub token - only PR creation requires it
+
+4. **Permission errors**
+   - **Cause**: Cannot write to test-logs directory
+   - **Solution**: Ensure write permissions to the current directory
 
 ### Getting Help
 
 If you encounter issues with enhanced logging:
-
 1. Check the console output for error messages
-2. Verify that the log files were created in the `test-logs/` directory
-3. Try running with `--verbose` to see more details
-4. Check the summary file for basic information
+2. Verify file permissions in the current directory
+3. Ensure sufficient disk space for log files
+4. Review the generated logs for clues about failures
+5. Use summary reports for quick analysis without detailed logs
 
-## Integration with Other Tools
+## Future Enhancements
 
-The JSON log files can be easily integrated with:
-- **CI/CD pipelines**: Parse results programmatically
-- **Monitoring systems**: Track test performance over time
-- **Reporting tools**: Generate custom reports
-- **Data analysis**: Use pandas or other tools to analyze trends
-
-The structured format makes it easy to extract specific information and create custom analysis tools. 
+The enhanced logging system is designed to be extensible:
+- **Custom log formats**: Support for different output formats
+- **Log compression**: Automatic compression of large log files
+- **Remote logging**: Integration with external logging services
+- **Advanced analytics**: Built-in analysis tools for log data
+- **Real-time monitoring**: Live log streaming for long-running tests 

@@ -62,6 +62,7 @@ class TestResult:
         steps: Test step results
         unified_result: Unified test execution result (for detailed logging)
         test_attempts: Auto-fix attempts (for detailed logging)
+        baseline_result: Baseline test execution result (before any auto-fix)
     """
     # Required fields
     name: str
@@ -77,6 +78,7 @@ class TestResult:
     steps: List[Dict[str, any]] = field(default_factory=list)
     unified_result: Optional[Any] = None  # TestExecutionResult
     test_attempts: Optional[List[Dict[str, any]]] = None
+    baseline_result: Optional[Any] = None  # TestExecutionResult
     
     @classmethod
     def from_config(cls, config: TestConfiguration) -> 'TestResult':

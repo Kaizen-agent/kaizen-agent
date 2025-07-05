@@ -98,6 +98,7 @@ poetry.lock
 
 # Test results
 test-results/
+test-logs/
 
 # Internal documentation
 DOCUMENTATION.md
@@ -172,3 +173,4 @@ Thumbs.db
 
 # dotenv or secrets (if any)
 .env
+

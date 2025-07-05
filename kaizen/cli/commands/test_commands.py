@@ -164,7 +164,8 @@ class TestAllCommand(BaseTestCommand):
                 error=None if best_test_execution_result.is_successful() else f"{best_test_execution_result.get_failure_count()} tests failed",
                 steps=[],  # TODO: Add step results if available
                 unified_result=best_test_execution_result,
-                test_attempts=test_attempts
+                test_attempts=test_attempts,
+                baseline_result=test_execution_result  # Store the baseline result (before auto-fix)
             )
             
             return Result.success(result)

@@ -21,7 +21,7 @@ Example:
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, NoReturn, List, Any
+from typing import Optional, NoReturn, List, Any, Dict
 import json
 
 # Third-party imports
@@ -371,6 +371,179 @@ def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) 
         console.print(f"[bold red]Warning: Failed to save detailed logs: {str(e)}[/bold red]")
         # Note: Removed the self.verbose check since this function doesn't have access to self
 
+def _save_summary_report(console: Console, test_result: TestResult, config: Any) -> None:
+    """Save test summary report in Markdown format for later analysis.
+    
+    Args:
+        console: Rich console for output
+        test_result: The test result to save
+        config: Test configuration
+    """
+    try:
+        # Create logs directory
+        logs_dir = Path("test-logs")
+        logs_dir.mkdir(exist_ok=True)
+        
+        # Generate timestamp for unique filename
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        report_filename = f"test_report_{timestamp}.md"
+        report_file_path = logs_dir / report_filename
+        
+        # Import required modules
+        from kaizen.autofix.pr.manager import PRManager
+        from kaizen.cli.commands.models import TestExecutionHistory
+        
+        # Create PR manager instance with create_pr=False to avoid GitHub token requirement
+        pr_config = config.__dict__.copy()
+        pr_config['create_pr'] = False  # Disable PR creation to avoid GitHub token requirement
+        
+        # Create PR manager instance
+        pr_manager = PRManager(pr_config)
+        
+        # Create test execution history from the test result
+        test_history = TestExecutionHistory()
+        
+        # Add baseline result if available
+        if test_result.baseline_result:
+            test_history.add_baseline_result(test_result.baseline_result)
+            console.print(f"[dim]✓ Baseline results included ({len(test_result.baseline_result.test_cases)} test cases)[/dim]")
+        
+        # Add all test execution results to the history
+        if test_result.test_attempts and len(test_result.test_attempts) > 0:
+            for attempt_data in test_result.test_attempts:
+                if isinstance(attempt_data, dict) and 'test_execution_result' in attempt_data:
+                    execution_result = attempt_data['test_execution_result']
+                    if execution_result:
+                        test_history.add_fix_attempt_result(execution_result)
+            
+            console.print(f"[dim]✓ Test attempts included ({len(test_result.test_attempts)} attempts)[/dim]")
+        
+        # If no test attempts, use unified_result as the only result
+        elif test_result.unified_result:
+            test_history.add_fix_attempt_result(test_result.unified_result)
+            console.print(f"[dim]✓ Test results included ({len(test_result.unified_result.test_cases)} test cases)[/dim]")
+        
+        # If no test history available, skip report generation
+        if not test_history.get_all_results():
+            console.print(f"[dim]No valid test results found, skipping summary report generation[/dim]")
+            return
+        
+        # Use the existing AutoFix logic to create test results for PR
+        # This reuses the same transformation logic used for PR creation
+        from kaizen.autofix.main import AutoFix
+        
+        # Create a minimal AutoFix instance just for the transformation method
+        # We don't need the full AutoFix functionality, just the data transformation
+        class MinimalAutoFix:
+            def _create_test_results_for_pr_from_history(self, test_history: TestExecutionHistory) -> Dict:
+                """Create test results for PR using test history."""
+                # Create agent info
+                agent_info = {
+                    'name': 'Kaizen AutoFix Agent',
+                    'version': '1.0.0',
+                    'description': 'Automated code fixing agent using LLM-based analysis'
+                }
+                
+                # Get all results from test history
+                all_results = test_history.get_all_results()
+                
+                # Convert each result to the expected Attempt format
+                attempts = []
+                for i, result in enumerate(all_results):
+                    # Convert test cases to the expected TestCase format
+                    test_cases = []
+                    for tc in result.test_cases:
+                        # Safely serialize evaluation data
+                        safe_evaluation = self._safe_serialize_evaluation(tc.evaluation)
+                        
+                        test_case = {
+                            'name': tc.name,
+                            'status': tc.status.value,
+                            'input': tc.input,
+                            'expected_output': tc.expected_output,
+                            'actual_output': tc.actual_output,
+                            'evaluation': safe_evaluation,
+                            'reason': tc.error_message
+                        }
+                        test_cases.append(test_case)
+                    
+                    # Create attempt
+                    attempt = {
+                        'status': result.status.value,
+                        'test_cases': test_cases
+                    }
+                    attempts.append(attempt)
+                
+                # Create TestResults structure
+                test_results_for_pr = {
+                    'agent_info': agent_info,
+                    'attempts': attempts,
+                    'additional_summary': f"Test: {test_result.name}, File: {test_result.file_path}"
+                }
+                
+                return test_results_for_pr
+            
+            def _safe_serialize_evaluation(self, evaluation):
+                """Safely serialize evaluation data to prevent JSON serialization issues."""
+                if evaluation is None:
+                    return None
+                
+                try:
+                    # Try to serialize as JSON first
+                    import json
+                    return json.dumps(evaluation, default=str)
+                except (TypeError, ValueError) as e:
+                    try:
+                        # Fallback to string representation
+                        return str(evaluation)
+                    except Exception as e2:
+                        return "Evaluation data unavailable"
+        
+        # Use the minimal AutoFix instance to transform the data
+        minimal_autofix = MinimalAutoFix()
+        test_results_for_pr = minimal_autofix._create_test_results_for_pr_from_history(test_history)
+        
+        # Generate the summary report using the same logic as PR descriptions
+        summary_report = pr_manager.generate_summary_report(
+            changes={},  # No code changes to show in summary report
+            test_results=test_results_for_pr
+        )
+        
+        # Write the summary report to file
+        with open(report_file_path, 'w', encoding='utf-8') as f:
+            f.write(summary_report)
+        
+        # Show success message
+        console.print(f"[green]✓ Summary report saved: {report_filename}[/green]")
+        console.print(f"[dim]  Location: {report_file_path}[/dim]")
+        console.print(f"[dim]  Size: {report_file_path.stat().st_size / 1024:.1f} KB[/dim]")
+        
+        # Show what was included
+        all_results = test_history.get_all_results()
+        if all_results:
+            console.print(f"[dim]✓ Test results included ({len(all_results)} attempts)[/dim]")
+            total_test_cases = sum(len(result.test_cases) for result in all_results)
+            console.print(f"[dim]  - Total test cases: {total_test_cases}[/dim]")
+            
+            # Show breakdown of attempts
+            if test_result.baseline_result:
+                console.print(f"[dim]  - Baseline: {len(test_result.baseline_result.test_cases)} test cases[/dim]")
+            if test_result.test_attempts:
+                console.print(f"[dim]  - Auto-fix attempts: {len(test_result.test_attempts)} attempts[/dim]")
+        
+        # Provide guidance on how to use the report
+        console.print(f"\n[bold]Summary Report Information:[/bold]")
+        console.print(f"[dim]• Contains the same detailed test summary used in PR descriptions[/dim]")
+        console.print(f"[dim]• Includes baseline results and all auto-fix attempts[/dim]")
+        console.print(f"[dim]• Shows test results table and detailed analysis[/dim]")
+        console.print(f"[dim]• Can be viewed in any Markdown viewer or text editor[/dim]")
+        
+    except Exception as e:
+        console.print(f"[bold red]Warning: Failed to save summary report: {str(e)}[/bold red]")
+        # Add more detailed error information for debugging
+        import traceback
+        console.print(f"[dim]Error details: {traceback.format_exc()}[/dim]")
+
 @click.command()
 @click.option('--config', '-c', type=click.Path(exists=True), required=True, help='Test configuration file')
 @click.option('--auto-fix', is_flag=True, help='Automatically fix failing tests')
@@ -382,7 +555,7 @@ def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) 
 @click.option('--language', type=click.Choice([l.value for l in Language]), 
               default=DEFAULT_LANGUAGE.value, help=f'Programming language for test execution (default: {DEFAULT_LANGUAGE.value})')
 @click.option('--test-github-access', is_flag=True, help='Test GitHub access and permissions before running tests')
-@click.option('--save-logs', is_flag=True, help='Save detailed test logs in JSON format for later analysis')
+@click.option('--save-logs', is_flag=True, help='Save detailed test logs in JSON format and summary report in Markdown format for later analysis')
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed debug information and verbose logging')
 @click.option('--clear-ts-cache', is_flag=True, help='Clear TypeScript compilation cache before running tests')
 @click.option('--show-cache-stats', is_flag=True, help='Show TypeScript cache statistics')
@@ -442,6 +615,7 @@ def test_all(
     - {test_name}_{timestamp}_detailed_logs.json: Complete test results including inputs, outputs, 
       evaluations, and auto-fix attempts
     - {test_name}_{timestamp}_summary.json: Quick reference summary with key metrics
+    - test_report_{timestamp}.md: Detailed test summary report in Markdown format (same as PR descriptions)
     
     The detailed logs include:
     - Test metadata and configuration
@@ -450,6 +624,12 @@ def test_all(
     - Auto-fix attempts and their outcomes
     - Error details and stack traces
     - Execution timing information
+    
+    The summary report (.md file) includes:
+    - Comprehensive test summary (same format as PR descriptions)
+    - Test results table showing all attempts
+    - Detailed analysis of improvements and regressions
+    - Agent information and execution details
         
     Example:
         >>> test_all(
@@ -718,6 +898,8 @@ def test_all(
         # Save detailed logs if requested
         if save_logs:
             _save_detailed_logs(logger.console, test_result_value, config)
+            # Also save summary report in Markdown format
+            _save_summary_report(logger.console, test_result_value, config)
         
         # Show detailed results in verbose mode
         if verbose:
