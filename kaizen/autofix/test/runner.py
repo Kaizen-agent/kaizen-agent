@@ -224,64 +224,22 @@ class TestRunner:
                 region_name = f"{agent_entry_point.module}.{agent_entry_point.class_name or agent_entry_point.method}"
             
             else:
-                # Use the legacy marker-based system
+                # No agent entry point specified, use the entire file
                 if self.verbose:
-                    logger.debug(f"DEBUG: Using legacy marker-based system")
+                    logger.debug(f"DEBUG: No agent entry point specified, using entire file")
                 
-                # Determine region name: use input['region'] if present, else first from top-level 'regions'
-                region_name = test_case_obj.input.get('region')
-                if not region_name:
-                    regions = self.test_config.get('regions', [])
-                    if not regions:
-                        if agent_entry_point_dict:
-                            # Use agent entry point logic (already handled above)
-                            pass  # Do nothing, agent entry point logic is above
-                        else:
-                            # No agent entry point, fallback to method in step input
-                            method_name = test_case_obj.input.get('method')
-                            if not method_name:
-                                raise ValueError("No method specified in test step and no regions configured")
-                            if self.verbose:
-                                logger.debug(f"DEBUG: Extracting function '{method_name}' from test file")
-                            if language == "typescript":
-                                region_info = self.code_region_extractor.extract_region_ts_by_name(
-                                    test_file_path, 
-                                    method_name
-                                )
-                            else:
-                                region_info = self.code_region_extractor.extract_region(
-                                    test_file_path, 
-                                    method_name
-                                )
-                            region_name = method_name
-                    else:
-                        region_name = regions[0]
-                        logger.info(f"No region specified in test step; using first region from top-level: {region_name}")
-                        if self.verbose:
-                            logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
-                        if language == "typescript":
-                            region_info = self.code_region_extractor.extract_region_ts(
-                                test_file_path, 
-                                region_name
-                            )
-                        else:
-                            region_info = self.code_region_extractor.extract_region(
-                                test_file_path, 
-                                region_name
-                            )
+                # Use the entire file as the region
+                region_name = "main"
+                if language == "typescript":
+                    region_info = self.code_region_extractor.extract_region_ts(
+                        test_file_path, 
+                        region_name
+                    )
                 else:
-                    if self.verbose:
-                        logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
-                    if language == "typescript":
-                        region_info = self.code_region_extractor.extract_region_ts(
-                            test_file_path, 
-                            region_name
-                        )
-                    else:
-                        region_info = self.code_region_extractor.extract_region(
-                            test_file_path, 
-                            region_name
-                        )
+                    region_info = self.code_region_extractor.extract_region(
+                        test_file_path, 
+                        region_name
+                    )
             
             if self.verbose:
                 logger.debug(f"DEBUG: Region extraction completed. Region info: {region_info}")
@@ -293,7 +251,7 @@ class TestRunner:
             # Parse input data using the new input parser
             input_data = test_case_obj.input.get('input')
             
-            # Extract method name from test case input (only for legacy system)
+            # Extract method name from test case input (for non-entry point cases)
             method_name = None
             if not agent_entry_point_dict:
                 method_name = test_case_obj.input.get('method')

@@ -1,4 +1,4 @@
-"""Code region extraction and execution."""
+"""Code region extraction and execution using entry points and file-based analysis."""
 
 # Standard library imports
 import ast
@@ -160,7 +160,7 @@ class ModuleInfo:
 
 @dataclass
 class AgentEntryPoint:
-    """Configuration for agent entry point without markers.
+    """Configuration for agent entry point.
     
     Attributes:
         module: Module path (e.g., 'path.to.module')
@@ -1160,7 +1160,7 @@ class ImportManager:
         self._import_errors.clear()
 
 class CodeRegionExtractor:
-    """Extracts and analyzes code regions from files."""
+    """Extracts and analyzes code regions from files using entry points and file-based analysis."""
     
     def __init__(self, workspace_root: Optional[Path] = None):
         """Initialize the code region extractor."""
@@ -1169,7 +1169,7 @@ class CodeRegionExtractor:
         logger.debug(f"Initialized CodeRegionExtractor with workspace root: {self.workspace_root}")
     
     def extract_region(self, file_path: Path, region_name: str) -> RegionInfo:
-        """Extract a code region from a file."""
+        """Extract a code region from a file using the entire file content."""
         logger.debug(f"Extracting region '{region_name}' from file: {file_path}")
         try:
             logger.debug(f"DEBUG: Opening file: {file_path}")
@@ -1177,30 +1177,9 @@ class CodeRegionExtractor:
                 content = f.read()
             logger.debug(f"DEBUG: Successfully read file: {file_path} ({len(content)} characters)")
             
-            # If region_name is 'main', use the entire file
-            if region_name == 'main':
-                logger.debug("Using entire file as region (main)")
-                code = content
-                logger.debug(f"DEBUG: About to analyze region (main)")
-                return self._analyze_region(code, region_name, file_path)
-            
-            # Otherwise look for region markers
-            start_marker = f"# kaizen:start:{region_name}"
-            end_marker = f"# kaizen:end:{region_name}"
-            
-            logger.debug(f"DEBUG: Looking for start marker: {start_marker}")
-            start_idx = content.find(start_marker)
-            if start_idx == -1:
-                logger.error(f"Start marker not found: {start_marker}")
-                raise ValueError(f"Start marker for region '{region_name}' not found")
-            
-            logger.debug(f"DEBUG: Looking for end marker: {end_marker}")
-            end_idx = content.find(end_marker)
-            if end_idx == -1:
-                logger.error(f"End marker not found: {end_marker}")
-                raise ValueError(f"End marker for region '{region_name}' not found")
-            
-            logger.debug(f"DEBUG: Found markers at positions {start_idx} and {end_idx}")
+            # Use the entire file content
+            logger.debug("Using entire file as region")
+            code = content
             
             # Extract imports from the entire file
             logger.debug(f"DEBUG: Extracting imports from file")
@@ -1215,20 +1194,6 @@ class CodeRegionExtractor:
                     import_lines.append(line)
             
             logger.debug(f"DEBUG: Found {len(import_lines)} import lines")
-            
-            # Extract the region code
-            start_idx = content.find('\n', start_idx) + 1
-            if start_idx == 0:  # find() returned -1, no newline found
-                logger.error(f"No newline found after start marker: {start_marker}")
-                raise ValueError(f"Invalid start marker format for region '{region_name}'")
-            region_code = content[start_idx:end_idx].strip()
-            
-            # Combine imports with region code
-            if import_lines:
-                logger.debug(f"Including {len(import_lines)} import statements in region")
-                code = '\n'.join(import_lines) + '\n\n' + region_code
-            else:
-                code = region_code
             
             logger.debug(f"Extracted code region: {len(code)} characters")
             logger.debug(f"DEBUG: About to analyze region: {region_name}")
@@ -1380,7 +1345,7 @@ class CodeRegionExtractor:
             raise ValueError(f"Failed to determine region type: {str(e)}")
 
     def extract_region_by_entry_point(self, file_path: Path, entry_point: AgentEntryPoint) -> RegionInfo:
-        """Extract a code region using agent entry point configuration instead of markers.
+        """Extract a code region using agent entry point configuration.
         
         Args:
             file_path: Path to the file containing the agent
@@ -1573,7 +1538,7 @@ class CodeRegionExtractor:
             return False
 
     def extract_region_ts(self, file_path: Path, region_name: str) -> RegionInfo:
-        """Extract a code region from a TypeScript file.
+        """Extract a code region from a TypeScript file using the entire file content.
         
         Args:
             file_path: Path to the TypeScript file
@@ -1587,27 +1552,9 @@ class CodeRegionExtractor:
             with open(file_path, 'r') as f:
                 content = f.read()
             
-            # If region_name is 'main', use the entire file
-            if region_name == 'main':
-                logger.debug("Using entire TypeScript file as region (main)")
-                code = content
-                return self._analyze_region_ts(code, region_name, file_path)
-            
-            # Look for region markers (same format as Python)
-            start_marker = f"// kaizen:start:{region_name}"
-            end_marker = f"// kaizen:end:{region_name}"
-            
-            logger.debug(f"Looking for TypeScript start marker: {start_marker}")
-            start_idx = content.find(start_marker)
-            if start_idx == -1:
-                logger.error(f"TypeScript start marker not found: {start_marker}")
-                raise ValueError(f"Start marker for region '{region_name}' not found")
-            
-            logger.debug(f"Looking for TypeScript end marker: {end_marker}")
-            end_idx = content.find(end_marker)
-            if end_idx == -1:
-                logger.error(f"TypeScript end marker not found: {end_marker}")
-                raise ValueError(f"End marker for region '{region_name}' not found")
+            # Use the entire file content
+            logger.debug("Using entire TypeScript file as region")
+            code = content
             
             # Extract imports from the entire file
             import_lines = []
@@ -1615,19 +1562,6 @@ class CodeRegionExtractor:
                 line = line.strip()
                 if line.startswith(('import ', 'export ')) and not line.startswith('//'):
                     import_lines.append(line)
-            
-            # Extract the region code
-            start_idx = content.find('\n', start_idx) + 1
-            if start_idx == 0:  # find() returned -1, no newline found
-                logger.error(f"No newline found after start marker: {start_marker}")
-                raise ValueError(f"Invalid start marker format for region '{region_name}'")
-            region_code = content[start_idx:end_idx].strip()
-            
-            # Combine imports with region code
-            if import_lines:
-                code = '\n'.join(import_lines) + '\n\n' + region_code
-            else:
-                code = region_code
             
             logger.debug(f"Extracted TypeScript code region: {len(code)} characters")
             return self._analyze_region_ts(code, region_name, file_path)
