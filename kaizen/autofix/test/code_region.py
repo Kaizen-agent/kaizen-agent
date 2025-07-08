@@ -1364,20 +1364,8 @@ class CodeRegionExtractor:
             with open(file_path, 'r') as f:
                 content = f.read()
             
-            # Extract imports from the entire file
-            import_lines = []
-            for line in content.split('\n'):
-                line = line.strip()
-                if line.startswith(('import ', 'from ')) and not line.startswith('#'):
-                    if line.startswith('from .'):
-                        logger.debug(f"Skipping relative import: {line}")
-                        continue
-                    import_lines.append(line)
-            
             # Use the entire file content as the region
             code = content
-            if import_lines:
-                logger.debug(f"Found {len(import_lines)} import lines in file")
             
             # Analyze the region to determine type and structure
             region_info = self._analyze_region(code, entry_point.module, file_path)
@@ -2038,28 +2026,7 @@ class CodeRegionExecutor:
                 return self._execute_with_entry_point(
                     region_info, input_data, tracked_variables
                 )
-            
-            # Otherwise use the traditional region-based execution
-            with self.import_manager.managed_imports(region_info) as namespace:
-                # Add imported dependencies to namespace
-                namespace.update(self.imported_dependencies)
-                
-                # Execute the code region
-                if region_info.type == RegionType.CLASS:
-                    return self._execute_class_region(
-                        region_info, method_name, input_data, tracked_variables, namespace
-                    )
-                elif region_info.type == RegionType.FUNCTION:
-                    return self._execute_function_region(
-                        region_info, input_data, tracked_variables, namespace
-                    )
-                elif region_info.type == RegionType.MODULE:
-                    return self._execute_module_region(
-                        region_info, tracked_variables, namespace
-                    )
-                else:
-                    raise ValueError(f"Unsupported region type: {region_info.type}")
-                    
+               
         except Exception as e:
             logger.error(f"Error executing region {region_info.name}: {str(e)}")
             return {

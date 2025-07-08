@@ -16,7 +16,7 @@ from .models import (
     TestConfiguration,
     Result
 )
-from .types import DEFAULT_MAX_RETRIES, DEFAULT_LANGUAGE
+from .types import DEFAULT_MAX_RETRIES, DEFAULT_LANGUAGE, DEFAULT_FRAMEWORK
 
 @dataclass
 class ParseResult:
@@ -108,6 +108,16 @@ class ConfigurationParser:
                 except ValueError as e:
                     return Result.failure(f"Invalid language: {str(e)}")
             
+            # Parse framework from config data
+            framework = DEFAULT_FRAMEWORK
+            if 'framework' in config_data:
+                try:
+                    from .types import Framework
+                    framework = Framework.from_str(config_data['framework'])
+                    
+                except ValueError as e:
+                    return Result.failure(f"Invalid framework: {str(e)}")
+            
             # Create configuration
             config = TestConfiguration(
                 name=config_data['name'],
@@ -127,7 +137,8 @@ class ConfigurationParser:
                 dependencies=config_data.get('dependencies', []),
                 referenced_files=config_data.get('referenced_files', []),
                 files_to_fix=config_data.get('files_to_fix', []),
-                language=language
+                language=language,
+                framework=framework
             )
             
             return Result.success(config)

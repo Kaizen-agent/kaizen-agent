@@ -5,18 +5,20 @@ These values are used for configuration and control flow in the test execution p
 
 The module provides:
 - Language: Enum for supported programming languages
+- Framework: Enum for supported agent frameworks
 - PRStrategy: Enum for pull request creation strategies
 - TestStatus: Enum for test execution statuses
 - STATUS_EMOJI: Mapping of status values to emoji representations
 - Default configuration values
 
 Example:
-    >>> from kaizen.cli.commands.types import Language, PRStrategy, TestStatus
+    >>> from kaizen.cli.commands.types import Language, Framework, PRStrategy, TestStatus
     >>> language = Language.PYTHON
+    >>> framework = Framework.LLAMAINDEX
     >>> strategy = PRStrategy.ALL_PASSING
     >>> status = TestStatus.PASSED
-    >>> print(f"Language: {language.value}, Strategy: {strategy.value}, Status: {status.value}")
-    Language: python, Strategy: ALL_PASSING, Status: passed
+    >>> print(f"Language: {language.value}, Framework: {framework.value}, Strategy: {strategy.value}, Status: {status.value}")
+    Language: python, Framework: llamaindex, Strategy: ALL_PASSING, Status: passed
 """
 
 import logging
@@ -78,6 +80,66 @@ class Language(str, Enum):
             logger.error(f"Failed to convert language '{value}' (normalized: '{normalized_value}'). Valid values: {valid_values}")
             raise ValueError(
                 f"Invalid language: {value}. "
+                f"Must be one of {valid_values}"
+            ) from e
+
+class Framework(str, Enum):
+    """Supported agent frameworks for test execution.
+    
+    This enum defines the different agent frameworks that can be used
+    for test execution and agent implementation.
+    
+    Attributes:
+        LLAMAINDEX: LlamaIndex framework
+        LANGCHAIN: LangChain framework
+        AUTOGEN: AutoGen framework
+        CUSTOM: Custom framework implementation
+    
+    Example:
+        >>> framework = Framework.from_str("llamaindex")
+        >>> print(framework.value)  # "llamaindex"
+    """
+    
+    LLAMAINDEX = 'llamaindex'
+    LANGCHAIN = 'langchain'
+    AUTOGEN = 'autogen'
+    CUSTOM = 'custom'
+
+    @classmethod
+    def from_str(cls, value: str) -> 'Framework':
+        """Convert string to Framework enum.
+        
+        Args:
+            value: String value to convert (case-insensitive)
+            
+        Returns:
+            Framework enum value
+            
+        Raises:
+            ValueError: If value is not a valid framework
+            
+        Example:
+            >>> framework = Framework.from_str("llamaindex")
+            >>> print(framework)  # Framework.LLAMAINDEX
+        """
+        logger.debug(f"Converting framework string: '{value}' (type: {type(value)})")
+        
+        if not isinstance(value, str):
+            logger.error(f"Invalid input type for framework conversion: {type(value)}, value: {value}")
+            raise ValueError(f"Framework value must be a string, got {type(value)}")
+        
+        normalized_value = value.lower().strip()
+        logger.debug(f"Normalized framework value: '{normalized_value}'")
+        
+        try:
+            result = cls(normalized_value)
+            logger.debug(f"Successfully converted '{value}' to {result}")
+            return result
+        except ValueError as e:
+            valid_values = [f.value for f in cls]
+            logger.error(f"Failed to convert framework '{value}' (normalized: '{normalized_value}'). Valid values: {valid_values}")
+            raise ValueError(
+                f"Invalid framework: {value}. "
                 f"Must be one of {valid_values}"
             ) from e
 
@@ -167,4 +229,5 @@ STATUS_EMOJI: Final[Dict[str, str]] = {
 # Default values for test configuration
 DEFAULT_MAX_RETRIES: Final[int] = 2
 DEFAULT_BASE_BRANCH: Final[str] = 'main'
-DEFAULT_LANGUAGE: Final[Language] = Language.PYTHON 
+DEFAULT_LANGUAGE: Final[Language] = Language.PYTHON
+DEFAULT_FRAMEWORK: Final[Framework] = Framework.CUSTOM 

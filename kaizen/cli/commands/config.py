@@ -52,7 +52,8 @@ class ConfigurationManager:
         create_pr: bool = False,
         max_retries: int = DEFAULT_MAX_RETRIES,
         base_branch: str = 'main',
-        pr_strategy: str = 'ALL_PASSING'
+        pr_strategy: str = 'ALL_PASSING',
+        framework: Optional[str] = None
     ) -> Result[TestConfiguration]:
         """Load and validate test configuration, allowing CLI overrides except for language.
         
@@ -83,6 +84,10 @@ class ConfigurationManager:
                 'base_branch': base_branch,
                 'pr_strategy': pr_strategy
             }
+            
+            # Add framework override if provided
+            if framework is not None:
+                cli_overrides['framework'] = framework
 
             logger.debug(f"Original config_data language: {config_data.get('language', 'NOT_SET')}")
             logger.debug(f"CLI overrides: {cli_overrides}")

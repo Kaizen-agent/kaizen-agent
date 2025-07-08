@@ -159,8 +159,12 @@ class TestRunner:
             language = self.test_config.get("language")
             if not language:
                 raise ValueError("No language specified in test configuration. Please set the 'language' field.")
+            
+            # Get framework from test config (optional)
+            framework = self.test_config.get("framework")
             if self.verbose:
                 logger.debug(f"DEBUG: Using language: {language} (type: {type(language)})")
+                logger.debug(f"DEBUG: Using framework: {framework} (type: {type(framework)})")
                 logger.debug(f"DEBUG: Language comparison - language == 'typescript': {language == 'typescript'}")
                 logger.debug(f"DEBUG: Language comparison - language == 'python': {language == 'python'}")
                 logger.debug(f"DEBUG: Test config keys: {list(self.test_config.keys())}")
@@ -355,6 +359,7 @@ class TestRunner:
                     'parsed_inputs': parsed_inputs,
                     'tracked_values': tracked_values,
                     'assertions': assertion_results,
+                    'framework': framework,
                     'region_info': {
                         'type': region_info.type.value,
                         'name': region_info.name,

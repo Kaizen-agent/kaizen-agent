@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from kaizen.cli.commands.errors import ConfigurationError
-from ..types import PRStrategy, DEFAULT_MAX_RETRIES, Language, DEFAULT_LANGUAGE
+from ..types import PRStrategy, DEFAULT_MAX_RETRIES, Language, DEFAULT_LANGUAGE, Framework, DEFAULT_FRAMEWORK
 
 from .metadata import TestMetadata
 from .evaluation import TestEvaluation
@@ -52,6 +52,7 @@ class TestConfiguration:
         referenced_files: List of referenced files to import
         files_to_fix: List of files that should be fixed
         language: Test language
+        framework: Agent framework (e.g., LlamaIndex, LangChain)
     """
     # Required fields
     name: str
@@ -76,6 +77,7 @@ class TestConfiguration:
     referenced_files: List[str] = field(default_factory=list)
     files_to_fix: List[str] = field(default_factory=list)
     language: Language = DEFAULT_LANGUAGE
+    framework: Framework = DEFAULT_FRAMEWORK
 
     def with_cli_overrides(
         self,
@@ -84,7 +86,8 @@ class TestConfiguration:
         max_retries: int = DEFAULT_MAX_RETRIES,
         base_branch: str = 'main',
         pr_strategy: str = 'ALL_PASSING',
-        language: Optional[str] = None
+        language: Optional[str] = None,
+        framework: Optional[str] = None
     ) -> 'TestConfiguration':
         """Create a new configuration with CLI overrides applied.
         
@@ -115,6 +118,10 @@ class TestConfiguration:
         # Handle language override if provided
         if language is not None and str(language).strip() != '':
             overrides['language'] = Language.from_str(language)
+        
+        # Handle framework override if provided
+        if framework is not None and str(framework).strip() != '':
+            overrides['framework'] = Framework.from_str(framework)
         
         # Use dataclass replace for efficient field updates
         return replace(self, **overrides)
@@ -171,6 +178,25 @@ class TestConfiguration:
         else:
             print(f"DEBUG: No language in data, using default: {language}")
         
+        # Parse framework
+        framework = DEFAULT_FRAMEWORK
+        if 'framework' in data:
+            framework_val = data['framework']
+            print(f"DEBUG: Processing framework value: {framework_val} (type: {type(framework_val)})")
+            if isinstance(framework_val, Framework):
+                framework = framework_val
+                print(f"DEBUG: Using Framework enum directly: {framework}")
+            elif isinstance(framework_val, str):
+                try:
+                    framework = Framework.from_str(framework_val)
+                    print(f"DEBUG: Converted string to Framework: {framework}")
+                except ValueError as e:
+                    raise ConfigurationError(str(e))
+            else:
+                raise ConfigurationError(f"Invalid type for framework: {type(framework_val)}")
+        else:
+            print(f"DEBUG: No framework in data, using default: {framework}")
+        
         # Parse agent entry point if present
         agent_entry_point = None
         if 'agent' in data:
@@ -203,5 +229,6 @@ class TestConfiguration:
             dependencies=data.get('dependencies', []),
             referenced_files=data.get('referenced_files', []),
             files_to_fix=data.get('files_to_fix', []),
-            language=language
+            language=language,
+            framework=framework
         ) 
