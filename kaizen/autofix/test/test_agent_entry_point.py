@@ -213,7 +213,8 @@ class CallableAgent:
             result = executor.execute_region_with_tracking(
                 region_info,
                 input_data=["test input"],
-                tracked_variables=set()
+                tracked_variables=set(),
+                framework=None
             )
             
             assert result['result']['status'] == 'success'
@@ -231,7 +232,8 @@ class CallableAgent:
             result = executor.execute_region_with_tracking(
                 region_info,
                 input_data=["function input"],
-                tracked_variables=set()
+                tracked_variables=set(),
+                framework=None
             )
             
             assert result['result']['status'] == 'success'
@@ -248,7 +250,8 @@ class CallableAgent:
             result = executor.execute_region_with_tracking(
                 region_info,
                 input_data=["callable input"],
-                tracked_variables=set()
+                tracked_variables=set(),
+                framework=None
             )
             
             assert result['result']['status'] == 'success'
@@ -298,7 +301,8 @@ def TestAgent(data):
             result = executor.execute_region_with_tracking(
                 region_info,
                 input_data=["fallback test"],
-                tracked_variables=set()
+                tracked_variables=set(),
+                framework=None
             )
             
             assert result['result']['status'] == 'success'
@@ -350,7 +354,8 @@ class MyAgent:
             result = executor.execute_region_with_tracking(
                 region_info,
                 input_data=["nested test"],
-                tracked_variables=set()
+                tracked_variables=set(),
+                framework=None
             )
             
             assert result['result']['status'] == 'success'
@@ -400,7 +405,8 @@ class TestAgent:
             result = executor.execute_region_with_tracking(
                 region_info,
                 input_data=["error test"],
-                tracked_variables=set()
+                tracked_variables=set(),
+                framework=None
             )
             
             assert 'error' in result

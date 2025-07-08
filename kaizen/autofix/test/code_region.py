@@ -2004,7 +2004,8 @@ class CodeRegionExecutor:
         region_info: RegionInfo, 
         method_name: Optional[str] = None,
         input_data: Optional[List[Any]] = None,
-        tracked_variables: Optional[Set[str]] = None
+        tracked_variables: Optional[Set[str]] = None,
+        framework: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute a code region with variable tracking.
         
@@ -2013,6 +2014,7 @@ class CodeRegionExecutor:
             method_name: Optional method name to call (for class regions)
             input_data: Optional input data to pass to the method
             tracked_variables: Optional set of variable names to track
+            framework: Optional framework information for execution context
             
         Returns:
             Dictionary containing execution result and tracked values
@@ -2024,9 +2026,9 @@ class CodeRegionExecutor:
             # If entry point is specified, use it for execution
             if region_info.entry_point:
                 return self._execute_with_entry_point(
-                    region_info, input_data, tracked_variables
+                    region_info, input_data, tracked_variables, framework
                 )
-               
+                  
         except Exception as e:
             logger.error(f"Error executing region {region_info.name}: {str(e)}")
             return {
@@ -2041,7 +2043,8 @@ class CodeRegionExecutor:
         self,
         region_info: RegionInfo,
         input_data: List[Any],
-        tracked_variables: Set[str]
+        tracked_variables: Set[str],
+        framework: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute code using agent entry point configuration.
         
@@ -2049,6 +2052,7 @@ class CodeRegionExecutor:
             region_info: Region info with entry point configuration
             input_data: Input data to pass to the method/function
             tracked_variables: Variables to track during execution
+            framework: Optional framework information for execution context
             
         Returns:
             Dictionary containing execution result and tracked values
@@ -2193,7 +2197,8 @@ class CodeRegionExecutor:
         method_name: str,
         input_data: List[Any],
         tracked_variables: Set[str],
-        namespace: Dict[str, Any]
+        namespace: Dict[str, Any],
+        framework: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute a class region by calling a specific method."""
         # Execute the class definition
@@ -2238,7 +2243,8 @@ class CodeRegionExecutor:
         region_info: RegionInfo,
         input_data: List[Any],
         tracked_variables: Set[str],
-        namespace: Dict[str, Any]
+        namespace: Dict[str, Any],
+        framework: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute a function region."""
         # Execute the function definition
@@ -2274,7 +2280,8 @@ class CodeRegionExecutor:
         self, 
         region_info: RegionInfo,
         tracked_variables: Set[str],
-        namespace: Dict[str, Any]
+        namespace: Dict[str, Any],
+        framework: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute a module region."""
         # Execute the module code
@@ -2369,7 +2376,8 @@ class CodeRegionExecutor:
         self,
         region_info: RegionInfo,
         input_data: List[Any],
-        tracked_variables: Set[str]
+        tracked_variables: Set[str],
+        framework: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute code using agent entry point configuration.
         
@@ -2377,6 +2385,7 @@ class CodeRegionExecutor:
             region_info: Region info with entry point configuration
             input_data: Input data to pass to the method/function
             tracked_variables: Variables to track during execution
+            framework: Optional framework information for execution context
             
         Returns:
             Dictionary containing execution result and tracked values
@@ -2521,7 +2530,8 @@ class CodeRegionExecutor:
         method_name: str,
         input_data: List[Any],
         tracked_variables: Set[str],
-        namespace: Dict[str, Any]
+        namespace: Dict[str, Any],
+        framework: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute a class region by calling a specific method."""
         # Execute the class definition
@@ -2566,7 +2576,8 @@ class CodeRegionExecutor:
         region_info: RegionInfo,
         input_data: List[Any],
         tracked_variables: Set[str],
-        namespace: Dict[str, Any]
+        namespace: Dict[str, Any],
+        framework: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute a function region."""
         # Execute the function definition
@@ -2602,7 +2613,8 @@ class CodeRegionExecutor:
         self, 
         region_info: RegionInfo,
         tracked_variables: Set[str],
-        namespace: Dict[str, Any]
+        namespace: Dict[str, Any],
+        framework: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute a module region."""
         # Execute the module code

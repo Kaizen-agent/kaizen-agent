@@ -318,7 +318,8 @@ class TestRunner:
                     region_info, 
                     method_name=method_name,
                     input_data=parsed_inputs,
-                    tracked_variables=set()  # Empty set for no specific tracking
+                    tracked_variables=set(),  # Empty set for no specific tracking
+                    framework=framework
                 )
             actual_output = execution_result['result']
             tracked_values = execution_result['tracked_values']
