@@ -7,6 +7,14 @@
 
 📚 **[View Full Documentation](https://kaizen-agent.github.io/kaizen-agent/)** - Complete guides, examples, and API reference
 
+🌟 **If you find this project helpful, please consider giving it a star — it really helps us!**  
+[![GitHub stars](https://img.shields.io/github/stars/Kaizen-agent/Kaizen-agent?style=social)](https://github.com/Kaizen-agent/Kaizen-agent)
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Kaizen-agent/Kaizen-agent&type=Date)](https://www.star-history.com/#Kaizen-agent/Kaizen-agent&Date)
+
+
 ## Community & Support
 
 💬 **Questions? Need help?** Join our [Discord community](https://discord.gg/2A5Genuh) to ask questions, share your experiences, and get support from other developers using Kaizen Agent!
