@@ -249,16 +249,24 @@ class TestRunner:
                 logger.debug(f"DEBUG: Region extraction completed. Region info: {region_info}")
             
             # Add imports from test case to region info
-            if 'imports' in test_case_obj.input:
+            if isinstance(test_case_obj.input, dict) and 'imports' in test_case_obj.input:
                 region_info.imports.extend(test_case_obj.input['imports'])
             
             # Parse input data using the new input parser
-            input_data = test_case_obj.input.get('input')
-            
-            # Extract method name from test case input (for non-entry point cases)
+            input_data = None
             method_name = None
-            if not agent_entry_point_dict:
-                method_name = test_case_obj.input.get('method')
+            
+            if isinstance(test_case_obj.input, dict):
+                input_data = test_case_obj.input.get('input')
+                # Extract method name from test case input (for non-entry point cases)
+                if not agent_entry_point_dict:
+                    method_name = test_case_obj.input.get('method')
+            else:
+                logger.warning(f"test_case_obj.input is not a dictionary: {type(test_case_obj.input)}")
+                # Fallback: try to use the input directly if it's a list
+                if isinstance(test_case_obj.input, list):
+                    input_data = test_case_obj.input
+                    logger.info("Using input list directly as fallback")
             
             # DEBUG: Print the input data before parsing
             if self.verbose:
@@ -282,7 +290,6 @@ class TestRunner:
                     return TestCaseResult(
                         name=test_case.get('name', 'Unknown'),
                         status=UnifiedTestStatus.ERROR,
-                        region=region_name,
                         input=input_data,
                         expected_output=test_case_obj.expected_output,
                         error_message=f"Input parsing failed: {str(e)}",
@@ -350,7 +357,6 @@ class TestRunner:
             return TestCaseResult(
                 name=test_case.get('name', 'Unknown'),
                 status=unified_status,
-                region=region_name,
                 input=input_data,
                 expected_output=test_case_obj.expected_output,
                 actual_output=actual_output,
@@ -377,7 +383,6 @@ class TestRunner:
             return TestCaseResult(
                 name=test_case.get('name', 'Unknown'),
                 status=UnifiedTestStatus.ERROR,
-                region=test_case.get('region', 'unknown'),
                 input=test_case.get('input'),
                 expected_output=test_case.get('expected_output'),
                 error_message=str(e),

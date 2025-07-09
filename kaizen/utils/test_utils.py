@@ -96,7 +96,6 @@ def get_failed_tests_dict_from_unified(test_result: TestExecutionResult) -> List
     failed_tests = []
     for tc in test_result.get_failed_tests():
         failed_tests.append({
-            'region': tc.region,
             'test_name': tc.name,
             'error_message': tc.get_error_summary(),
             'input': tc.input,

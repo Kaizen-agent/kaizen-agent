@@ -27,7 +27,6 @@ class TestCaseResult:
     # Basic information
     name: str
     status: TestStatus
-    region: str
     
     # Input and output
     input: Optional[Any] = None
@@ -80,9 +79,6 @@ class TestExecutionSummary:
     end_time: Optional[datetime] = None
     total_execution_time: Optional[float] = None
     
-    # Region breakdown
-    regions: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    
     def update_from_test_cases(self, test_cases: List[TestCaseResult]) -> None:
         """Update summary from test cases."""
         self.total_tests = len(test_cases)
@@ -90,24 +86,6 @@ class TestExecutionSummary:
         self.failed_tests = sum(1 for tc in test_cases if tc.status == TestStatus.FAILED)
         self.error_tests = sum(1 for tc in test_cases if tc.status == TestStatus.ERROR)
         self.skipped_tests = sum(1 for tc in test_cases if tc.status == TestStatus.SKIPPED)
-        
-        # Update region breakdown
-        self.regions.clear()
-        for tc in test_cases:
-            if tc.region not in self.regions:
-                self.regions[tc.region] = {
-                    'total': 0, 'passed': 0, 'failed': 0, 'error': 0, 'skipped': 0
-                }
-            
-            self.regions[tc.region]['total'] += 1
-            if tc.is_passed():
-                self.regions[tc.region]['passed'] += 1
-            elif tc.status == TestStatus.FAILED:
-                self.regions[tc.region]['failed'] += 1
-            elif tc.status == TestStatus.ERROR:
-                self.regions[tc.region]['error'] += 1
-            elif tc.status == TestStatus.SKIPPED:
-                self.regions[tc.region]['skipped'] += 1
     
     def is_successful(self) -> bool:
         """Check if all tests passed."""
@@ -131,8 +109,7 @@ class TestExecutionSummary:
             'is_successful': self.is_successful(),
             'start_time': self.start_time.isoformat() if self.start_time else None,
             'end_time': self.end_time.isoformat() if self.end_time else None,
-            'total_execution_time': self.total_execution_time,
-            'regions': self.regions
+            'total_execution_time': self.total_execution_time
         }
 
 @dataclass
@@ -213,9 +190,7 @@ class TestExecutionResult:
         """Get all passed test cases."""
         return [tc for tc in self.test_cases if tc.is_passed()]
     
-    def get_tests_by_region(self, region: str) -> List[TestCaseResult]:
-        """Get all test cases for a specific region."""
-        return [tc for tc in self.test_cases if tc.region == region]
+
     
     def get_tests_by_status(self, status: TestStatus) -> List[TestCaseResult]:
         """Get all test cases with a specific status."""
@@ -242,12 +217,9 @@ class TestExecutionResult:
             }
         }
         
-        # Group test cases by region
-        regions = {}
+        # Group all test cases under a single 'tests' key
+        test_cases = []
         for tc in self.test_cases:
-            if tc.region not in regions:
-                regions[tc.region] = {'test_cases': []}
-            
             test_case_dict = {
                 'name': tc.name,
                 'status': tc.status.value,
@@ -257,9 +229,9 @@ class TestExecutionResult:
                 'evaluation': tc.evaluation,
                 'error': tc.error_message
             }
-            regions[tc.region]['test_cases'].append(test_case_dict)
+            test_cases.append(test_case_dict)
         
-        result.update(regions)
+        result['tests'] = {'test_cases': test_cases}
         return result
     
     @classmethod
@@ -283,12 +255,12 @@ class TestExecutionResult:
         
         # Parse test cases
         test_cases = []
-        for region_name, region_data in legacy_results.items():
-            if region_name == 'overall_status':
-                continue
-            
-            if isinstance(region_data, dict):
-                region_test_cases = region_data.get('test_cases', [])
+        
+        # Handle new format with 'tests' key
+        if 'tests' in legacy_results:
+            test_data = legacy_results['tests']
+            if isinstance(test_data, dict):
+                region_test_cases = test_data.get('test_cases', [])
                 for tc_data in region_test_cases:
                     if isinstance(tc_data, dict):
                         try:
@@ -299,7 +271,6 @@ class TestExecutionResult:
                         test_case = TestCaseResult(
                             name=tc_data.get('name', 'Unknown'),
                             status=status,
-                            region=region_name,
                             input=tc_data.get('input'),
                             expected_output=tc_data.get('expected_output'),
                             actual_output=tc_data.get('output'),
@@ -307,6 +278,32 @@ class TestExecutionResult:
                             evaluation=tc_data.get('evaluation')
                         )
                         test_cases.append(test_case)
+        
+        # Handle old format with region-based grouping (for backward compatibility)
+        else:
+            for region_name, region_data in legacy_results.items():
+                if region_name == 'overall_status':
+                    continue
+                
+                if isinstance(region_data, dict):
+                    region_test_cases = region_data.get('test_cases', [])
+                    for tc_data in region_test_cases:
+                        if isinstance(tc_data, dict):
+                            try:
+                                status = TestStatus(tc_data.get('status', 'unknown'))
+                            except ValueError:
+                                status = TestStatus.ERROR
+                            
+                            test_case = TestCaseResult(
+                                name=tc_data.get('name', 'Unknown'),
+                                status=status,
+                                input=tc_data.get('input'),
+                                expected_output=tc_data.get('expected_output'),
+                                actual_output=tc_data.get('output'),
+                                error_message=tc_data.get('error'),
+                                evaluation=tc_data.get('evaluation')
+                            )
+                            test_cases.append(test_case)
         
         result.add_test_cases(test_cases)
         return result
@@ -327,7 +324,6 @@ class TestExecutionResult:
                 {
                     'name': tc.name,
                     'status': tc.status.value,
-                    'region': tc.region,
                     'input': tc.input,
                     'expected_output': tc.expected_output,
                     'actual_output': tc.actual_output,

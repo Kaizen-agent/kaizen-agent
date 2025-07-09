@@ -113,6 +113,25 @@ class TestCase:
         evaluation_targets = data.get('evaluation_targets', [])
         llm_evaluation = data.get('evaluation', {})
         
+        # Handle case where input is a list (new format) instead of dict (old format)
+        input_data = data.get('input')
+        if isinstance(input_data, list):
+            # Convert list input to dict format for backward compatibility
+            data = data.copy()
+            data['input'] = {
+                'input': input_data,  # Store the list under 'input' key
+                'method': data.get('method'),  # Preserve method if present
+                'imports': data.get('imports', [])  # Preserve imports if present
+            }
+            logger.info("Converted list input to dict format for backward compatibility")
+        
+        # Validate input field
+        input_data = data.get('input')
+        if input_data is not None and not isinstance(input_data, dict):
+            raise ValueError(f"TestCase input must be a dictionary, got {type(input_data).__name__}. "
+                           f"This usually means the test configuration format is incompatible. "
+                           f"Expected: {{'input': [...], 'method': '...'}}, Got: {input_data}")
+        
         # If using old format with evaluation.criteria, convert to evaluation_targets
         if not evaluation_targets and 'evaluation' in data and 'criteria' in data['evaluation']:
             logger.info("Converting old evaluation.criteria format to evaluation_targets")

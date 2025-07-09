@@ -14,7 +14,7 @@ class BaseAgent(ABC):
         self.config = config
         
     @abstractmethod
-    def run_test(self, code: str, region: str) -> Dict[str, Any]:
+    def run_test(self, code: str) -> Dict[str, Any]:
         """
         Run tests for the specified code region.
         

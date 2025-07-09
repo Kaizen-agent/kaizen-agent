@@ -174,13 +174,21 @@ def _display_test_summary(console: Console, test_result: TestResult, rich_format
     console.print(f"- Config: {test_result.config_path}")
     
     # Format and display overall status
-    overall_status = test_result.results.get('overall_status', 'unknown')
-    status = rich_formatter.format_status(overall_status)
-    console.print(f"\nOverall Status: {status}")
+    try:
+        overall_status = test_result.results.get('overall_status', 'unknown')
+        status = overall_status.get('status', 'unknown') if isinstance(overall_status, dict) else overall_status
+        formatted_status = rich_formatter.format_status(status)
+        console.print(f"\nOverall Status: {formatted_status}")
+    except Exception as e:
+        console.print(f"\nOverall Status: ❓ UNKNOWN (Error: {str(e)})")
     
     # Display test results table
-    console.print("\nTest Results Table:")
-    console.print(rich_formatter.format_table(test_result.results))
+    try:
+        console.print("\nTest Results Table:")
+        console.print(rich_formatter.format_table(test_result.results))
+    except Exception as e:
+        console.print(f"\n[bold red]Error displaying test results table: {str(e)}[/bold red]")
+        console.print("[dim]Test results table could not be displayed due to formatting error[/dim]")
 
 def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) -> None:
     """Save detailed test logs in JSON format for later analysis.
@@ -239,7 +247,6 @@ def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) 
                     detailed_tc = {
                         "name": tc.name,
                         "status": tc.status.value,
-                        "region": tc.region,
                         "input": tc.input,
                         "expected_output": tc.expected_output,
                         "actual_output": tc.actual_output,
@@ -270,8 +277,7 @@ def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) 
                     "failed_test_cases": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'failed']),
                     "error_test_cases": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'error']),
                     "test_cases_with_evaluations": len([tc for tc in test_result.unified_result.test_cases if tc.evaluation is not None]),
-                    "test_cases_with_errors": len([tc for tc in test_result.unified_result.test_cases if tc.error_message is not None]),
-                    "regions": list(set(tc.region for tc in test_result.unified_result.test_cases))
+                    "test_cases_with_errors": len([tc for tc in test_result.unified_result.test_cases if tc.error_message is not None])
                 }
                 
                 detailed_logs["unified_test_results"] = enhanced_unified_data
@@ -318,8 +324,7 @@ def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) 
                 "total": len(test_result.unified_result.test_cases),
                 "passed": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'passed']),
                 "failed": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'failed']),
-                "error": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'error']),
-                "regions": list(set(tc.region for tc in test_result.unified_result.test_cases))
+                "error": len([tc for tc in test_result.unified_result.test_cases if tc.status.value == 'error'])
             }
             
             # Add quick reference for failed/error test cases
@@ -328,7 +333,6 @@ def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) 
                 if tc.status.value in ['failed', 'error']:
                     failed_tests.append({
                         "name": tc.name,
-                        "region": tc.region,
                         "status": tc.status.value,
                         "input": tc.input,
                         "expected_output": tc.expected_output,
@@ -351,7 +355,6 @@ def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) 
             
             console.print(f"[dim]✓ Unified test results included ({total_tests} test cases)[/dim]")
             console.print(f"[dim]  - Passed: {passed_tests}, Failed/Error: {failed_tests}[/dim]")
-            console.print(f"[dim]  - Regions: {', '.join(set(tc.region for tc in test_result.unified_result.test_cases))}[/dim]")
             
             # Show failed test cases for quick reference
             if failed_tests > 0:
@@ -857,11 +860,15 @@ def test_all(
         
         # Display results
         test_result_value = test_result.value
-        overall_status = test_result_value.results.get('overall_status', {})
-        if isinstance(overall_status, dict):
-            status = overall_status.get('status', 'unknown')
-        else:
-            status = overall_status
+        try:
+            overall_status = test_result_value.results.get('overall_status', {})
+            if isinstance(overall_status, dict):
+                status = overall_status.get('status', 'unknown')
+            else:
+                status = overall_status
+        except Exception as e:
+            logger.print_error(f"Error determining test status: {str(e)}")
+            status = 'unknown'
         
         if status == 'passed':
             logger.print_success(f"All tests passed! ({test_result_value.name})")
@@ -877,14 +884,17 @@ def test_all(
                 logger.print("This will modify your code files and may introduce changes.")
                 
                 # Show a brief summary of what failed (if available)
-                if test_result_value.unified_result:
-                    failed_tests = [tc for tc in test_result_value.unified_result.test_cases if tc.status.value in ['failed', 'error']]
-                    if failed_tests:
-                        logger.print(f"\n[bold]Failed test cases ({len(failed_tests)}):[/bold]")
-                        for tc in failed_tests[:3]:  # Show first 3 failed tests
-                            logger.print(f"  • {tc.name} ({tc.region})")
-                        if len(failed_tests) > 3:
-                            logger.print(f"  • ... and {len(failed_tests) - 3} more")
+                try:
+                    if test_result_value.unified_result:
+                        failed_tests = [tc for tc in test_result_value.unified_result.test_cases if tc.status.value in ['failed', 'error']]
+                        if failed_tests:
+                            logger.print(f"\n[bold]Failed test cases ({len(failed_tests)}):[/bold]")
+                            for tc in failed_tests[:3]:  # Show first 3 failed tests
+                                logger.print(f"  • {tc.name}")
+                            if len(failed_tests) > 3:
+                                logger.print(f"  • ... and {len(failed_tests) - 3} more")
+                except Exception as e:
+                    logger.print(f"[dim]Could not display failed test summary: {str(e)}[/dim]")
                 
                 if no_confirm:
                     logger.print_success("Auto-fix confirmed (--no-confirm flag used)")
@@ -929,11 +939,14 @@ def test_all(
                 logger.print(f"  • Successful fixes: {successful_fixes}")
                 
                 # Show what was fixed
-                if test_result_value.unified_result:
-                    fixed_tests = [tc for tc in test_result_value.unified_result.test_cases 
-                                 if tc.status.value == 'passed']
-                    if fixed_tests:
-                        logger.print(f"  • Tests now passing: {len(fixed_tests)}")
+                try:
+                    if test_result_value.unified_result:
+                        fixed_tests = [tc for tc in test_result_value.unified_result.test_cases 
+                                     if tc.status.value == 'passed']
+                        if fixed_tests:
+                            logger.print(f"  • Tests now passing: {len(fixed_tests)}")
+                except Exception as e:
+                    logger.print(f"[dim]Could not display fixed test summary: {str(e)}[/dim]")
             
             if no_confirm:
                 logger.print_success("PR creation confirmed (--no-confirm flag used)")
