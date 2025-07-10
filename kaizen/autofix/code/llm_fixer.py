@@ -981,7 +981,10 @@ class LLMCodeFixer:
                 raise LLMError("GOOGLE_API_KEY environment variable not set")
                 
             genai.configure(api_key=api_key)
-            return genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+            if self.config.get('better_ai', False):
+                return genai.GenerativeModel('gemini-2.5-pro')
+            else:
+                return genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
         except Exception as e:
             raise LLMError(f"Failed to initialize LLM model: {str(e)}")
     

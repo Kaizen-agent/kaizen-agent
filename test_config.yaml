@@ -1,0 +1,11 @@
+name: test_better_ai
+file_path: test_file.py
+description: Test configuration for better AI flag
+auto_fix: false
+create_pr: false
+max_retries: 1
+base_branch: main
+pr_strategy: ALL_PASSING
+language: python
+framework: custom
+better_ai: false 

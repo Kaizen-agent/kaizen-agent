@@ -138,7 +138,8 @@ class ConfigurationParser:
                 referenced_files=config_data.get('referenced_files', []),
                 files_to_fix=config_data.get('files_to_fix', []),
                 language=language,
-                framework=framework
+                framework=framework,
+                better_ai=config_data.get('better_ai', False)
             )
             
             return Result.success(config)

@@ -347,15 +347,19 @@ class PromptBuilder:
 class LLMEvaluator:
     """Evaluates test results using LLM."""
     
-    def __init__(self, config: Optional[LLMConfig] = None):
+    def __init__(self, config: Optional[LLMConfig] = None, better_ai: bool = False):
         self.config = config or LLMConfig()
+        self.better_ai = better_ai
         self._initialize_model()
         
     def _initialize_model(self):
         """Initialize the LLM model with proper configuration."""
         try:
             genai.configure(api_key=self.config.api_key)
-            self.model = genai.GenerativeModel(self.config.model_name)
+            if self.better_ai:
+                self.model = genai.GenerativeModel('gemini-2.5-pro')
+            else:
+                self.model = genai.GenerativeModel(self.config.model_name)
         except Exception as e:
             logger.error(f"Failed to initialize LLM model: {str(e)}")
             raise RuntimeError(f"LLM initialization failed: {str(e)}")

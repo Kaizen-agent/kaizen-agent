@@ -53,6 +53,7 @@ class TestConfiguration:
         files_to_fix: List of files that should be fixed
         language: Test language
         framework: Agent framework (e.g., LlamaIndex, LangChain)
+        better_ai: Whether to use enhanced AI model for improved code fixing and analysis
     """
     # Required fields
     name: str
@@ -78,6 +79,7 @@ class TestConfiguration:
     files_to_fix: List[str] = field(default_factory=list)
     language: Language = DEFAULT_LANGUAGE
     framework: Framework = DEFAULT_FRAMEWORK
+    better_ai: bool = False
 
     def with_cli_overrides(
         self,
@@ -87,7 +89,8 @@ class TestConfiguration:
         base_branch: str = 'main',
         pr_strategy: str = 'ALL_PASSING',
         language: Optional[str] = None,
-        framework: Optional[str] = None
+        framework: Optional[str] = None,
+        better_ai: bool = False
     ) -> 'TestConfiguration':
         """Create a new configuration with CLI overrides applied.
         
@@ -102,6 +105,8 @@ class TestConfiguration:
             base_branch: Base branch for pull requests
             pr_strategy: Strategy for when to create PRs
             language: Language override (if provided)
+            framework: Framework override (if provided)
+            better_ai: Whether to use enhanced AI model
             
         Returns:
             New TestConfiguration instance with overrides applied
@@ -112,7 +117,8 @@ class TestConfiguration:
             'create_pr': create_pr,
             'max_retries': max_retries,
             'base_branch': base_branch,
-            'pr_strategy': PRStrategy.from_str(pr_strategy)
+            'pr_strategy': PRStrategy.from_str(pr_strategy),
+            'better_ai': better_ai
         }
         
         # Handle language override if provided
@@ -230,5 +236,6 @@ class TestConfiguration:
             referenced_files=data.get('referenced_files', []),
             files_to_fix=data.get('files_to_fix', []),
             language=language,
-            framework=framework
+            framework=framework,
+            better_ai=data.get('better_ai', False)
         ) 

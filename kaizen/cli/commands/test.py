@@ -564,6 +564,7 @@ def _save_summary_report(console: Console, test_result: TestResult, config: Any)
 @click.option('--show-cache-stats', is_flag=True, help='Show TypeScript cache statistics')
 @click.option('--debug-ts', is_flag=True, help='Enable detailed TypeScript execution debugging')
 @click.option('--no-confirm', is_flag=True, help='Skip confirmation prompts (useful for non-interactive use)')
+@click.option('--better-ai', is_flag=True, help='Use enhanced AI model for improved code fixing and analysis')
 def test_all(
     config: str,
     auto_fix: bool,
@@ -578,7 +579,8 @@ def test_all(
     clear_ts_cache: bool,
     show_cache_stats: bool,
     debug_ts: bool,
-    no_confirm: bool
+    no_confirm: bool,
+    better_ai: bool
 ) -> None:
     """Run all tests specified in the configuration file.
     
@@ -613,6 +615,7 @@ def test_all(
         show_cache_stats: Whether to show TypeScript cache statistics
         debug_ts: Whether to enable detailed TypeScript execution debugging
         no_confirm: Whether to skip confirmation prompts (useful for non-interactive use)
+        better_ai: Whether to use enhanced AI model for improved code fixing and analysis
         
     When --save-logs is enabled, the following files are created in the test-logs/ directory:
     - {test_name}_{timestamp}_detailed_logs.json: Complete test results including inputs, outputs, 
@@ -645,7 +648,8 @@ def test_all(
         ...     language="python",
         ...     test_github_access=True,
         ...     save_logs=True,
-        ...     verbose=False
+        ...     verbose=False,
+        ...     better_ai=True
         ... )
     """
     # Initialize clean logger
@@ -671,7 +675,8 @@ def test_all(
             create_pr=create_pr,
             max_retries=max_retries,
             base_branch=base_branch,
-            pr_strategy=pr_strategy
+            pr_strategy=pr_strategy,
+            better_ai=better_ai
         )
         
         if not config_result.is_success:
@@ -680,6 +685,10 @@ def test_all(
         config = config_result.value
         logger.print_success(f"Configuration loaded: {config.name}")
         logger.info(f"Language: {config.language.value}")
+        
+        # Log better AI status if enabled
+        if config.better_ai:
+            logger.print_success("Enhanced AI model enabled for improved code fixing and analysis")
         
         # Handle TypeScript cache management
         if clear_ts_cache or show_cache_stats:

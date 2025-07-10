@@ -65,7 +65,7 @@ class TestRunner:
         
         self.code_region_extractor = CodeRegionExtractor()
         self.code_region_executor = CodeRegionExecutor(self.workspace_root, imported_dependencies)
-        self.llm_evaluator = LLMEvaluator()
+        self.llm_evaluator = LLMEvaluator(better_ai=self.test_config.get('better_ai', False))
         self.assertion_runner = AssertionRunner()
         self.input_parser = InputParser()
         
