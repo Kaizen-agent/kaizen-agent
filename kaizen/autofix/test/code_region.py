@@ -2059,63 +2059,21 @@ class CodeRegionExecutor:
                 with track_variables(tracked_variables) as tracker:
                     result = None
                     
-                    # If class is specified, instantiate and call method
-                    if entry_point.class_name:
-                        if not hasattr(module, entry_point.class_name):
-                            if entry_point.fallback_to_function:
-                                # Fallback to function if class not found
-                                if hasattr(module, entry_point.class_name):
-                                    func = getattr(module, entry_point.class_name)
-                                    if callable(func):
-                                        if len(input_data) == 1:
-                                            result = func(input_data[0])
-                                        else:
-                                            result = func(*input_data)
-                                else:
-                                    raise AttributeError(f"Neither class nor function '{entry_point.class_name}' found in module '{module_name}'")
-                            else:
-                                raise AttributeError(f"Class '{entry_point.class_name}' not found in module '{module_name}'")
-                        else:
-                            class_obj = getattr(module, entry_point.class_name)
-                            instance = class_obj()
-                            
-                            # If method is specified, call it
-                            if entry_point.method:
-                                if not hasattr(instance, entry_point.method):
-                                    raise AttributeError(f"Method '{entry_point.method}' not found in class '{entry_point.class_name}'")
-                                
-                                method = getattr(instance, entry_point.method)
-                                if len(input_data) == 1:
-                                    result = method(input_data[0])
-                                else:
-                                    result = method(*input_data)
-                            else:
-                                # If no method specified, try to call the instance directly
-                                if callable(instance):
-                                    if len(input_data) == 1:
-                                        result = instance(input_data[0])
-                                    else:
-                                        result = instance(*input_data)
-                                else:
-                                    raise ValueError(f"Instance of '{entry_point.class_name}' is not callable and no method specified")
+                    # Class name and method are mandatory - instantiate and call method
+                    if not hasattr(module, entry_point.class_name):
+                        raise AttributeError(f"Class '{entry_point.class_name}' not found in module '{module_name}'")
                     
-                    # If no class specified but method is, call it as a function
-                    elif entry_point.method:
-                        if not hasattr(module, entry_point.method):
-                            raise AttributeError(f"Function '{entry_point.method}' not found in module '{module_name}'")
-                        
-                        func = getattr(module, entry_point.method)
-                        if not callable(func):
-                            raise ValueError(f"'{entry_point.method}' is not callable in module '{module_name}'")
-                        
-                        if len(input_data) == 1:
-                            result = func(input_data[0])
-                        else:
-                            result = func(*input_data)
+                    class_obj = getattr(module, entry_point.class_name)
+                    instance = class_obj()
                     
-                    # If neither class nor method specified, raise error
+                    if not hasattr(instance, entry_point.method):
+                        raise AttributeError(f"Method '{entry_point.method}' not found in class '{entry_point.class_name}'")
+                    
+                    method = getattr(instance, entry_point.method)
+                    if len(input_data) == 1:
+                        result = method(input_data[0])
                     else:
-                        raise ValueError("Either class_name or method must be specified in entry point")
+                        result = method(*input_data)
                     
                     # Get tracked values
                     tracked_values = {}

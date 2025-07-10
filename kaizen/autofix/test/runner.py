@@ -225,25 +225,7 @@ class TestRunner:
                         test_file_path, 
                         agent_entry_point
                     )
-                region_name = f"{agent_entry_point.module}.{agent_entry_point.class_name or agent_entry_point.method}"
-            
-            else:
-                # No agent entry point specified, use the entire file
-                if self.verbose:
-                    logger.debug(f"DEBUG: No agent entry point specified, using entire file")
                 
-                # Use the entire file as the region
-                region_name = "main"
-                if language == "typescript":
-                    region_info = self.code_region_extractor.extract_region_ts(
-                        test_file_path, 
-                        region_name
-                    )
-                else:
-                    region_info = self.code_region_extractor.extract_region(
-                        test_file_path, 
-                        region_name
-                    )
             
             if self.verbose:
                 logger.debug(f"DEBUG: Region extraction completed. Region info: {region_info}")
