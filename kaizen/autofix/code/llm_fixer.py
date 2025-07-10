@@ -2,13 +2,10 @@
 
 import os
 import logging
-import json
-from typing import Dict, Any, Optional, List, Set, Tuple, TypedDict, Union, TYPE_CHECKING
+from typing import Dict, Any, Optional, List, TYPE_CHECKING
 import google.generativeai as genai
-from tenacity import retry, stop_after_attempt, wait_exponential
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from enum import Enum, auto
 import traceback
 
 if TYPE_CHECKING:
@@ -20,15 +17,12 @@ logger = logging.getLogger(__name__)
 
 class LLMError(Exception):
     """Base exception for LLM-related errors."""
-    pass
 
 class LLMResponseError(LLMError):
     """Exception for invalid LLM responses."""
-    pass
 
 class LLMConnectionError(LLMError):
     """Exception for LLM connection issues."""
-    pass
 
 @dataclass
 class FixResult:
@@ -56,12 +50,10 @@ class BaseFixer(ABC):
     @abstractmethod
     def get_instructions(self) -> str:
         """Get instructions for the fixer."""
-        pass
     
     @abstractmethod
     def fix(self, content: str, file_path: str, **kwargs) -> FixResult:
         """Fix the content."""
-        pass
 
 class CodeFixer(BaseFixer):
     """Fixes code using LLM."""
