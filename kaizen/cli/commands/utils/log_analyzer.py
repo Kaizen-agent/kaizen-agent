@@ -184,7 +184,7 @@ class TestLogAnalyzer:
             title = f"Test Case {i}: {tc.get('name', 'Unknown')} [{status_color}]{status}[/{status_color}]"
             
             content = []
-            content.append(f"[bold]Region:[/bold] {tc.get('region', 'Unknown')}")
+            
             
             # Input
             input_data = tc.get('input')

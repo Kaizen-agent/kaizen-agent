@@ -65,7 +65,7 @@ class TestRunner:
         
         self.code_region_extractor = CodeRegionExtractor()
         self.code_region_executor = CodeRegionExecutor(self.workspace_root, imported_dependencies)
-        self.llm_evaluator = LLMEvaluator()
+        self.llm_evaluator = LLMEvaluator(better_ai=self.test_config.get('better_ai', False))
         self.assertion_runner = AssertionRunner()
         self.input_parser = InputParser()
         
@@ -159,8 +159,12 @@ class TestRunner:
             language = self.test_config.get("language")
             if not language:
                 raise ValueError("No language specified in test configuration. Please set the 'language' field.")
+            
+            # Get framework from test config (optional)
+            framework = self.test_config.get("framework")
             if self.verbose:
                 logger.debug(f"DEBUG: Using language: {language} (type: {type(language)})")
+                logger.debug(f"DEBUG: Using framework: {framework} (type: {type(framework)})")
                 logger.debug(f"DEBUG: Language comparison - language == 'typescript': {language == 'typescript'}")
                 logger.debug(f"DEBUG: Language comparison - language == 'python': {language == 'python'}")
                 logger.debug(f"DEBUG: Test config keys: {list(self.test_config.keys())}")
@@ -221,82 +225,30 @@ class TestRunner:
                         test_file_path, 
                         agent_entry_point
                     )
-                region_name = f"{agent_entry_point.module}.{agent_entry_point.class_name or agent_entry_point.method}"
-            
-            else:
-                # Use the legacy marker-based system
-                if self.verbose:
-                    logger.debug(f"DEBUG: Using legacy marker-based system")
                 
-                # Determine region name: use input['region'] if present, else first from top-level 'regions'
-                region_name = test_case_obj.input.get('region')
-                if not region_name:
-                    regions = self.test_config.get('regions', [])
-                    if not regions:
-                        if agent_entry_point_dict:
-                            # Use agent entry point logic (already handled above)
-                            pass  # Do nothing, agent entry point logic is above
-                        else:
-                            # No agent entry point, fallback to method in step input
-                            method_name = test_case_obj.input.get('method')
-                            if not method_name:
-                                raise ValueError("No method specified in test step and no regions configured")
-                            if self.verbose:
-                                logger.debug(f"DEBUG: Extracting function '{method_name}' from test file")
-                            if language == "typescript":
-                                region_info = self.code_region_extractor.extract_region_ts_by_name(
-                                    test_file_path, 
-                                    method_name
-                                )
-                            else:
-                                region_info = self.code_region_extractor.extract_region(
-                                    test_file_path, 
-                                    method_name
-                                )
-                            region_name = method_name
-                    else:
-                        region_name = regions[0]
-                        logger.info(f"No region specified in test step; using first region from top-level: {region_name}")
-                        if self.verbose:
-                            logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
-                        if language == "typescript":
-                            region_info = self.code_region_extractor.extract_region_ts(
-                                test_file_path, 
-                                region_name
-                            )
-                        else:
-                            region_info = self.code_region_extractor.extract_region(
-                                test_file_path, 
-                                region_name
-                            )
-                else:
-                    if self.verbose:
-                        logger.debug(f"DEBUG: About to extract region '{region_name}' from file: {test_file_path}")
-                    if language == "typescript":
-                        region_info = self.code_region_extractor.extract_region_ts(
-                            test_file_path, 
-                            region_name
-                        )
-                    else:
-                        region_info = self.code_region_extractor.extract_region(
-                            test_file_path, 
-                            region_name
-                        )
             
             if self.verbose:
                 logger.debug(f"DEBUG: Region extraction completed. Region info: {region_info}")
             
             # Add imports from test case to region info
-            if 'imports' in test_case_obj.input:
+            if isinstance(test_case_obj.input, dict) and 'imports' in test_case_obj.input:
                 region_info.imports.extend(test_case_obj.input['imports'])
             
             # Parse input data using the new input parser
-            input_data = test_case_obj.input.get('input')
-            
-            # Extract method name from test case input (only for legacy system)
+            input_data = None
             method_name = None
-            if not agent_entry_point_dict:
-                method_name = test_case_obj.input.get('method')
+            
+            if isinstance(test_case_obj.input, dict):
+                input_data = test_case_obj.input.get('input')
+                # Extract method name from test case input (for non-entry point cases)
+                if not agent_entry_point_dict:
+                    method_name = test_case_obj.input.get('method')
+            else:
+                logger.warning(f"test_case_obj.input is not a dictionary: {type(test_case_obj.input)}")
+                # Fallback: try to use the input directly if it's a list
+                if isinstance(test_case_obj.input, list):
+                    input_data = test_case_obj.input
+                    logger.info("Using input list directly as fallback")
             
             # DEBUG: Print the input data before parsing
             if self.verbose:
@@ -320,7 +272,6 @@ class TestRunner:
                     return TestCaseResult(
                         name=test_case.get('name', 'Unknown'),
                         status=UnifiedTestStatus.ERROR,
-                        region=region_name,
                         input=input_data,
                         expected_output=test_case_obj.expected_output,
                         error_message=f"Input parsing failed: {str(e)}",
@@ -356,7 +307,8 @@ class TestRunner:
                     region_info, 
                     method_name=method_name,
                     input_data=parsed_inputs,
-                    tracked_variables=set()  # Empty set for no specific tracking
+                    tracked_variables=set(),  # Empty set for no specific tracking
+                    framework=framework
                 )
             actual_output = execution_result['result']
             tracked_values = execution_result['tracked_values']
@@ -387,7 +339,6 @@ class TestRunner:
             return TestCaseResult(
                 name=test_case.get('name', 'Unknown'),
                 status=unified_status,
-                region=region_name,
                 input=input_data,
                 expected_output=test_case_obj.expected_output,
                 actual_output=actual_output,
@@ -397,6 +348,7 @@ class TestRunner:
                     'parsed_inputs': parsed_inputs,
                     'tracked_values': tracked_values,
                     'assertions': assertion_results,
+                    'framework': framework,
                     'region_info': {
                         'type': region_info.type.value,
                         'name': region_info.name,
@@ -413,7 +365,6 @@ class TestRunner:
             return TestCaseResult(
                 name=test_case.get('name', 'Unknown'),
                 status=UnifiedTestStatus.ERROR,
-                region=test_case.get('region', 'unknown'),
                 input=test_case.get('input'),
                 expected_output=test_case.get('expected_output'),
                 error_message=str(e),

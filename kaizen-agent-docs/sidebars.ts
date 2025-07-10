@@ -7,6 +7,7 @@ const sidebars: SidebarsConfig = {
   docs: [
     'intro',
     'quickstart',
+    'quickstart_llamaindex',
     'usage',
     'github',
     'examples',

@@ -24,7 +24,6 @@ def test_unified_approach():
         TestCaseResult(
             name="test_basic_functionality",
             status=TestStatus.PASSED,
-            region="test_region_1",
             input="test_input_1",
             expected_output="expected_1",
             actual_output="expected_1",
@@ -33,7 +32,6 @@ def test_unified_approach():
         TestCaseResult(
             name="test_edge_cases",
             status=TestStatus.FAILED,
-            region="test_region_2",
             input="test_input_2",
             expected_output="expected_2",
             actual_output="actual_2",
@@ -43,7 +41,6 @@ def test_unified_approach():
         TestCaseResult(
             name="test_error_handling",
             status=TestStatus.ERROR,
-            region="test_region_3",
             input="test_input_3",
             expected_output="expected_3",
             actual_output=None,
@@ -74,7 +71,7 @@ def test_unified_approach():
     failed_tests = test_result.get_failed_tests()
     print(f"   Count: {len(failed_tests)}")
     for tc in failed_tests:
-        print(f"   - {tc.name} ({tc.region}): {tc.get_error_summary()}")
+        print(f"   - {tc.name}: {tc.get_error_summary()}")
     
     # Test 3: Get tests by status
     print(f"\n3. Tests by Status:")
@@ -84,13 +81,7 @@ def test_unified_approach():
         for tc in status_tests:
             print(f"     - {tc.name}")
     
-    # Test 4: Get tests by region
-    print(f"\n4. Tests by Region:")
-    for region in ["test_region_1", "test_region_2", "test_region_3"]:
-        region_tests = test_result.get_tests_by_region(region)
-        print(f"   {region}: {len(region_tests)} tests")
-        for tc in region_tests:
-            print(f"     - {tc.name}: {tc.status.value}")
+
     
     # Test 5: Legacy format conversion (for backward compatibility)
     print(f"\n5. Legacy Format Conversion:")
@@ -103,14 +94,13 @@ def test_unified_approach():
     legacy_failed_tests = get_failed_tests_dict_from_unified(test_result)
     print(f"   Count: {len(legacy_failed_tests)}")
     for test in legacy_failed_tests:
-        print(f"   - {test['test_name']} ({test['region']}): {test['error_message']}")
+        print(f"   - {test['test_name']}: {test['error_message']}")
     
     # Test 7: Rich metadata access
     print(f"\n7. Rich Metadata Access:")
     for tc in test_result.test_cases:
         print(f"   {tc.name}:")
         print(f"     Status: {tc.status.value}")
-        print(f"     Region: {tc.region}")
         print(f"     Input: {tc.input}")
         print(f"     Expected: {tc.expected_output}")
         print(f"     Actual: {tc.actual_output}")

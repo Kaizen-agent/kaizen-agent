@@ -113,6 +113,25 @@ class TestCase:
         evaluation_targets = data.get('evaluation_targets', [])
         llm_evaluation = data.get('evaluation', {})
         
+        # Handle case where input is a list (new format) instead of dict (old format)
+        input_data = data.get('input')
+        if isinstance(input_data, list):
+            # Convert list input to dict format for backward compatibility
+            data = data.copy()
+            data['input'] = {
+                'input': input_data,  # Store the list under 'input' key
+                'method': data.get('method'),  # Preserve method if present
+                'imports': data.get('imports', [])  # Preserve imports if present
+            }
+            logger.info("Converted list input to dict format for backward compatibility")
+        
+        # Validate input field
+        input_data = data.get('input')
+        if input_data is not None and not isinstance(input_data, dict):
+            raise ValueError(f"TestCase input must be a dictionary, got {type(input_data).__name__}. "
+                           f"This usually means the test configuration format is incompatible. "
+                           f"Expected: {{'input': [...], 'method': '...'}}, Got: {input_data}")
+        
         # If using old format with evaluation.criteria, convert to evaluation_targets
         if not evaluation_targets and 'evaluation' in data and 'criteria' in data['evaluation']:
             logger.info("Converting old evaluation.criteria format to evaluation_targets")
@@ -328,15 +347,19 @@ class PromptBuilder:
 class LLMEvaluator:
     """Evaluates test results using LLM."""
     
-    def __init__(self, config: Optional[LLMConfig] = None):
+    def __init__(self, config: Optional[LLMConfig] = None, better_ai: bool = False):
         self.config = config or LLMConfig()
+        self.better_ai = better_ai
         self._initialize_model()
         
     def _initialize_model(self):
         """Initialize the LLM model with proper configuration."""
         try:
             genai.configure(api_key=self.config.api_key)
-            self.model = genai.GenerativeModel(self.config.model_name)
+            if self.better_ai:
+                self.model = genai.GenerativeModel('gemini-2.5-pro')
+            else:
+                self.model = genai.GenerativeModel(self.config.model_name)
         except Exception as e:
             logger.error(f"Failed to initialize LLM model: {str(e)}")
             raise RuntimeError(f"LLM initialization failed: {str(e)}")

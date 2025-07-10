@@ -41,6 +41,7 @@ class ConfigurationValidator:
             ValidationRule('file_path', type=str),
             ValidationRule('description', required=False, type=str),
             ValidationRule('agent_type', required=False, type=str),
+            ValidationRule('framework', required=False, type=str),
             ValidationRule('regions', required=False, type=list),
             ValidationRule('steps', required=False, type=list),
             ValidationRule('metadata', required=False, type=dict),

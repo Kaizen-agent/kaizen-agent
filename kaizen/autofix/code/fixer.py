@@ -1,11 +1,9 @@
-import ast
 import os
 import re
 import logging
 import importlib
 import sys
 from datetime import datetime
-from typing import Dict, Optional
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -326,53 +324,6 @@ def fix_specific_syntax_error(code: str, error_msg: str) -> str:
         logger.error(f"Error in specific syntax error fix: {str(e)}")
         return code  # Return original code if fixes fail
 
-def reload_modules(file_paths: set) -> None:
-    """
-    Reload all affected modules to ensure changes are properly reflected.
-    This function handles circular dependencies and ensures proper reload order.
-    
-    Args:
-        file_paths: Set of file paths to reload
-    """
-    # First, invalidate all import caches
-    importlib.invalidate_caches()
-    
-    # Build dependency graph
-    dependency_graph = {}
-    for file_path in file_paths:
-        try:
-            abs_path = os.path.abspath(file_path)
-            with open(abs_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            # Parse the file to find imports
-            tree = ast.parse(content)
-            imports = set()
-            
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.Import, ast.ImportFrom)):
-                    if isinstance(node, ast.Import):
-                        imports.update(name.name.split('.')[0] for name in node.names)
-                    else:
-                        imports.add(node.module.split('.')[0])
-            
-            # Get module name
-            file_dir = os.path.dirname(abs_path)
-            root_dir = file_dir
-            while os.path.exists(os.path.join(root_dir, '__init__.py')):
-                parent = os.path.dirname(root_dir)
-                if parent == root_dir:  # Reached filesystem root
-                    break
-                root_dir = parent
-            
-            rel_path = os.path.relpath(abs_path, root_dir)
-            module_name = os.path.splitext(rel_path)[0].replace(os.sep, '.')
-            
-            dependency_graph[module_name] = imports
-            
-        except Exception as e:
-            logger.warning(f"Error analyzing dependencies for {file_path}: {str(e)}")
-    
     # Topological sort to determine reload order
     def topological_sort(graph):
         visited = set()
@@ -460,9 +411,6 @@ def apply_code_changes(current_file_path: str, fixed_codes: str) -> None:
         except Exception as e:
             logger.error(f"Failed to write changes to {current_file_path}: {str(e)}")
             raise
-        
-        # Reload the affected module
-        reload_modules({current_file_path})
         
         # Verify changes were applied
         try:

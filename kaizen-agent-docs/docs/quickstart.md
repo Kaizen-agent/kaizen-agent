@@ -175,6 +175,8 @@ steps:
 kaizen test-all --config kaizen.yaml --auto-fix --save-logs
 ```
 
+Add the `--better-ai` flag to enable enhanced AI capabilities for improved code suggestions and fixes.
+
 This command will:
 
 1. **Test your email improvement agent** with realistic scenarios

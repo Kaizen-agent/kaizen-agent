@@ -192,9 +192,10 @@ class TestClass:
             tracked_variables = {'result', 'summary'}
             result = executor.execute_region_with_tracking(
                 region_info,
-                'test_method',
-                'test input',
-                tracked_variables
+                method_name='test_method',
+                input_data=['test input'],
+                tracked_variables=tracked_variables,
+                framework=None
             )
             
             assert 'result' in result

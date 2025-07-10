@@ -77,7 +77,6 @@ class MarkdownTestResultFormatter(TestResultFormatter):
     indicators and complete result tables.
     
     The formatter generates markdown tables with the following columns:
-    - Region: The name of the test region
     - Status: The test status with emoji
     - Details: Additional test case information
     """
@@ -105,8 +104,8 @@ class MarkdownTestResultFormatter(TestResultFormatter):
         lines = []
         
         # Add header
-        lines.append("| Region | Status | Details |")
-        lines.append("|--------|--------|---------|")
+        lines.append("| Status | Details |")
+        lines.append("|--------|---------|")
         
         # Add rows
         for region, result in results.items():
@@ -124,7 +123,7 @@ class MarkdownTestResultFormatter(TestResultFormatter):
                         test_status = test_case.get('status', 'unknown')
                         details.append(f"{test_name}: {test_status}")
                 
-                lines.append(f"| {region} | {self.format_status(status)} | {', '.join(details)} |")
+                lines.append(f"| {self.format_status(status)} | {', '.join(details)} |")
         
         return lines
 
@@ -136,7 +135,6 @@ class RichTestResultFormatter(TestResultFormatter):
     both individual status indicators and complete result tables.
     
     The formatter creates Rich tables with the following columns:
-    - Region: The name of the test region (dimmed style)
     - Status: The test status with emoji
     - Details: Additional test case information
     """
@@ -170,7 +168,6 @@ class RichTestResultFormatter(TestResultFormatter):
             A Rich Table object containing the formatted results
         """
         table = Table(show_header=True, header_style="bold magenta")
-        table.add_column("Region", style="dim")
         table.add_column("Status")
         table.add_column("Details")
         
@@ -190,7 +187,6 @@ class RichTestResultFormatter(TestResultFormatter):
                         details.append(f"{test_name}: {test_status}")
                 
                 table.add_row(
-                    region,
                     self.format_status(status),
                     "\n".join(details)
                 )

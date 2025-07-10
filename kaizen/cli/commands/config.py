@@ -52,7 +52,9 @@ class ConfigurationManager:
         create_pr: bool = False,
         max_retries: int = DEFAULT_MAX_RETRIES,
         base_branch: str = 'main',
-        pr_strategy: str = 'ALL_PASSING'
+        pr_strategy: str = 'ALL_PASSING',
+        framework: Optional[str] = None,
+        better_ai: bool = False
     ) -> Result[TestConfiguration]:
         """Load and validate test configuration, allowing CLI overrides except for language.
         
@@ -63,6 +65,8 @@ class ConfigurationManager:
             max_retries: Maximum number of retry attempts
             base_branch: Base branch for pull requests
             pr_strategy: Strategy for when to create PRs
+            framework: Framework override (if provided)
+            better_ai: Whether to use enhanced AI model
         Returns:
             Result containing the validated configuration or an error
         """
@@ -81,8 +85,13 @@ class ConfigurationManager:
                 'create_pr': create_pr,
                 'max_retries': max_retries,
                 'base_branch': base_branch,
-                'pr_strategy': pr_strategy
+                'pr_strategy': pr_strategy,
+                'better_ai': better_ai
             }
+            
+            # Add framework override if provided
+            if framework is not None:
+                cli_overrides['framework'] = framework
 
             logger.debug(f"Original config_data language: {config_data.get('language', 'NOT_SET')}")
             logger.debug(f"CLI overrides: {cli_overrides}")

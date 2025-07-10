@@ -18,7 +18,6 @@ def create_sample_test_result() -> TestExecutionResult:
         TestCaseResult(
             name="test_basic_functionality",
             status=TestStatus.PASSED,
-            region="test_region_1",
             input="test_input_1",
             expected_output="expected_1",
             actual_output="expected_1",
@@ -28,7 +27,6 @@ def create_sample_test_result() -> TestExecutionResult:
         TestCaseResult(
             name="test_edge_cases",
             status=TestStatus.FAILED,
-            region="test_region_2",
             input="test_input_2",
             expected_output="expected_2",
             actual_output="actual_2",
@@ -39,7 +37,6 @@ def create_sample_test_result() -> TestExecutionResult:
         TestCaseResult(
             name="test_error_handling",
             status=TestStatus.ERROR,
-            region="test_region_3",
             input="test_input_3",
             expected_output="expected_3",
             actual_output=None,
@@ -82,21 +79,14 @@ def demonstrate_unified_result_usage():
     print("\n=== Failed Tests ===")
     failed_tests = test_result.get_failed_tests()
     for tc in failed_tests:
-        print(f"- {tc.name} ({tc.region}): {tc.get_error_summary()}")
-    
-    print("\n=== Tests by Region ===")
-    for region in ["test_region_1", "test_region_2", "test_region_3"]:
-        region_tests = test_result.get_tests_by_region(region)
-        print(f"{region}: {len(region_tests)} tests")
-        for tc in region_tests:
-            print(f"  - {tc.name}: {tc.status.value}")
+        print(f"- {tc.name}: {tc.get_error_summary()}")
     
     print("\n=== Tests by Status ===")
     for status in [TestStatus.PASSED, TestStatus.FAILED, TestStatus.ERROR]:
         status_tests = test_result.get_tests_by_status(status)
         print(f"{status.value}: {len(status_tests)} tests")
         for tc in status_tests:
-            print(f"  - {tc.name} ({tc.region})")
+            print(f"  - {tc.name}")
     
     print("\n=== Legacy Format Conversion ===")
     legacy_format = test_result.to_legacy_format()
@@ -137,14 +127,12 @@ def demonstrate_simplified_workflow():
     passed_tests = test_result.get_passed_tests()
     print(f"   Passed tests: {len(passed_tests)}")
     
-    region_tests = test_result.get_tests_by_region("test_region_1")
-    print(f"   Tests in test_region_1: {len(region_tests)}")
+
     
     print("\n5. Access rich metadata")
     for tc in test_result.test_cases:
         print(f"   {tc.name}:")
         print(f"     Status: {tc.status.value}")
-        print(f"     Region: {tc.region}")
         print(f"     Input: {tc.input}")
         print(f"     Output: {tc.actual_output}")
         if tc.evaluation:

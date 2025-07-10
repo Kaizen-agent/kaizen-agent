@@ -118,7 +118,7 @@ class TestReportWriter:
             if region == 'overall_status':
                 continue
                 
-            f.write(f"Region: {region}\n")
+
             f.write("-" * 30 + "\n")
             
             test_cases = result.get('test_cases', []) if isinstance(result, dict) else []

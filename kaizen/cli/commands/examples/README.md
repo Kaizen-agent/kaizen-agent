@@ -1,15 +1,16 @@
-# Dependency Management in Kaizen CLI
+# Configuration Examples for Kaizen CLI
 
-This directory contains examples demonstrating how to use dependency management in Kaizen CLI test configurations.
+This directory contains examples demonstrating how to use various features in Kaizen CLI test configurations, including dependency management and framework specification.
 
 ## Overview
 
-The Kaizen CLI now supports specifying dependencies and referenced files in test configuration files. This allows you to:
+The Kaizen CLI supports several advanced features in test configuration files:
 
-1. **Import Python packages** before test execution
-2. **Import local files** that are referenced by your test code
-3. **Ensure all dependencies are available** before running tests
-4. **Use imported dependencies during test execution**
+1. **Framework Specification**: Specify the agent framework (e.g., LlamaIndex, LangChain) for better test execution
+2. **Import Python packages** before test execution
+3. **Import local files** that are referenced by your test code
+4. **Ensure all dependencies are available** before running tests
+5. **Use imported dependencies during test execution**
 
 ## How It Works
 
@@ -32,6 +33,37 @@ The integration works through several components:
 - **CodeRegionExecutor**: Uses the imported dependencies during code execution
 
 ## Configuration Structure
+
+### Framework Specification
+
+The `framework` field allows you to specify the agent framework being used, which can help with test execution and evaluation:
+
+```yaml
+framework: "llamaindex"  # Supported values: llamaindex, langchain, autogen, custom
+```
+
+**Supported Frameworks:**
+- `llamaindex`: LlamaIndex framework for document processing and RAG
+- `langchain`: LangChain framework for building LLM applications
+- `autogen`: AutoGen framework for multi-agent systems
+- `custom`: Custom framework implementation
+
+**Benefits:**
+- Framework-specific test execution optimizations
+- Framework-aware evaluation criteria
+- Better error handling for framework-specific issues
+- Enhanced logging and debugging information
+
+**Example Usage:**
+```yaml
+name: "LlamaIndex Agent Test"
+file_path: "llamaindex_agent.py"
+language: "python"
+framework: "llamaindex"
+description: "Test configuration for LlamaIndex-based agent"
+```
+
+See `framework_test_config.yaml` and `langchain_test_config.yaml` for complete examples.
 
 ### Dependencies
 
