@@ -3767,14 +3767,19 @@ console.log('Google object:', typeof google);
         
         logger.debug(f"🤖 Executing async function: {func.__name__}")
         
-        # Use the current event loop instead of creating a new one
-        # This prevents the "attached to a different loop" error
+        
         try:
+            # Get the current event loop or create one if none exists
             # Get the current event loop or create one if none exists
             try:
                 loop = asyncio.get_event_loop()
+                # ONLY create new loop if current one is completely dead
+                if loop.is_closed():
+                    logger.info(f"🔍 Event loop is closed, creating new one")
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
             except RuntimeError:
-                # No event loop in current thread, create one
+                logger.info(f"🔍 Creating new event loop")
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
             
