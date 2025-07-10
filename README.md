@@ -7,6 +7,31 @@
 
 📚 **[View Full Documentation](https://kaizen-agent.github.io/kaizen-agent/)** - Complete guides, examples, and API reference
 
+## Our Vision
+
+We're building an AI development teammate that autonomously tests, improves, and evolves your LLM applications. Given input/output pairs, it generates test cases, fixes failures, and iterates until your agent is battle-ready.
+
+**Goal**: Transform from a testing tool into your AI development partner.
+
+## Current Limitations
+
+While we're excited about this vision, we acknowledge we're still on the journey. Some current limitations include:
+
+- Limited support for complex multi-agent workflows
+- Basic prompt optimization capabilities
+- Limited integration with specific LLM frameworks
+- Early-stage edge case generation
+
+## Contributing & Roadmap
+
+We welcome contributions and feature requests! If you have specific scenarios or use cases you'd like to see supported, please:
+
+1. **Open an Issue**: Share your requirements or use cases
+2. **Join Discussions**: Help prioritize features that matter to the community
+3. **Contribute Code**: Help us build the AI teammate of the future
+
+Your feedback helps us prioritize development and ensures Kaizen Agent becomes the teammate you need for building world-class LLM applications.
+
 🌟 **If you find this project helpful, please consider giving it a star — it really helps us!**  
 [![GitHub stars](https://img.shields.io/github/stars/Kaizen-agent/Kaizen-agent?style=social)](https://github.com/Kaizen-agent/Kaizen-agent)
 
