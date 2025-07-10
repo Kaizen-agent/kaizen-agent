@@ -15,12 +15,7 @@ We're building an AI development teammate that autonomously tests, improves, and
 
 ## Current Limitations
 
-While we're excited about this vision, we acknowledge we're still on the journey. Some current limitations include:
-
-- Limited support for complex multi-agent workflows
-- Basic prompt optimization capabilities
-- Limited integration with specific LLM frameworks
-- Early-stage edge case generation
+Here is our current progress toward our vision of becoming a true AI development teammate for LLM applications. See our [current limitations](https://kaizen-agent.github.io/kaizen-agent/docs/limitations) for details.
 
 ## Contributing & Roadmap
 

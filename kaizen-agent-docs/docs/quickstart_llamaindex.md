@@ -18,11 +18,37 @@ Before you begin, make sure you have:
 
 ## Installation
 
+### Create a Test Directory
+
+```bash
+# Create a test directory for your specific agent
+mkdir my-email-agent-test
+cd my-email-agent-test
+
+# Create a virtual environment (recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+
 Install Kaizen Agent using pip:
 
 ```bash
-pip install kaizen-agent
+pip install kaizen-agent llama-index llama-index-llms-gemini
 ```
+
+### Set Up Environment Variables
+
+```bash
+# Create .env file with your Google API key
+cat > .env << EOF
+GOOGLE_API_KEY=your_api_key_here
+EOF
+
+# Or set it directly in your shell
+export GOOGLE_API_KEY="your_api_key_here"
+```
+
 
 ## Step 1: Create Your Test Configuration
 
@@ -231,20 +257,12 @@ if __name__ == "__main__":
     main()
 ```
 
-## Step 3: Set Up Environment Variables
-
-Create a `.env` file in your project root:
-
-```bash
-GOOGLE_API_KEY=your_google_api_key_here
-```
-
-## Step 4: Run Kaizen Agent
+## Step 3: Run Kaizen Agent
 
 Execute the test command:
 
 ```bash
-kaizen test-all --config test_config.yaml --auto-fix
+kaizen test-all --config test_config.yaml --auto-fix --save-logs
 ```
 
 Add the `--better-ai` flag to enable enhanced AI capabilities for improved code suggestions and fixes.
