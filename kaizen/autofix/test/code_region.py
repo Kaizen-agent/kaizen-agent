@@ -13,29 +13,18 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Set, FrozenSet, Union, Type, TypeVar, Generic
+from typing import Any, Callable, Dict, List, Optional, Tuple, Set, FrozenSet, TypeVar
 from collections import defaultdict
 import typing
 import builtins
-import re
 import tempfile
-import json
 import subprocess
-import shutil
-import hashlib
-import time
-import asyncio
-import concurrent.futures
-import threading
-import textwrap
 
 # Third-party imports
 # (none in this file)
 
 # Local application imports
-from .input_parser import InputParser, InputParsingError
-from .variable_tracker import VariableTracker, track_variables, safe_serialize_value
-from .simple_import_resolver import SimpleImportResolver
+from .variable_tracker import track_variables
 
 # Configure colored logging
 class ColoredFormatter(logging.Formatter):
@@ -90,19 +79,15 @@ STANDARD_MODULES = frozenset({
 
 class CodeRegionError(Exception):
     """Base exception for code region related errors."""
-    pass
 
 class RegionExtractionError(CodeRegionError):
     """Exception raised when region extraction fails."""
-    pass
 
 class DependencyResolutionError(CodeRegionError):
     """Exception raised when dependency resolution fails."""
-    pass
 
 class ImportError(CodeRegionError):
     """Exception raised when import handling fails."""
-    pass
 
 class RegionType(Enum):
     """Types of code regions that can be tested."""
@@ -1050,7 +1035,7 @@ class ImportManager:
             self._process_imports(standard_imports, namespace, is_standard=True)
             self._process_imports(third_party_imports, namespace, is_standard=False)
 
-        except (IOError, SyntaxError) as e:
+        except (IOError, SyntaxError):
             # Re-raise specific exceptions
             raise
         except Exception as e:
@@ -1326,7 +1311,6 @@ class CodeRegionExtractor:
         """Determine the type, name, and methods of the region."""
         logger.debug("Determining region type")
         try:
-            methods = []
             classes = []
             
             # First pass: collect all classes
@@ -1475,7 +1459,6 @@ class CodeRegionExtractor:
             except SyntaxError as e:
                 logger.warning(f"Syntax error in {file_path}: {str(e)}")
                 # Don't fail validation for syntax errors, let execution handle them
-                pass
             
             # For lenient validation, we'll assume the entry point is valid
             # and let the execution phase handle any import or attribute errors
@@ -1822,7 +1805,6 @@ class CodeRegionExtractor:
         """
         import re
         
-        methods = []
         classes = []
         
         # Pattern for class definitions
@@ -2290,7 +2272,7 @@ class CodeRegionExecutor:
             Dictionary containing execution result and tracked values
         """
         import time
-        start_time = time.time()
+        time.time()
         
         tracked_variables = tracked_variables or set()
         input_data = input_data or []
@@ -2735,7 +2717,7 @@ class CodeRegionExecutor:
             self._process_imports(standard_imports, namespace, is_standard=True)
             self._process_imports(third_party_imports, namespace, is_standard=False)
 
-        except (IOError, SyntaxError) as e:
+        except (IOError, SyntaxError):
             # Re-raise specific exceptions
             raise
         except Exception as e:
@@ -2891,7 +2873,6 @@ class CodeRegionExecutor:
             logger.debug(f"Precompiling Mastra agent: {region_info.name}")
             
             # Create a temporary file for precompilation in the workspace root
-            import tempfile
             import time
             temp_file_path = self.workspace_root / f"temp_precompile_{region_info.name}_{int(time.time())}.ts"
             with open(temp_file_path, 'w') as temp_file:
@@ -3462,11 +3443,9 @@ console.log('Google object:', typeof google);
                     except Exception as e2:
                         logger.warning(f"⚠️ Second execution attempt failed: {str(e2)}")
                         # Continue anyway - let execution handle missing classes
-                        pass
                 except Exception as e:
                     logger.warning(f"⚠️ Error during module execution: {str(e)}")
                     # Continue execution even with errors
-                    pass
                 
                 # Add the module to sys.modules
                 sys.modules[module_name] = module
@@ -3559,11 +3538,9 @@ console.log('Google object:', typeof google);
                 except Exception as e2:
                     logger.warning(f"⚠️ Second execution attempt failed: {str(e2)}")
                     # Continue anyway - let execution handle missing classes
-                    pass
             except Exception as e:
                 logger.warning(f"⚠️ Error during module execution: {str(e)}")
                 # Continue execution even with errors
-                pass
             
             # Add the module to sys.modules
             full_module_name = f"{package_name}.{module_name}"
@@ -3618,93 +3595,24 @@ console.log('Google object:', typeof google);
                 module = self._create_dynamic_module(region_info, module_name)
                 
                 if not module:
-                    # Fallback to file-based import if dynamic creation fails
-                    if '.' in module_name:
-                        # Handle nested modules
-                        module_parts = module_name.split('.')
-                        base_module = module_parts[0]
-                        
-                        # Try to import the base module
-                        try:
-                            module = importlib.import_module(base_module)
-                        except builtins.ImportError:
-                            logger.error(f"Base module '{base_module}' not found")
-                            raise
-                        
-                        # Navigate to the nested module
-                        for part in module_parts[1:]:
-                            if hasattr(module, part):
-                                module = getattr(module, part)
-                            else:
-                                logger.error(f"Module part '{part}' not found in {module}")
-                                raise AttributeError(f"Module part '{part}' not found")
-                    else:
-                        # For simple module names, try to import directly
-                        try:
-                            module = importlib.import_module(module_name)
-                        except builtins.ImportError:
-                            # If direct import fails, try to load from file
-                            if region_info.file_path and region_info.file_path.exists():
-                                spec = importlib.util.spec_from_file_location(module_name, region_info.file_path)
-                                if spec and spec.loader:
-                                    module = importlib.util.module_from_spec(spec)
-                                    spec.loader.exec_module(module)
-                                else:
-                                    logger.error(f"Could not load module from file: {region_info.file_path}")
-                                    raise
-                            else:
-                                logger.error(f"Module '{module_name}' not found and file does not exist: {region_info.file_path}")
-                                raise
+                    # Simple fallback: try to import the module directly
+                    try:
+                        module = importlib.import_module(module_name)
+                    except builtins.ImportError:
+                        logger.error(f"Module '{module_name}' not found")
+                        raise
                 
                 # Execute with variable tracking
                 with track_variables(tracked_variables) as tracker:
                     result = None
                     
-                    # If class is specified, instantiate and call method
-                    if entry_point.class_name:
-                        if not hasattr(module, entry_point.class_name):
-                            if entry_point.fallback_to_function:
-                                # Fallback to function if class not found
-                                if hasattr(module, entry_point.class_name):
-                                    func = getattr(module, entry_point.class_name)
-                                    if callable(func):
-                                        result = self._call_llamaindex_function(func, input_data)
-                                else:
-                                    raise AttributeError(f"Neither class nor function '{entry_point.class_name}' found in module '{module_name}'")
-                            else:
-                                raise AttributeError(f"Class '{entry_point.class_name}' not found in module '{module_name}'")
-                        else:
-                            class_obj = getattr(module, entry_point.class_name)
-                            instance = class_obj()
-                            
-                            # If method is specified, call it
-                            if entry_point.method:
-                                if not hasattr(instance, entry_point.method):
-                                    raise AttributeError(f"Method '{entry_point.method}' not found in class '{entry_point.class_name}'")
-                                
-                                method = getattr(instance, entry_point.method)
-                                result = self._call_llamaindex_method(method, input_data)
-                            else:
-                                # If no method specified, try to call the instance directly
-                                if callable(instance):
-                                    result = self._call_llamaindex_function(instance, input_data)
-                                else:
-                                    raise ValueError(f"Instance of '{entry_point.class_name}' is not callable and no method specified")
+                    # Get the class and instantiate it
+                    class_obj = getattr(module, entry_point.class_name)
+                    instance = class_obj()
                     
-                    # If no class specified but method is, call it as a function
-                    elif entry_point.method:
-                        if not hasattr(module, entry_point.method):
-                            raise AttributeError(f"Function '{entry_point.method}' not found in module '{module_name}'")
-                        
-                        func = getattr(module, entry_point.method)
-                        if not callable(func):
-                            raise ValueError(f"'{entry_point.method}' is not callable in module '{module_name}'")
-                        
-                        result = self._call_llamaindex_function(func, input_data)
-                    
-                    # If neither class nor method specified, raise error
-                    else:
-                        raise ValueError("Either class_name or method must be specified in entry point")
+                    # Call the specified method
+                    method = getattr(instance, entry_point.method)
+                    result = self._call_llamaindex_method(method, input_data)
                     
                     # Get tracked values
                     tracked_values = {}
@@ -3949,7 +3857,6 @@ console.log('Google object:', typeof google);
             The result of the function call
         """
         import asyncio
-        import inspect
         
         # Check if the function is async
         if asyncio.iscoroutinefunction(func):
@@ -3970,7 +3877,6 @@ console.log('Google object:', typeof google);
             The result of the method call
         """
         import asyncio
-        import inspect
         
         # Check if the method is async
         if asyncio.iscoroutinefunction(method):
@@ -4163,13 +4069,12 @@ if __name__ == "__main__":
         """
         import asyncio
         import concurrent.futures
-        import threading
         
         logger.debug(f"🔄 Executing async function: {func.__name__}")
         
         # Check if we're already in an event loop
         try:
-            current_loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             logger.debug("🔄 Already in event loop, using ThreadPoolExecutor")
             
             # If we're already in an event loop, run in a separate thread
@@ -4207,8 +4112,6 @@ if __name__ == "__main__":
         """
         import asyncio
         import concurrent.futures
-        import threading
-        import time
         
         logger.debug(f"🤖 Executing LlamaIndex async function: {func.__name__}")
         
@@ -4525,10 +4428,8 @@ if __name__ == "__main__":
                         exec(code, module.__dict__)
                     except Exception as e2:
                         logger.warning(f"⚠️ Second execution attempt failed: {str(e2)}")
-                        pass
                 except Exception as e:
                     logger.warning(f"⚠️ Error during module execution: {str(e)}")
-                    pass
                 sys.modules[module_name] = module
                 logger.debug(f"✅ Successfully created dynamic module: {module_name}")
                 return module
@@ -4572,10 +4473,8 @@ if __name__ == "__main__":
                     exec(code, module.__dict__)
                 except Exception as e2:
                     logger.warning(f"⚠️ Second execution attempt failed: {str(e2)}")
-                    pass
             except Exception as e:
                 logger.warning(f"⚠️ Error during module execution: {str(e)}")
-                pass
             full_module_name = f"{package_name}.{module_name}"
             sys.modules[full_module_name] = module
             setattr(package_module, module_name, module)
