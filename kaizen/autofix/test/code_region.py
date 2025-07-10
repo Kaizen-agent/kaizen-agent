@@ -3754,102 +3754,42 @@ console.log('Google object:', typeof google);
 
     
     def _execute_llamaindex_async_function(self, func: Callable, input_data: List[Any]) -> Any:
-        """Specialized async execution for LlamaIndex agents that handles their internal event loop patterns.
+        """Simple async execution for LlamaIndex agents.
         
         Args:
-            func: The async function to execute (LlamaIndex agent method)
+            func: The async function to execute
             input_data: Input data to pass to the function
             
         Returns:
             The result of the async function
         """
         import asyncio
-        import concurrent.futures
         
-        logger.debug(f"🤖 Executing LlamaIndex async function: {func.__name__}")
+        logger.debug(f"🤖 Executing async function: {func.__name__}")
         
-        # For LlamaIndex agents, the issue is that their internal workflow system
-        # creates tasks that are bound to specific event loops. We need to run
-        # the entire agent creation and execution in the same isolated context.
-        
-        def run_llamaindex_in_thread():
-            """Run LlamaIndex agent in a dedicated thread with its own event loop."""
-            # Create a completely isolated event loop for this thread
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            
-            try:
-                # Set up the thread-local context for LlamaIndex
-                import os
-                os.environ['LLAMA_INDEX_ASYNC_MODE'] = 'true'
-                
-                # Instead of calling the existing function (which has already created
-                # LlamaIndex objects bound to a different event loop), we need to
-                # recreate the agent in this thread's context
-                
-                # Get the module and recreate the agent instance
-                import importlib.util
-                import sys
-                
-                # Add current directory to path
-                sys.path.insert(0, str(self.workspace_root))
-                
-                # Import the module
-                spec = importlib.util.spec_from_file_location("temp_module", "test_math_agent.py")
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                
-                # Create a new instance of the agent in this thread's context
-                if hasattr(module, 'MathAgent'):
-                    agent_class = getattr(module, 'MathAgent')
-                    agent_instance = agent_class()
-                    
-                    # Call the method on the new instance
-                    method = getattr(agent_instance, func.__name__)
-                    result = new_loop.run_until_complete(method(*input_data))
-                    return result
-                else:
-                    raise Exception("MathAgent class not found in module")
-                
-            except Exception as e:
-                logger.error(f"❌ Error in LlamaIndex thread execution: {str(e)}")
-                # Try to get more detailed error information
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                raise
-            finally:
-                # Clean up the event loop
-                try:
-                    # Cancel any pending tasks
-                    pending = asyncio.all_tasks(new_loop)
-                    for task in pending:
-                        task.cancel()
-                    
-                    # Wait for tasks to be cancelled
-                    if pending:
-                        new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                    
-                    new_loop.close()
-                except Exception as cleanup_error:
-                    logger.warning(f"⚠️ Error during event loop cleanup: {str(cleanup_error)}")
-        
-        # Use a dedicated thread for LlamaIndex execution
+        # Use the current event loop instead of creating a new one
+        # This prevents the "attached to a different loop" error
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(run_llamaindex_in_thread)
-                
-                # Wait for the result with a longer timeout for LLM operations
-                result = future.result(timeout=600)  # 10 minute timeout for LLM operations
-                logger.debug(f"✅ LlamaIndex async execution completed successfully")
-                return result
-                
-        except concurrent.futures.TimeoutError:
-            logger.error(f"⏰ LlamaIndex async execution timed out after 10 minutes")
-            raise TimeoutError("LlamaIndex agent execution timed out")
+            # Get the current event loop or create one if none exists
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # No event loop in current thread, create one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Call the async function with input data
+            if len(input_data) == 1:
+                result = loop.run_until_complete(func(input_data[0]))
+            else:
+                result = loop.run_until_complete(func(*input_data))
+            logger.info(f"🔍 result: {result}")
+            logger.debug(f"✅ Async execution completed successfully")
+            return result
+            
         except Exception as e:
-            logger.error(f"❌ LlamaIndex async execution failed: {str(e)}")
-            # Try the fallback method
-            raise e
+            logger.error(f"❌ Async execution failed: {str(e)}")
+            raise
 
     
     def _preprocess_code_with_mock_imports(self, code: str) -> str:
