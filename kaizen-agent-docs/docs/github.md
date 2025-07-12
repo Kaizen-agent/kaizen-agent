@@ -73,31 +73,7 @@ kaizen setup create-env-example
 kaizen setup check-env
 ```
 
-## Step 3: Test GitHub Access
-
-Before running tests with PR creation, verify your GitHub setup:
-
-```bash
-# Test GitHub access
-kaizen test-github-access --repo your-username/your-repo-name
-```
-
-This command will:
-- Verify your GitHub token is valid
-- Check repository access permissions
-- Test branch creation capabilities
-- Validate pull request creation permissions
-
-### Example Output
-
-```
-✅ GitHub access test successful!
-✅ Token is valid and has required permissions
-✅ Repository access confirmed: your-username/your-repo-name
-✅ Can create branches and pull requests
-```
-
-## Step 4: Run Tests with PR Creation
+## Step 3: Run Tests with PR Creation
 
 Once GitHub access is confirmed, you can run tests with automatic PR creation:
 
@@ -429,9 +405,8 @@ kaizen test-all --config kaizen.yaml --auto-fix --create-pr --repo owner/repo-na
 If you continue to have issues:
 
 1. **Check the logs**: Review detailed logs in `test-logs/` directory
-2. **Run diagnostics**: Use `kaizen diagnose-github-access`
-3. **Join Discord**: Get help from the community at [Discord](https://discord.gg/2A5Genuh)
-4. **Check GitHub status**: Ensure GitHub services are operational
+2. **Join Discord**: Get help from the community at [Discord](https://discord.gg/2A5Genuh)
+3. **Check GitHub status**: Ensure GitHub services are operational
 
 ## Security Considerations
 

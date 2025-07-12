@@ -287,6 +287,21 @@ kaizen test-github-access --repo owner/repo-name
 kaizen diagnose-github-access --repo owner/repo-name
 ```
 
+### Test Generation Commands
+
+```bash
+# Generate additional test cases to reach a total of 10
+kaizen augment test.yaml --total 10
+
+# Use enhanced AI model for better generation
+kaizen augment test.yaml --total 15 --better-ai
+
+# Show detailed debug information
+kaizen augment test.yaml --total 12 --verbose
+```
+
+For detailed information about test generation, see our [Test Generation Guide](./test-generation.md).
+
 ### Command Options
 
 | Option | Description | Example |
@@ -296,6 +311,8 @@ kaizen diagnose-github-access --repo owner/repo-name
 | `--create-pr` | Create a pull request with fixes (requires GitHub setup) | `--create-pr` |
 | `--save-logs` | Save detailed execution logs to `test-logs/` directory | `--save-logs` |
 | `--repo` | GitHub repository for PR creation (format: owner/repo-name) | `--repo myuser/myproject` |
+| `--total` | Total number of test cases desired for augmentation | `--total 10` |
+| `--better-ai` | Use enhanced AI model for improved test generation | `--better-ai` |
 
 ## Simple Configuration Template
 
