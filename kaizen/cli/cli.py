@@ -12,11 +12,7 @@ from enum import Enum
 from rich.console import Console
 
 from .commands.test import test_all
-from .commands.debug_typescript import debug_typescript
-from .commands.test_github_access import test_github_access
-from .commands.diagnose_github_access import diagnose_github_access
 from .commands.setup import setup
-from .commands.analyze_logs import analyze_logs
 from .commands.augment import augment
 from .utils.env_setup import check_environment_setup, display_environment_status
 
@@ -148,11 +144,7 @@ def cli(ctx: click.Context, debug: bool, config: Optional[str]) -> None:
 
 # Register commands
 cli.add_command(test_all)
-cli.add_command(debug_typescript)
-cli.add_command(test_github_access)
-cli.add_command(diagnose_github_access)
 cli.add_command(setup)
-cli.add_command(analyze_logs)
 cli.add_command(augment)
 
 if __name__ == '__main__':
