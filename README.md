@@ -3,7 +3,13 @@
 [![Python Versions](https://img.shields.io/pypi/pyversions/kaizen.svg)](https://pypi.org/project/kaizen-agent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Kaizen Agent autonomously tests your app using input and ideal output pairs, detects failures, suggests fixes, and opens PRs — so your LLM gets better with every iteration.**
+🧪 Your AI teammate that tests, debugs, and fixes LLM agents – production-ready with confidence.
+
+<p align="center">
+  <img src="media/demo.gif" alt="Kaizen Agent Demo">
+</p>
+
+▶️ [Watch full demo on Loom](https://www.loom.com/share/d3d8a5c344dc4108906d60e5c209962e)
 
 📚 **[View Full Documentation](https://kaizen-agent.github.io/kaizen-agent/)** - Complete guides, examples, and API reference
 
@@ -40,17 +46,6 @@ Your feedback helps us prioritize development and ensures Kaizen Agent becomes t
 💬 **Questions? Need help?** Join our [Discord community](https://discord.gg/2A5Genuh) to ask questions, share your experiences, and get support from other developers using Kaizen Agent!
 
 ## How It Works
-
-🎥 **Watch Kaizen Agent in Action:**
-
-<div>
-    <a href="https://www.loom.com/share/d3d8a5c344dc4108906d60e5c209962e">
-      <p>Kaizen Agent Demo - Watch Video</p>
-    </a>
-    <a href="https://www.loom.com/share/d3d8a5c344dc4108906d60e5c209962e">
-      <img style="max-width:300px;" src="https://cdn.loom.com/sessions/thumbnails/d3d8a5c344dc4108906d60e5c209962e-54c4b35b3c755f5d-full-play.gif">
-    </a>
-  </div>
 
 Kaizen Agent acts as your AI development partner that continuously evolves and improves your AI agents and LLM applications. Here's how it works at a high level:
 
