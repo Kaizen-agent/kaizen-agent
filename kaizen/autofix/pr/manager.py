@@ -169,7 +169,7 @@ class PRManager:
             }
             
             # Log generated PR data
-            logger.info("Generated PR data", extra={
+            logger.debug("Generated PR data", extra={
                 'title': self.pr_data['title'],
                 'title_length': len(self.pr_data['title']),
                 'description_length': len(self.pr_data['description']),
@@ -227,7 +227,7 @@ class PRManager:
                 'reopened': 'PR reopened successfully'
             }.get(self.pr_data['status'], 'PR operation completed')
             
-            logger.info(status_message, extra={
+            logger.debug(status_message, extra={
                 'pr_title': self.pr_data['title'],
                 'pr_url': self.pr_data['pr_url'],
                 'pr_number': self.pr_data['pr_number'],
