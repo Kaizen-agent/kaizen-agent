@@ -1,6 +1,21 @@
 # Kaizen Agent - The AI Agent That Improves Your LLM App
 
-[![Python Versions](https://img.shields.io/pypi/pyversions/kaizen.svg)](https://pypi.org/project/kaizen-agent/)
+<a href="https://itslaunched.com/product/kaizen-agent?ref=badge"><img src="https://itslaunched.com/badges/top2.png" alt="View on It's Launched" style="width: 240px; height: auto;"></a>
+
+<a href="https://peerpush.net/p/kaizen-agent"
+  target="_blank"
+  rel="noopener"
+  style="height: 60px;"
+>
+  <img
+    src="https://peerpush.net/p/kaizen-agent/badge"
+    alt="Kaizen Agent badge"
+    style="height: 60px;"
+  />
+</a>
+
+[![Python Versions](https://img.shields.io/badge/python-3.8+-blue.svg)](https://pypi.org/project/kaizen-agent/)
+[![PyPI Downloads](https://static.pepy.tech/badge/kaizen-agent)](https://pepy.tech/projects/kaizen-agent)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 🧪 Your AI teammate that tests, debugs, and fixes LLM agents – production-ready with confidence.
