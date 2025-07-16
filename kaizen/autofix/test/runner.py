@@ -4,6 +4,7 @@ import os
 import sys
 import logging
 import yaml
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
@@ -154,6 +155,9 @@ class TestRunner:
         
         try:
             logger.info(f"Running test case: {test_case.get('name', 'Unknown')}")
+            
+            # Execute between_runs lifecycle command if configured
+            self._execute_between_runs_command()
             
             # Get language from test config, require it to be set
             language = self.test_config.get("language")
@@ -490,6 +494,62 @@ class TestRunner:
             logger.debug(f"DEBUG: run_tests completed, returning unified result")
         
         return test_result
+
+    def _execute_lifecycle_command(self, command: str, timeout: int = 30) -> bool:
+        """Execute a lifecycle command with proper error handling.
+        
+        Args:
+            command: The command string to execute
+            timeout: Timeout in seconds for command execution
+            
+        Returns:
+            True if command executed successfully, False otherwise
+        """
+        try:
+            logger.info(f"Executing lifecycle command: {command}")
+            
+            # Execute the command with timeout
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=self.workspace_root
+            )
+            
+            if result.returncode == 0:
+                logger.info(f"Lifecycle command completed successfully")
+                if self.verbose and result.stdout.strip():
+                    logger.debug(f"Command stdout: {result.stdout.strip()}")
+                return True
+            else:
+                logger.error(f"Lifecycle command failed with exit code {result.returncode}")
+                logger.error(f"Command stderr: {result.stderr.strip()}")
+                if result.stdout.strip():
+                    logger.debug(f"Command stdout: {result.stdout.strip()}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            logger.error(f"Lifecycle command timed out after {timeout} seconds")
+            return False
+        except Exception as e:
+            logger.error(f"Error executing lifecycle command: {str(e)}")
+            return False
+    
+    def _execute_between_runs_command(self) -> None:
+        """Execute the between_runs lifecycle command if configured."""
+        lifecycle_config = self.test_config.get('lifecycle', {})
+        between_runs_command = lifecycle_config.get('between_runs')
+        
+        if between_runs_command:
+            logger.info("Executing between_runs lifecycle command")
+            success = self._execute_lifecycle_command(between_runs_command)
+            if not success:
+                logger.warning("Between runs command failed, but continuing with test execution")
+        else:
+            if self.verbose:
+                logger.debug("No between_runs command configured in lifecycle section")
 
     def _load_environment_variables(self) -> None:
         """Load environment variables from .env files and user's environment.

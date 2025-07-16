@@ -35,6 +35,7 @@ from .config import ConfigurationManager
 from .test_commands import TestAllCommand
 from .formatters import MarkdownTestResultFormatter, RichTestResultFormatter
 from .report_writer import TestReportWriter
+from .memory import ExecutionMemory
 from .errors import (
     TestError,
     ConfigurationError,
@@ -52,6 +53,7 @@ from .types import (
     DEFAULT_LANGUAGE
 )
 from .models import TestResult
+from kaizen.cli.commands.models.test_execution_result import TestCaseResult, TestStatus, TestExecutionResult
 
 # Configure rich traceback
 install_rich_traceback(show_locals=True)
@@ -287,7 +289,7 @@ def _save_detailed_logs(console: Console, test_result: TestResult, config: Any) 
                 detailed_logs["unified_test_results"] = {"error": f"Serialization failed: {str(e)}"}
         
         # Add auto-fix attempts if available
-        if test_result.test_attempts:
+        if test_result.test_attempts is not None:
             detailed_logs["auto_fix_attempts"] = test_result.test_attempts
         
         # Save to JSON file
@@ -411,21 +413,235 @@ def _save_summary_report(console: Console, test_result: TestResult, config: Any)
             test_history.add_baseline_result(test_result.baseline_result)
             console.print(f"[dim]✓ Baseline results included ({len(test_result.baseline_result.test_cases)} test cases)[/dim]")
         
-        # Add all test execution results to the history
-        if test_result.test_attempts and len(test_result.test_attempts) > 0:
-            for attempt_data in test_result.test_attempts:
-                if isinstance(attempt_data, dict) and 'test_execution_result' in attempt_data:
-                    execution_result = attempt_data['test_execution_result']
-                    if execution_result:
+        # Convert all memory-based attempts (dicts) to TestExecutionResult objects if needed
+        if test_result.test_attempts is not None and len(test_result.test_attempts) > 0:
+            console.print(f"[dim]DEBUG: Found {len(test_result.test_attempts)} test attempts[/dim]")
+            attempts_processed = 0
+            for i, attempt_data in enumerate(test_result.test_attempts):
+                console.print(f"[dim]DEBUG: Processing attempt {i+1}, type: {type(attempt_data)}[/dim]")
+                try:
+                    if isinstance(attempt_data, dict):
+                        # Handle memory system attempts (which have test_execution_result: None)
+                        test_cases = []
+                        test_results = attempt_data.get('test_results', {})
+                        # Debug print the structure of test_results
+                        console.print(f"[dim]DEBUG: test_results structure for attempt {attempt_data.get('attempt_number', 'unknown')}: {repr(test_results)[:300]}[/dim]")
+                        # Try to extract test cases from legacy format
+                        if 'tests' in test_results and isinstance(test_results['tests'], dict):
+                            console.print(f"[dim]DEBUG: Found 'tests' key in test_results[/dim]")
+                            for tc_data in test_results['tests'].get('test_cases', []):
+                                status_val = tc_data.get('status', 'unknown')
+                                if status_val == 'success':
+                                    status_val = 'passed'
+                                elif status_val == 'fail':
+                                    status_val = 'failed'
+                                elif status_val == 'error':
+                                    status_val = 'error'
+                                elif status_val == 'passed':
+                                    status_val = 'passed'
+                                elif status_val == 'failed':
+                                    status_val = 'failed'
+                                else:
+                                    status_val = 'unknown'
+                                try:
+                                    status_enum = TestStatus(status_val)
+                                except Exception:
+                                    status_enum = TestStatus.UNKNOWN
+                                test_case = TestCaseResult(
+                                    name=tc_data.get('name', f"test_case_{len(test_cases)}"),
+                                    status=status_enum,
+                                    input=tc_data.get('input'),
+                                    expected_output=tc_data.get('expected_output'),
+                                    actual_output=tc_data.get('actual_output') if 'actual_output' in tc_data else tc_data.get('output'),
+                                    error_message=tc_data.get('error'),
+                                    evaluation=tc_data.get('evaluation')
+                                )
+                                test_cases.append(test_case)
+                        # Fallback: handle direct 'test_cases' key (legacy format)
+                        elif 'test_cases' in test_results and isinstance(test_results['test_cases'], list):
+                            console.print(f"[dim]DEBUG: Found 'test_cases' key in test_results[/dim]")
+                            for tc_data in test_results['test_cases']:
+                                status_val = tc_data.get('status', 'unknown')
+                                if status_val == 'success':
+                                    status_val = 'passed'
+                                elif status_val == 'fail':
+                                    status_val = 'failed'
+                                elif status_val == 'error':
+                                    status_val = 'error'
+                                elif status_val == 'passed':
+                                    status_val = 'passed'
+                                elif status_val == 'failed':
+                                    status_val = 'failed'
+                                else:
+                                    status_val = 'unknown'
+                                try:
+                                    status_enum = TestStatus(status_val)
+                                except Exception:
+                                    status_enum = TestStatus.UNKNOWN
+                                test_case = TestCaseResult(
+                                    name=tc_data.get('name', f"test_case_{len(test_cases)}"),
+                                    status=status_enum,
+                                    input=tc_data.get('input'),
+                                    expected_output=tc_data.get('expected_output'),
+                                    actual_output=tc_data.get('actual_output') if 'actual_output' in tc_data else tc_data.get('output'),
+                                    error_message=tc_data.get('error'),
+                                    evaluation=tc_data.get('evaluation')
+                                )
+                                test_cases.append(test_case)
+                        else:
+                            console.print(f"[dim]DEBUG: No 'tests' or 'test_cases' found in test_results. Keys: {list(test_results.keys())}[/dim]")
+                        # If no test_cases, create a dummy failed case to avoid empty attempts
+                        if not test_cases:
+                            console.print(f"[dim]DEBUG: No test cases extracted, creating dummy case[/dim]")
+                            test_cases = [TestCaseResult(
+                                name='unknown',
+                                status=TestStatus.FAILED,
+                                input=None,
+                                expected_output=None,
+                                actual_output=None,
+                                error_message='No test case data',
+                                evaluation=None
+                            )]
+                        # Map status values to valid TestStatus enum values
+                        status_str = attempt_data.get('status', 'unknown')
+                        if status_str == 'success':
+                            status_str = 'passed'
+                        elif status_str == 'failed':
+                            status_str = 'failed'
+                        elif status_str == 'error':
+                            status_str = 'error'
+                        else:
+                            status_str = 'unknown'
+                        try:
+                            status_enum = TestStatus(status_str)
+                        except Exception:
+                            status_enum = TestStatus.UNKNOWN
+                        execution_result = TestExecutionResult(
+                            name=f"attempt_{attempt_data.get('attempt_number', attempts_processed + 1)}",
+                            file_path=test_result.file_path,
+                            config_path=test_result.config_path,
+                            test_cases=test_cases,
+                            status=status_enum
+                        )
                         test_history.add_fix_attempt_result(execution_result)
-            
-            console.print(f"[dim]✓ Test attempts included ({len(test_result.test_attempts)} attempts)[/dim]")
-        
+                        attempts_processed += 1
+                        console.print(f"[dim]DEBUG: Successfully converted attempt {attempt_data.get('attempt_number', 'unknown')} with {len(test_cases)} test cases[/dim]")
+                    elif hasattr(attempt_data, 'test_results_after'):
+                        # Handle FixAttempt objects from memory system
+                        console.print(f"[dim]DEBUG: Processing FixAttempt object[/dim]")
+                        test_cases = []
+                        test_results = attempt_data.test_results_after
+                        # Debug print the structure of test_results
+                        console.print(f"[dim]DEBUG: test_results structure for FixAttempt: {repr(test_results)[:300]}[/dim]")
+                        # Try to extract test cases from legacy format
+                        if 'tests' in test_results and isinstance(test_results['tests'], dict):
+                            console.print(f"[dim]DEBUG: Found 'tests' key in test_results[/dim]")
+                            for tc_data in test_results['tests'].get('test_cases', []):
+                                status_val = tc_data.get('status', 'unknown')
+                                if status_val == 'success':
+                                    status_val = 'passed'
+                                elif status_val == 'fail':
+                                    status_val = 'failed'
+                                elif status_val == 'error':
+                                    status_val = 'error'
+                                elif status_val == 'passed':
+                                    status_val = 'passed'
+                                elif status_val == 'failed':
+                                    status_val = 'failed'
+                                else:
+                                    status_val = 'unknown'
+                                try:
+                                    status_enum = TestStatus(status_val)
+                                except Exception:
+                                    status_enum = TestStatus.UNKNOWN
+                                test_case = TestCaseResult(
+                                    name=tc_data.get('name', f"test_case_{len(test_cases)}"),
+                                    status=status_enum,
+                                    input=tc_data.get('input'),
+                                    expected_output=tc_data.get('expected_output'),
+                                    actual_output=tc_data.get('actual_output') if 'actual_output' in tc_data else tc_data.get('output'),
+                                    error_message=tc_data.get('error'),
+                                    evaluation=tc_data.get('evaluation')
+                                )
+                                test_cases.append(test_case)
+                        # Fallback: handle direct 'test_cases' key (legacy format)
+                        elif 'test_cases' in test_results and isinstance(test_results['test_cases'], list):
+                            console.print(f"[dim]DEBUG: Found 'test_cases' key in test_results[/dim]")
+                            for tc_data in test_results['test_cases']:
+                                status_val = tc_data.get('status', 'unknown')
+                                if status_val == 'success':
+                                    status_val = 'passed'
+                                elif status_val == 'fail':
+                                    status_val = 'failed'
+                                elif status_val == 'error':
+                                    status_val = 'error'
+                                elif status_val == 'passed':
+                                    status_val = 'passed'
+                                elif status_val == 'failed':
+                                    status_val = 'failed'
+                                else:
+                                    status_val = 'unknown'
+                                try:
+                                    status_enum = TestStatus(status_val)
+                                except Exception:
+                                    status_enum = TestStatus.UNKNOWN
+                                test_case = TestCaseResult(
+                                    name=tc_data.get('name', f"test_case_{len(test_cases)}"),
+                                    status=status_enum,
+                                    input=tc_data.get('input'),
+                                    expected_output=tc_data.get('expected_output'),
+                                    actual_output=tc_data.get('actual_output') if 'actual_output' in tc_data else tc_data.get('output'),
+                                    error_message=tc_data.get('error'),
+                                    evaluation=tc_data.get('evaluation')
+                                )
+                                test_cases.append(test_case)
+                        else:
+                            console.print(f"[dim]DEBUG: No 'tests' or 'test_cases' found in test_results. Keys: {list(test_results.keys())}[/dim]")
+                        # If no test_cases, create a dummy failed case to avoid empty attempts
+                        if not test_cases:
+                            console.print(f"[dim]DEBUG: No test cases extracted, creating dummy case[/dim]")
+                            test_cases = [TestCaseResult(
+                                name='unknown',
+                                status=TestStatus.FAILED,
+                                input=None,
+                                expected_output=None,
+                                actual_output=None,
+                                error_message='No test case data',
+                                evaluation=None
+                            )]
+                        # Map status values to valid TestStatus enum values
+                        status_str = 'passed' if attempt_data.success else 'failed'
+                        try:
+                            status_enum = TestStatus(status_str)
+                        except Exception:
+                            status_enum = TestStatus.UNKNOWN
+                        execution_result = TestExecutionResult(
+                            name=f"attempt_{attempt_data.attempt_number}",
+                            file_path=test_result.file_path,
+                            config_path=test_result.config_path,
+                            test_cases=test_cases,
+                            status=status_enum
+                        )
+                        test_history.add_fix_attempt_result(execution_result)
+                        attempts_processed += 1
+                        console.print(f"[dim]DEBUG: Successfully converted FixAttempt {attempt_data.attempt_number} with {len(test_cases)} test cases[/dim]")
+                    elif hasattr(attempt_data, 'test_cases'):
+                        # Already a TestExecutionResult
+                        test_history.add_fix_attempt_result(attempt_data)
+                        attempts_processed += 1
+                        console.print(f"[dim]DEBUG: Added existing TestExecutionResult[/dim]")
+                except Exception as e:
+                    console.print(f"[dim]Warning: Could not convert attempt {getattr(attempt_data, 'attempt_number', 'unknown')} to TestExecutionResult: {str(e)}[/dim]")
+                    continue
+
+            if attempts_processed > 0:
+                console.print(f"[dim]✓ Test attempts included ({attempts_processed} attempts)[/dim]")
+            else:
+                console.print(f"[dim]✓ Test attempts found but not in TestExecutionResult format ({len(test_result.test_attempts)} attempts)[/dim]")
         # If no test attempts, use unified_result as the only result
         elif test_result.unified_result:
             test_history.add_fix_attempt_result(test_result.unified_result)
             console.print(f"[dim]✓ Test results included ({len(test_result.unified_result.test_cases)} test cases)[/dim]")
-        
         # If no test history available, skip report generation
         if not test_history.get_all_results():
             console.print(f"[dim]No valid test results found, skipping summary report generation[/dim]")
@@ -541,11 +757,14 @@ def _save_summary_report(console: Console, test_result: TestResult, config: Any)
         console.print(f"[dim]• Shows test results table and detailed analysis[/dim]")
         console.print(f"[dim]• Can be viewed in any Markdown viewer or text editor[/dim]")
         
+        return report_file_path
+        
     except Exception as e:
         console.print(f"[bold red]Warning: Failed to save summary report: {str(e)}[/bold red]")
         # Add more detailed error information for debugging
         import traceback
         console.print(f"[dim]Error details: {traceback.format_exc()}[/dim]")
+        return None
 
 @click.command()
 @click.option('--config', '-c', type=click.Path(exists=True), required=True, help='Test configuration file')
@@ -562,7 +781,6 @@ def _save_summary_report(console: Console, test_result: TestResult, config: Any)
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed debug information and verbose logging')
 @click.option('--clear-ts-cache', is_flag=True, help='Clear TypeScript compilation cache before running tests')
 @click.option('--show-cache-stats', is_flag=True, help='Show TypeScript cache statistics')
-@click.option('--debug-ts', is_flag=True, help='Enable detailed TypeScript execution debugging')
 @click.option('--no-confirm', is_flag=True, help='Skip confirmation prompts (useful for non-interactive use)')
 @click.option('--better-ai', is_flag=True, help='Use enhanced AI model for improved code fixing and analysis')
 def test_all(
@@ -578,7 +796,6 @@ def test_all(
     verbose: bool,
     clear_ts_cache: bool,
     show_cache_stats: bool,
-    debug_ts: bool,
     no_confirm: bool,
     better_ai: bool
 ) -> None:
@@ -613,7 +830,6 @@ def test_all(
         verbose: Whether to show detailed debug information and verbose logging
         clear_ts_cache: Whether to clear TypeScript compilation cache before running tests
         show_cache_stats: Whether to show TypeScript cache statistics
-        debug_ts: Whether to enable detailed TypeScript execution debugging
         no_confirm: Whether to skip confirmation prompts (useful for non-interactive use)
         better_ai: Whether to use enhanced AI model for improved code fixing and analysis
         
@@ -655,16 +871,6 @@ def test_all(
     # Initialize clean logger
     logger = CleanLogger(verbose=verbose)
     
-    # Enable detailed TypeScript debugging if requested
-    if debug_ts:
-        logger.print_progress("Enabling detailed TypeScript debugging...")
-        # Set TypeScript logger to DEBUG level
-        ts_logger = logging.getLogger("kaizen.autofix.test.code_region")
-        ts_logger.setLevel(logging.DEBUG)
-        # Also enable debug for the main test logger
-        logging.getLogger("kaizen").setLevel(logging.DEBUG)
-        logger.print_success("TypeScript debugging enabled")
-    
     try:
         # Load configuration
         logger.print_progress("Loading test configuration...")
@@ -692,67 +898,25 @@ def test_all(
         
         # Handle TypeScript cache management
         if clear_ts_cache or show_cache_stats:
-            from kaizen.autofix.test.code_region import CodeRegionExecutor
-            temp_executor = CodeRegionExecutor(Path.cwd())
-            
-            if clear_ts_cache:
-                logger.print_progress("Clearing TypeScript compilation cache...")
-                temp_executor.clear_cache()
-                logger.print_success("TypeScript cache cleared")
-            
-            if show_cache_stats:
-                stats = temp_executor.get_cache_stats()
-                logger.print("\n[bold]TypeScript Cache Statistics:[/bold]")
-                logger.print(f"  • Execution cache entries: {stats['execution_cache_size']}")
-                logger.print(f"  • Compiled modules: {stats['compiled_modules_size']}")
-                logger.print(f"  • Cache directory: {stats['ts_cache_directory']}")
-                logger.print("")
+            from .utils.ts_cache_manager import TypeScriptCacheManager
+            ts_cache_manager = TypeScriptCacheManager(logger.console)
+            ts_cache_manager.handle_cache_operations(clear_ts_cache, show_cache_stats)
+        
+        # Handle user confirmations
+        from .utils.confirmation_manager import ConfirmationManager
+        confirmation_manager = ConfirmationManager(logger.console)
         
         # Confirm auto-fix operation if enabled
         if auto_fix:
-            logger.print("\n[bold yellow]⚠ Auto-fix Warning[/bold yellow]")
-            logger.print("Auto-fix will attempt to modify your code files to fix failing tests.")
-            logger.print("This may change your existing code and could potentially introduce new issues.")
-            logger.print(f"Maximum retry attempts: {max_retries}")
-            logger.print("\n[bold]Files that may be modified:[/bold]")
-            
-            # Show files that will be tested/modified
-            if hasattr(config, 'files_to_fix') and config.files_to_fix:
-                for file_path in config.files_to_fix:
-                    logger.print(f"  • {file_path}")
-            else:
-                logger.print("  • Files specified in test configuration")
-            
-            if no_confirm:
-                logger.print_success("Auto-fix confirmed (--no-confirm flag used)")
-            elif not click.confirm("\n[bold]Do you want to proceed with auto-fix?[/bold]"):
-                logger.print("[dim]Auto-fix cancelled by user[/dim]")
+            if not confirmation_manager.confirm_auto_fix(config, max_retries, no_confirm):
                 auto_fix = False
-                # Update config to disable auto-fix
                 config.auto_fix = False
-            else:
-                logger.print_success("Auto-fix confirmed - proceeding with automatic fixes")
         
         # Confirm PR creation if enabled
         if create_pr:
-            logger.print("\n[bold yellow]⚠ Pull Request Creation Warning[/bold yellow]")
-            logger.print("This will create a pull request on GitHub with the fixes applied.")
-            logger.print(f"Base branch: {base_branch}")
-            logger.print(f"PR strategy: {pr_strategy}")
-            logger.print("\n[bold]What will happen:[/bold]")
-            logger.print("  • A new branch will be created with your fixes")
-            logger.print("  • A pull request will be opened against the base branch")
-            logger.print("  • You'll need to review and merge the PR manually")
-            
-            if no_confirm:
-                logger.print_success("PR creation confirmed (--no-confirm flag used)")
-            elif not click.confirm("\n[bold]Do you want to proceed with PR creation?[/bold]"):
-                logger.print("[dim]PR creation cancelled by user[/dim]")
+            if not confirmation_manager.confirm_pr_creation(base_branch, pr_strategy, no_confirm):
                 create_pr = False
-                # Update config to disable PR creation
                 config.create_pr = False
-            else:
-                logger.print_success("PR creation confirmed - will create pull request after fixes")
         
         # Load environment variables before testing GitHub access
         if test_github_access or create_pr:
@@ -768,100 +932,50 @@ def test_all(
         if test_github_access or create_pr:
             logger.print_progress("Testing GitHub access...")
             
-            # Check if GITHUB_TOKEN is available
-            import os
-            github_token = os.environ.get('GITHUB_TOKEN')
-            if not github_token:
-                logger.print_error("GITHUB_TOKEN not found in environment variables")
-                logger.print("\n[bold]Possible solutions:[/bold]")
-                logger.print("1. Create a .env file in your project root with:")
-                logger.print("   GITHUB_TOKEN=your_github_token_here")
-                logger.print("2. Set the environment variable directly:")
-                logger.print("   export GITHUB_TOKEN=your_github_token_here")
-                logger.print("3. Check if your .env file is in the correct location")
-                logger.print("4. Restart your terminal after creating/modifying .env files")
-                logger.print("\n[bold]For more help, run:[/bold]")
-                logger.print("   kaizen setup check-env --features github")
-                if create_pr:
-                    logger.print("\n[bold yellow]Warning: PR creation will fail without GITHUB_TOKEN[/bold yellow]")
-                    if not no_confirm and not click.confirm("Continue with test execution?"):
-                        return
-                else:
-                    return
+            # Check GitHub token availability
+            if not confirmation_manager.check_github_token(create_pr, no_confirm):
+                return
             
-            # Show token status (without exposing the actual token)
-            token_preview = github_token[:8] + "..." if len(github_token) > 8 else "***"
-            logger.info(f"GitHub token found: {token_preview}")
-            
-            try:
-                from kaizen.autofix.pr.manager import PRManager
-                pr_manager = PRManager(config.__dict__)
-                access_result = pr_manager.test_github_access()
-                
-                if access_result['overall_status'] == 'full_access':
-                    logger.print_success("GitHub access test passed")
-                elif access_result['overall_status'] == 'limited_branch_access_private':
-                    logger.print("[bold yellow]⚠ GitHub access test: Partial access (Private Repository)[/bold yellow]")
-                    logger.print("Branch-level access is limited, but PR creation may still work.")
-                else:
-                    logger.print_error(f"GitHub access test failed: {access_result['overall_status']}")
-                    
-                    # Display detailed results only in verbose mode
-                    if verbose:
-                        logger.print("\n[bold]Access Test Results:[/bold]")
-                        
-                        # Repository access
-                        repo = access_result['repository']
-                        if repo.get('accessible'):
-                            logger.print(f"  [green]✓ Repository: {repo.get('full_name', 'Unknown')} (Private: {repo.get('private', False)})[/green]")
-                        else:
-                            logger.print(f"  [red]✗ Repository: {repo.get('error', 'Unknown error')}[/red]")
-                        
-                        # Branch access
-                        current_branch = access_result['current_branch']
-                        if current_branch.get('accessible'):
-                            logger.print(f"  [green]✓ Current branch: {current_branch.get('branch_name', 'Unknown')}[/green]")
-                        else:
-                            logger.print(f"  [red]✗ Current branch: {current_branch.get('error', 'Unknown error')}[/red]")
-                        
-                        base_branch = access_result['base_branch']
-                        if base_branch.get('accessible'):
-                            logger.print(f"  [green]✓ Base branch: {base_branch.get('branch_name', 'Unknown')}[/green]")
-                        else:
-                            logger.print(f"  [red]✗ Base branch: {base_branch.get('error', 'Unknown error')}[/red]")
-                        
-                        # PR permissions
-                        pr_perms = access_result['pr_permissions']
-                        if pr_perms.get('can_read'):
-                            logger.print("  [green]✓ PR permissions: Read access confirmed[/green]")
-                        else:
-                            logger.print(f"  [red]✗ PR permissions: {pr_perms.get('error', 'Unknown error')}[/red]")
-                        
-                        # Display recommendations
-                        logger.print("\n[bold]Recommendations:[/bold]")
-                        for rec in access_result.get('recommendations', []):
-                            logger.print(f"  • {rec}")
-                    
-                    if create_pr:
-                        if access_result['overall_status'] == 'limited_branch_access_private':
-                            logger.print("\n[bold yellow]Note: Limited branch access detected for private repository. PR creation will be attempted but may fail.[/bold yellow]")
-                            if not no_confirm and not click.confirm("Continue with test execution?"):
-                                return
-                        else:
-                            logger.print("\n[bold yellow]Warning: PR creation may fail due to access issues.[/bold yellow]")
-                            if not no_confirm and not click.confirm("Continue with test execution?"):
-                                return
-                            
-            except Exception as e:
-                logger.print_error(f"GitHub access test failed: {str(e)}")
-                if create_pr:
-                    logger.print("[bold yellow]Warning: PR creation may fail due to access issues.[/bold yellow]")
-                    if not no_confirm and not click.confirm("Continue with test execution?"):
-                        return
+            # Test GitHub access
+            if not confirmation_manager.test_github_access(config, create_pr, no_confirm, verbose):
+                return
         
-        # Execute tests
+        # Initialize memory system for execution tracking
+        from datetime import datetime
+        execution_id = f"kaizen_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        memory = ExecutionMemory()
+        memory.start_execution(execution_id, config, config_manager)
+        
+        # Save original code before any modifications
+        if hasattr(config, 'files_to_fix') and config.files_to_fix:
+            from .utils.code_extractor import extract_relevant_functions
+            for file_path in config.files_to_fix:
+                try:
+                    with open(file_path, 'r') as f:
+                        original_content = f.read()
+                    
+                    # Create agent config from the test configuration
+                    agent_config = None
+                    if hasattr(config, 'agent') and config.agent:
+                        agent_config = {
+                            'agent': {
+                                'module': config.agent.module,
+                                'class': config.agent.class_name,
+                                'method': config.agent.method,
+                                'fallback_to_function': config.agent.fallback_to_function
+                            }
+                        }
+                    
+                    # Extract relevant functions using the enhanced code extractor
+                    relevant_sections = extract_relevant_functions(original_content, file_path, agent_config)
+                    memory.save_original_relevant_code(file_path, relevant_sections)
+                    logger.info(f"Saved original code sections for {file_path}: {list(relevant_sections.keys())}")
+                except Exception as e:
+                    logger.warning(f"Could not save original code for {file_path}: {str(e)}")
+        
+        # Execute tests with memory tracking
         logger.print_progress("Running tests...")
-        command = TestAllCommand(config, logger.logger if verbose else logger, verbose=verbose)
+        command = TestAllCommand(config, logger.logger if verbose else logger, verbose=verbose, memory=memory, config_manager=config_manager)
         test_result = command.execute()
         
         if not test_result.is_success:
@@ -888,31 +1002,8 @@ def test_all(
             
             # If auto-fix is enabled and tests failed, ask for confirmation before proceeding
             if auto_fix and config.auto_fix:
-                logger.print("\n[bold yellow]⚠ Auto-fix Confirmation[/bold yellow]")
-                logger.print("Tests have failed. Auto-fix will now attempt to fix the failing tests.")
-                logger.print("This will modify your code files and may introduce changes.")
-                
-                # Show a brief summary of what failed (if available)
-                try:
-                    if test_result_value.unified_result:
-                        failed_tests = [tc for tc in test_result_value.unified_result.test_cases if tc.status.value in ['failed', 'error']]
-                        if failed_tests:
-                            logger.print(f"\n[bold]Failed test cases ({len(failed_tests)}):[/bold]")
-                            for tc in failed_tests[:3]:  # Show first 3 failed tests
-                                logger.print(f"  • {tc.name}")
-                            if len(failed_tests) > 3:
-                                logger.print(f"  • ... and {len(failed_tests) - 3} more")
-                except Exception as e:
-                    logger.print(f"[dim]Could not display failed test summary: {str(e)}[/dim]")
-                
-                if no_confirm:
-                    logger.print_success("Auto-fix confirmed (--no-confirm flag used)")
-                elif not click.confirm("\n[bold]Do you want to proceed with auto-fix?[/bold]"):
-                    logger.print("[dim]Auto-fix cancelled by user after seeing test results[/dim]")
-                    # Update config to disable auto-fix
+                if not confirmation_manager.confirm_auto_fix_after_failure(test_result_value, no_confirm):
                     config.auto_fix = False
-                else:
-                    logger.print_success("Proceeding with auto-fix to resolve failing tests")
         
         # Save detailed logs if requested
         if save_logs:
@@ -932,39 +1023,10 @@ def test_all(
         if (auto_fix and config.auto_fix and create_pr and config.create_pr and 
             test_result_value.test_attempts and len(test_result_value.test_attempts) > 0):
             
-            logger.print("\n[bold yellow]⚠ Pull Request Creation Confirmation[/bold yellow]")
-            logger.print("Auto-fix has been completed. A pull request will now be created with the fixes.")
-            logger.print(f"Base branch: {base_branch}")
-            logger.print(f"PR strategy: {pr_strategy}")
-            
-            # Show auto-fix summary
-            if test_result_value.test_attempts:
-                logger.print(f"\n[bold]Auto-fix summary:[/bold]")
-                logger.print(f"  • Attempts made: {len(test_result_value.test_attempts)}")
-                
-                # Count successful fixes
-                successful_fixes = sum(1 for attempt in test_result_value.test_attempts 
-                                     if attempt.get('status') == 'success')
-                logger.print(f"  • Successful fixes: {successful_fixes}")
-                
-                # Show what was fixed
-                try:
-                    if test_result_value.unified_result:
-                        fixed_tests = [tc for tc in test_result_value.unified_result.test_cases 
-                                     if tc.status.value == 'passed']
-                        if fixed_tests:
-                            logger.print(f"  • Tests now passing: {len(fixed_tests)}")
-                except Exception as e:
-                    logger.print(f"[dim]Could not display fixed test summary: {str(e)}[/dim]")
-            
-            if no_confirm:
-                logger.print_success("PR creation confirmed (--no-confirm flag used)")
-            elif not click.confirm("\n[bold]Do you want to create a pull request with these fixes?[/bold]"):
-                logger.print("[dim]PR creation cancelled by user after auto-fix[/dim]")
-                # Update config to disable PR creation
+            if not confirmation_manager.confirm_pr_creation_after_auto_fix(test_result_value, base_branch, pr_strategy, no_confirm):
                 config.create_pr = False
-            else:
-                logger.print_success("Proceeding with pull request creation")
         
     except Exception as e:
         _handle_error(e, "Unexpected error", logger)
+
+

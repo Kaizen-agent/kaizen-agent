@@ -19,6 +19,7 @@ from .errors import TestExecutionError, AutoFixError, DependencyError
 from .types import TestStatus as LegacyTestStatus, PRStrategy
 from .dependency_manager import DependencyManager, ImportResult
 from kaizen.cli.utils.env_setup import check_environment_setup, get_missing_variables
+from .memory import ExecutionMemory, LLMInteraction
 
 @runtime_checkable
 class TestCommand(Protocol):
@@ -55,17 +56,21 @@ class BaseTestCommand(ABC):
 class TestAllCommand(BaseTestCommand):
     """Command to run all tests."""
     
-    def __init__(self, config: TestConfiguration, logger, verbose: bool = False):
+    def __init__(self, config: TestConfiguration, logger, verbose: bool = False, memory: ExecutionMemory = None, config_manager=None):
         """Initialize test all command.
         
         Args:
             config: Test configuration
             logger: Logger instance (can be CleanLogger or logging.Logger)
             verbose: Whether to show detailed debug information
+            memory: ExecutionMemory instance for tracking execution context
+            config_manager: ConfigurationManager instance (optional)
         """
         super().__init__(logger)
         self.config = config
         self.verbose = verbose
+        self.memory = memory
+        self.config_manager = config_manager
         self.dependency_manager = DependencyManager()
         # Store the original logger for clean output methods
         self.clean_logger = logger if hasattr(logger, 'print_progress') else None
@@ -83,6 +88,10 @@ class TestAllCommand(BaseTestCommand):
                     self.logger.info(f"Description: {self.config.description}")
             else:
                 self.logger.info(f"Running test: {self.config.name}")
+            
+            # Store configuration manager information in memory if available
+            if self.memory and self.config_manager:
+                self._store_config_manager_in_memory()
             
             # Validate environment before proceeding
             self._validate_environment()
@@ -113,13 +122,32 @@ class TestAllCommand(BaseTestCommand):
             
             self.logger.info("Test execution completed")
             
+            # Log test execution to memory if available
+            if self.memory:
+                test_metadata = {
+                    'start_time': datetime.now(),
+                    'config': self.config.__dict__,
+                    'environment': 'test environment details'
+                }
+                
+                # Convert test execution result to comprehensive memory format
+                test_results_for_memory = self._convert_test_execution_result_to_memory_format(test_execution_result)
+                
+                self.memory.log_test_run(
+                    file_path=str(self.config.file_path),
+                    test_results=test_results_for_memory,
+                    run_metadata=test_metadata
+                )
+            
             # Handle auto-fix if enabled and tests failed
             test_attempts = None
             best_test_execution_result = test_execution_result  # Track best result after auto-fix
             if self.config.auto_fix and not test_execution_result.is_successful():
                 failed_count = test_execution_result.get_failure_count()
                 self.logger.info(f"Auto-fix enabled: attempting to fix {failed_count} failed tests (max retries: {self.config.max_retries})")
-                fix_results = self._handle_auto_fix(test_execution_result, self.config, runner_config)
+                
+                # Handle auto-fix with optional memory enhancement
+                fix_results = self._handle_auto_fix_implementation(test_execution_result, self.config, runner_config)
                 
                 if fix_results and fix_results.get('attempts'):
                     test_attempts = fix_results['attempts']
@@ -250,6 +278,7 @@ class TestAllCommand(BaseTestCommand):
             'metadata': self.config.metadata.__dict__ if self.config.metadata else None,
             'language': self.config.language.value,
             'framework': self.config.framework.value,
+            'lifecycle': self.config.lifecycle,
         }
         
         if self.verbose:
@@ -335,8 +364,11 @@ class TestAllCommand(BaseTestCommand):
         
         return config
     
-    def _handle_auto_fix(self, test_execution_result: TestExecutionResult, config: TestConfiguration, runner_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Handle auto-fix for failed tests.
+
+    
+
+    def _handle_auto_fix_implementation(self, test_execution_result: TestExecutionResult, config: TestConfiguration, runner_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Handle auto-fix implementation with memory-based learning when available.
         
         Args:
             test_execution_result: Unified test execution result
@@ -344,7 +376,7 @@ class TestAllCommand(BaseTestCommand):
             runner_config: Runner configuration
             
         Returns:
-            Dictionary containing fix results including attempts and best test execution result, or None if no fixes were attempted
+            Dictionary containing fix results including attempts and best test execution result
             
         Raises:
             AutoFixError: If auto-fix process fails
@@ -353,24 +385,287 @@ class TestAllCommand(BaseTestCommand):
             self.logger.info(f"Attempting to fix {test_execution_result.get_failure_count()} failing tests (max retries: {self.config.max_retries})")
         
         try:
-            # Create AutoFix instance and run fixes
-            from ...autofix.main import AutoFix
-            fixer = AutoFix(self.config, runner_config)
             files_to_fix = self.config.files_to_fix
+            if not files_to_fix:
+                raise AutoFixError("No files to fix were provided")
+            
             if self.verbose:
                 self.logger.info(f"Files to fix: {files_to_fix}")
-            if files_to_fix:
-                fix_results = fixer.fix_code(
-                    file_path=str(self.config.file_path),
-                    test_execution_result=test_execution_result,  # Pass unified result directly
-                    config=config,
-                    files_to_fix=files_to_fix,
-                )
-            else:
-                raise AutoFixError("No files to fix were provided")
+            
+            # Create AutoFix instance with memory when available
+            from ...autofix.main import AutoFix
+            fixer = AutoFix(self.config, runner_config, memory=self.memory)
+            
+            if self.verbose:
+                if self.memory:
+                    self.logger.info("Using AutoFix with memory-enhanced learning")
+                else:
+                    self.logger.info("Using AutoFix with standard learning")
+            
+            # Run fixes using AutoFix (which now handles memory internally)
+            fix_results = fixer.fix_code(
+                file_path=str(self.config.file_path),
+                test_execution_result=test_execution_result,
+                config=config,
+                files_to_fix=self.config.files_to_fix,
+            )
             
             return fix_results
             
         except Exception as e:
             self.logger.error(f"Error during auto-fix process: {str(e)}")
-            raise AutoFixError(f"Failed to auto-fix tests: {str(e)}") 
+            raise AutoFixError(f"Failed to auto-fix tests: {str(e)}")
+    
+    def _store_config_manager_in_memory(self):
+        """Store configuration manager information in memory for analysis."""
+        try:
+            # Get the current execution from memory
+            if not self.memory.current_execution:
+                self.logger.warning("No current execution in memory to store config manager info")
+                return
+            
+            # Extract configuration manager information
+            config_manager_info = {
+                'config_manager_type': type(self.config_manager).__name__,
+                'config_validation_status': 'validated',  # Assuming it passed validation to get here
+                'config_loading_method': 'ConfigurationManager.load_configuration',
+                'config_environment': {
+                    'auto_fix': self.config.auto_fix,
+                    'create_pr': self.config.create_pr,
+                    'max_retries': self.config.max_retries,
+                    'better_ai': getattr(self.config, 'better_ai', False),
+                    'language': getattr(getattr(self.config, 'language', None), 'value', None),
+                    'pr_strategy': getattr(self.config, 'pr_strategy', None),
+                    'base_branch': getattr(self.config, 'base_branch', 'main')
+                },
+                'config_metadata': {
+                    'config_name': getattr(self.config, 'name', None),
+                    'config_file_path': getattr(self.config, 'config_path', None),
+                    'files_to_fix': getattr(self.config, 'files_to_fix', []),
+                    'dependencies': getattr(self.config, 'dependencies', []),
+                    'referenced_files': getattr(self.config, 'referenced_files', []),
+                    'agent_type': getattr(self.config, 'agent_type', None),
+                    'description': getattr(self.config, 'description', None)
+                }
+            }
+            
+            # Store in memory's current execution
+            self.memory.current_execution['config_manager_info'] = config_manager_info
+            
+            # Update the configuration context with additional config manager details
+            if 'configuration_context' in self.memory.current_execution:
+                self.memory.current_execution['configuration_context']['config_manager_details'] = {
+                    'manager_type': config_manager_info['config_manager_type'],
+                    'validation_status': config_manager_info['config_validation_status'],
+                    'loading_method': config_manager_info['config_loading_method']
+                }
+            
+            self.logger.info(f"Stored configuration manager information in memory: {config_manager_info['config_manager_type']}")
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to store configuration manager information in memory: {str(e)}")
+    
+    def _convert_test_execution_result_to_memory_format(self, test_execution_result: TestExecutionResult) -> Dict[str, Any]:
+        """Convert TestExecutionResult to comprehensive memory format capturing all valuable information.
+        
+        Args:
+            test_execution_result: The unified test execution result
+            
+        Returns:
+            Dictionary containing all test execution data in memory format
+        """
+        try:
+            # Convert individual test cases with full details
+            test_cases_for_memory = []
+            for test_case in test_execution_result.test_cases:
+                test_case_data = {
+                    'name': test_case.name,
+                    'status': test_case.status.value if hasattr(test_case.status, 'value') else str(test_case.status),
+                    'input': test_case.input,
+                    'expected_output': test_case.expected_output,
+                    'actual_output': test_case.actual_output,
+                    'error_message': test_case.error_message,
+                    'error_details': test_case.error_details,
+                    'evaluation': test_case.evaluation,
+                    'evaluation_score': test_case.evaluation_score,
+                    'execution_time': test_case.execution_time,
+                    'timestamp': test_case.timestamp.isoformat() if test_case.timestamp else None,
+                    'metadata': test_case.metadata,
+                    'is_failed': test_case.is_failed() if hasattr(test_case, 'is_failed') else test_case.status in ['failed', 'error'],
+                    'is_passed': test_case.is_passed() if hasattr(test_case, 'is_passed') else test_case.status == 'passed',
+                    'error_summary': test_case.get_error_summary() if hasattr(test_case, 'get_error_summary') else test_case.error_message
+                }
+                test_cases_for_memory.append(test_case_data)
+            
+            # Convert summary with detailed statistics
+            summary_data = {
+                'total_tests': test_execution_result.summary.total_tests,
+                'passed_tests': test_execution_result.summary.passed_tests,
+                'failed_tests': test_execution_result.summary.failed_tests,
+                'error_tests': test_execution_result.summary.error_tests,
+                'skipped_tests': test_execution_result.summary.skipped_tests,
+                'success_rate': test_execution_result.summary.get_success_rate() if hasattr(test_execution_result.summary, 'get_success_rate') else 0.0,
+                'is_successful': test_execution_result.summary.is_successful(),
+                'start_time': test_execution_result.summary.start_time.isoformat() if test_execution_result.summary.start_time else None,
+                'end_time': test_execution_result.summary.end_time.isoformat() if test_execution_result.summary.end_time else None,
+                'total_execution_time': test_execution_result.summary.total_execution_time
+            }
+            
+            # Convert overall result information
+            result_data = {
+                'name': test_execution_result.name,
+                'file_path': str(test_execution_result.file_path),
+                'config_path': str(test_execution_result.config_path),
+                'status': test_execution_result.status.value if hasattr(test_execution_result.status, 'value') else str(test_execution_result.status),
+                'error_message': test_execution_result.error_message,
+                'error_details': test_execution_result.error_details,
+                'start_time': test_execution_result.start_time.isoformat() if test_execution_result.start_time else None,
+                'end_time': test_execution_result.end_time.isoformat() if test_execution_result.end_time else None,
+                'metadata': test_execution_result.metadata,
+                'is_successful': test_execution_result.is_successful(),
+                'get_failure_count': test_execution_result.get_failure_count(),
+                'get_failed_tests_count': len(test_execution_result.get_failed_tests()) if hasattr(test_execution_result, 'get_failed_tests') else 0,
+                'get_passed_tests_count': len(test_execution_result.get_passed_tests()) if hasattr(test_execution_result, 'get_passed_tests') else 0
+            }
+            
+            # Legacy compatibility methods (if available)
+            legacy_inputs = []
+            legacy_outputs = []
+            llm_logs = {}
+            
+            if hasattr(test_execution_result, 'get_test_inputs'):
+                try:
+                    legacy_inputs = test_execution_result.get_test_inputs()
+                except Exception as e:
+                    self.logger.debug(f"Could not get test inputs: {e}")
+            
+            if hasattr(test_execution_result, 'get_test_outputs'):
+                try:
+                    legacy_outputs = test_execution_result.get_test_outputs()
+                except Exception as e:
+                    self.logger.debug(f"Could not get test outputs: {e}")
+            
+            if hasattr(test_execution_result, 'get_llm_logs'):
+                try:
+                    llm_logs = test_execution_result.get_llm_logs()
+                except Exception as e:
+                    self.logger.debug(f"Could not get LLM logs: {e}")
+            
+            if hasattr(test_execution_result, 'get_evaluation_results'):
+                try:
+                    evaluation_results = test_execution_result.get_evaluation_results()
+                except Exception as e:
+                    self.logger.debug(f"Could not get evaluation results: {e}")
+                    evaluation_results = None
+            else:
+                evaluation_results = None
+            
+            # Build comprehensive memory format
+            memory_format = {
+                # Individual test cases with full details
+                'test_cases': test_cases_for_memory,
+                
+                # Summary statistics
+                'summary': summary_data,
+                
+                # Overall result information
+                'result': result_data,
+                
+                # Legacy compatibility
+                'inputs': legacy_inputs,
+                'outputs': legacy_outputs,
+                'llm_logs': llm_logs,
+                'evaluation_results': evaluation_results,
+                
+                # Attempt tracking
+                'code_fix_attempt': None,  # Will be populated during auto-fix
+                'attempt_outcome': {
+                    'success': test_execution_result.is_successful(),
+                    'total_tests': test_execution_result.summary.total_tests,
+                    'passed_tests': test_execution_result.summary.passed_tests,
+                    'failed_tests': test_execution_result.summary.failed_tests,
+                    'error_tests': test_execution_result.summary.error_tests,
+                    'skipped_tests': test_execution_result.summary.skipped_tests,
+                    'success_rate': summary_data['success_rate'],
+                    'failure_count': test_execution_result.get_failure_count()
+                },
+                
+                # Additional analysis data
+                'failed_test_cases': [
+                    tc for tc in test_cases_for_memory 
+                    if tc['is_failed']
+                ],
+                'passed_test_cases': [
+                    tc for tc in test_cases_for_memory 
+                    if tc['is_passed']
+                ],
+                'error_test_cases': [
+                    tc for tc in test_cases_for_memory 
+                    if tc['status'] in ['error', 'failed']
+                ],
+                
+                # Timing analysis
+                'timing_analysis': {
+                    'total_execution_time': summary_data['total_execution_time'],
+                    'average_test_time': (
+                        summary_data['total_execution_time'] / summary_data['total_tests']
+                        if summary_data['total_tests'] > 0 and summary_data['total_execution_time']
+                        else None
+                    ),
+                    'start_time': summary_data['start_time'],
+                    'end_time': summary_data['end_time']
+                },
+                
+                # Error analysis
+                'error_analysis': {
+                    'total_errors': len([tc for tc in test_cases_for_memory if tc['error_message']]),
+                    'unique_error_types': list(set([
+                        tc['error_message'] for tc in test_cases_for_memory 
+                        if tc['error_message']
+                    ])),
+                    'most_common_error': self._get_most_common_error(test_cases_for_memory)
+                }
+            }
+            
+            if self.verbose:
+                self.logger.debug(f"Converted TestExecutionResult to memory format with {len(test_cases_for_memory)} test cases")
+            
+            return memory_format
+            
+        except Exception as e:
+            self.logger.error(f"Error converting TestExecutionResult to memory format: {str(e)}")
+            # Fallback to basic format
+            return {
+                'inputs': [],
+                'outputs': [],
+                'llm_logs': {},
+                'code_fix_attempt': None,
+                'attempt_outcome': {
+                    'success': test_execution_result.is_successful() if hasattr(test_execution_result, 'is_successful') else False,
+                    'total_tests': getattr(test_execution_result.summary, 'total_tests', 0),
+                    'passed_tests': getattr(test_execution_result.summary, 'passed_tests', 0),
+                    'failed_tests': getattr(test_execution_result.summary, 'failed_tests', 0)
+                },
+                'evaluation_results': None,
+                'error': f"Failed to convert test execution result: {str(e)}"
+            }
+    
+    def _get_most_common_error(self, test_cases: List[Dict]) -> Optional[str]:
+        """Get the most common error message from test cases.
+        
+        Args:
+            test_cases: List of test case dictionaries
+            
+        Returns:
+            Most common error message or None if no errors
+        """
+        error_counts = {}
+        for test_case in test_cases:
+            if test_case.get('error_message'):
+                error_msg = test_case['error_message']
+                error_counts[error_msg] = error_counts.get(error_msg, 0) + 1
+        
+        if not error_counts:
+            return None
+        
+        return max(error_counts.items(), key=lambda x: x[1])[0] 

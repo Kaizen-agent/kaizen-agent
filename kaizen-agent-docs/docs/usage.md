@@ -26,6 +26,9 @@ agent:
   class: TextAnalyzer
   method: analyze_text
 
+lifecycle:
+  between_runs: "python scripts/reset_analysis_state.py --clean"
+
 evaluation:
   evaluation_targets:
     - name: sentiment_score
@@ -199,6 +202,81 @@ evaluation:
 - **`files_to_fix`**: Files that Kaizen can modify to fix issues
 - **`referenced_files`**: Additional files for context (not modified)
 
+### Lifecycle Commands
+
+Lifecycle commands allow you to execute scripts at specific points during test execution to maintain consistent test environments and ensure proper cleanup between test runs.
+
+#### Configuration
+
+```yaml
+lifecycle:
+  between_runs: "python scripts/reset_database.py --clean --force"
+```
+
+#### Supported Lifecycle Hooks
+
+**`between_runs`**: Executed at the beginning of each test case, before any test logic begins.
+
+**Use Cases:**
+- Reset system state between tests
+- Clean up temporary files
+- Restart services
+- Clear caches
+- Reset databases
+- Clear test data
+
+#### Example Lifecycle Script
+
+```python
+#!/usr/bin/env python3
+import argparse
+import sys
+import logging
+
+def reset_database(clean: bool = False, force: bool = False):
+    """Reset the database to a clean state."""
+    logging.info("Starting database reset...")
+    
+    if clean:
+        logging.info("Performing clean database reset")
+        # Drop all tables, recreate schema, insert initial data
+    else:
+        logging.info("Performing standard database reset")
+        # Truncate tables, reset sequences
+    
+    logging.info("Database reset completed successfully")
+    return True
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--clean", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    args = parser.parse_args()
+    
+    success = reset_database(clean=args.clean, force=args.force)
+    sys.exit(0 if success else 1)
+```
+
+#### Best Practices
+
+1. **Keep commands fast** - Avoid slow operations that could delay test execution
+2. **Use absolute paths** - When possible, use absolute paths to avoid path resolution issues
+3. **Handle errors gracefully** - Commands should return appropriate exit codes
+4. **Use flags for automation** - Include flags like `-y` or `--force` to avoid interactive prompts
+5. **Test commands independently** - Verify that lifecycle commands work when run manually
+
+#### Advanced Configuration
+
+You can use complex commands with multiple operations:
+
+```yaml
+lifecycle:
+  between_runs: |
+    python scripts/reset_database.py --clean --force &&
+    python scripts/clear_cache.py &&
+    python scripts/restart_services.py
+```
+
 ### Test Steps
 
 Each step defines a test case with:
@@ -287,6 +365,21 @@ kaizen test-github-access --repo owner/repo-name
 kaizen diagnose-github-access --repo owner/repo-name
 ```
 
+### Test Generation Commands
+
+```bash
+# Generate additional test cases to reach a total of 10
+kaizen augment test.yaml --total 10
+
+# Use enhanced AI model for better generation
+kaizen augment test.yaml --total 15 --better-ai
+
+# Show detailed debug information
+kaizen augment test.yaml --total 12 --verbose
+```
+
+For detailed information about test generation, see our [Test Generation Guide](./test-generation.md).
+
 ### Command Options
 
 | Option | Description | Example |
@@ -296,6 +389,8 @@ kaizen diagnose-github-access --repo owner/repo-name
 | `--create-pr` | Create a pull request with fixes (requires GitHub setup) | `--create-pr` |
 | `--save-logs` | Save detailed execution logs to `test-logs/` directory | `--save-logs` |
 | `--repo` | GitHub repository for PR creation (format: owner/repo-name) | `--repo myuser/myproject` |
+| `--total` | Total number of test cases desired for augmentation | `--total 10` |
+| `--better-ai` | Use enhanced AI model for improved test generation | `--better-ai` |
 
 ## Simple Configuration Template
 
@@ -310,6 +405,10 @@ agent:
   module: my_agent
   class: MyAgent
   method: process
+
+# Optional: Lifecycle commands for test environment management
+lifecycle:
+  between_runs: "python scripts/reset_state.py"
 
 evaluation:
   evaluation_targets:

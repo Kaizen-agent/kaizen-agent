@@ -9,6 +9,7 @@ const sidebars: SidebarsConfig = {
     'quickstart',
     'quickstart_llamaindex',
     'usage',
+    'test-generation',
     'github',
     'examples',
     'faq',

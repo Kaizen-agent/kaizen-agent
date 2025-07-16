@@ -1,5 +1,5 @@
 """Utility functions for CLI commands."""
 
-from .log_analyzer import LogAnalyzer
+from .code_extractor import extract_relevant_functions, create_surgical_context
 
-__all__ = ["LogAnalyzer"] 
+__all__ = ["extract_relevant_functions", "create_surgical_context"] 
