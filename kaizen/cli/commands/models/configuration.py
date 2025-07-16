@@ -54,6 +54,7 @@ class TestConfiguration:
         language: Test language
         framework: Agent framework (e.g., LlamaIndex, LangChain)
         better_ai: Whether to use enhanced AI model for improved code fixing and analysis
+        lifecycle: Lifecycle command configuration for test execution hooks
     """
     # Required fields
     name: str
@@ -80,6 +81,7 @@ class TestConfiguration:
     language: Language = DEFAULT_LANGUAGE
     framework: Framework = DEFAULT_FRAMEWORK
     better_ai: bool = False
+    lifecycle: Dict[str, str] = field(default_factory=dict)
 
     def with_cli_overrides(
         self,
@@ -237,5 +239,6 @@ class TestConfiguration:
             files_to_fix=data.get('files_to_fix', []),
             language=language,
             framework=framework,
-            better_ai=data.get('better_ai', False)
+            better_ai=data.get('better_ai', False),
+            lifecycle=data.get('lifecycle', {})
         ) 

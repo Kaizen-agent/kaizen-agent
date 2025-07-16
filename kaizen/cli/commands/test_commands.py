@@ -278,6 +278,7 @@ class TestAllCommand(BaseTestCommand):
             'metadata': self.config.metadata.__dict__ if self.config.metadata else None,
             'language': self.config.language.value,
             'framework': self.config.framework.value,
+            'lifecycle': self.config.lifecycle,
         }
         
         if self.verbose:
