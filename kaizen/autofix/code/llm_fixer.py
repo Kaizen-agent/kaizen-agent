@@ -189,8 +189,9 @@ class PromptBuilder:
     """Handles prompt construction for LLM interactions."""
     
     @staticmethod
-    def build_fix_prompt(content: str, file_path: str, failure_data: Optional[Dict],
-                        config: Optional['TestConfiguration'], context_files: Optional[Dict[str, str]]) -> str:
+    def build_fix_prompt(content: str, file_path: str, learning_context: Optional[Dict] = None,
+                        targeting_context: Optional[Dict] = None, config: Optional['TestConfiguration'] = None, 
+                        context_files: Optional[Dict[str, str]] = None) -> str:
         """Build prompt for code fixing in AI agent development context."""
         
         # Detect language from config
@@ -206,12 +207,56 @@ class PromptBuilder:
             # Fallback to metadata.language
             elif hasattr(config, 'metadata') and config.metadata and isinstance(config.metadata, dict):
                 language = config.metadata.get("language")
+        
+        # If no language from config, try to detect from file extension
+        if not language and file_path:
+            if file_path.endswith('.ts') or file_path.endswith('.tsx'):
+                language = 'typescript'
+            elif file_path.endswith('.js') or file_path.endswith('.jsx'):
+                language = 'javascript'
+            elif file_path.endswith('.py'):
+                language = 'python'
+            elif file_path.endswith('.java'):
+                language = 'java'
+            elif file_path.endswith('.cpp') or file_path.endswith('.cc') or file_path.endswith('.cxx'):
+                language = 'cpp'
+            elif file_path.endswith('.c'):
+                language = 'c'
+            elif file_path.endswith('.cs'):
+                language = 'csharp'
+            elif file_path.endswith('.go'):
+                language = 'go'
+            elif file_path.endswith('.rs'):
+                language = 'rust'
+            elif file_path.endswith('.php'):
+                language = 'php'
+            elif file_path.endswith('.rb'):
+                language = 'ruby'
+            elif file_path.endswith('.swift'):
+                language = 'swift'
+            elif file_path.endswith('.kt'):
+                language = 'kotlin'
+            elif file_path.endswith('.scala'):
+                language = 'scala'
+            else:
+                # Default to python if we can't determine
+                language = 'python'
+        
+        # Final fallback
         if not language:
-            raise ValueError("No language specified in config for fix prompt. Please set the 'language' field.")
+            language = 'python'  # Default fallback
         
         # Customize prompt based on language
         if language.lower() == "typescript":
-            base_prompt = """You are an expert code fixer focused on targeted improvements. Your task is to fix the code following these principles:
+            base_prompt = """You are an expert code fixer focused on SURGICAL, TARGETED improvements. Your task is to fix the code following these principles:
+
+🔴 CRITICAL: SURGICAL TARGETING REQUIREMENTS
+- ONLY fix code in the specific sections identified in the targeting context
+- DO NOT modify any code outside the specified relevant sections
+- DO NOT add new functions or classes unless they are directly related to fixing the target agent class
+- DO NOT modify imports unless they are directly related to the failing functions
+- Focus ONLY on the specific agent class, methods used in that class, or imports needed by that class
+- If no specific sections are identified, make minimal changes only to fix the exact error
 
 1. Code Structure Preservation:
    - DO NOT change the overall function or class structure
@@ -409,7 +454,15 @@ Format your response as:
 ```"""
         else:
             # Default Python prompt
-            base_prompt = """You are an expert code fixer focused on targeted improvements. Your task is to fix the code following these principles:
+            base_prompt = """You are an expert code fixer focused on SURGICAL, TARGETED improvements. Your task is to fix the code following these principles:
+
+🔴 CRITICAL: SURGICAL TARGETING REQUIREMENTS
+- ONLY fix code in the specific sections identified in the targeting context
+- DO NOT modify any code outside the specified relevant sections
+- DO NOT add new functions or classes unless they are directly related to fixing the target agent class
+- DO NOT modify imports unless they are directly related to the failing functions
+- Focus ONLY on the specific agent class, methods used in that class, or imports needed by that class
+- If no specific sections are identified, make minimal changes only to fix the exact error
 
 1. Code Structure Preservation:
    - DO NOT change the overall function or class structure
@@ -608,82 +661,236 @@ Format your response as:
         
         prompt_parts = [base_prompt, f"\nFile: {file_path}", f"Content:\n{content}"]
         
-        # Handle enhanced failure data with learning context
-        if failure_data:
-            if isinstance(failure_data, dict) and 'learning_context' in failure_data:
-                # Enhanced failure data with learning
-                original_failures = failure_data.get('original_failures', {})
-                learning_context = failure_data.get('learning_context', {})
-                previous_analysis = failure_data.get('previous_attempt_analysis', {})
+        # Handle learning context from previous attempts
+        if learning_context:
+            # Calculate current attempt and total attempts from previous attempts history
+            previous_attempts_history = learning_context.get('previous_attempts_history', [])
+            current_attempt = len(previous_attempts_history) + 1
+            total_attempts = len(previous_attempts_history)
+            
+            learning_guidance = f"\nLEARNING FROM PREVIOUS ATTEMPTS (Attempt {current_attempt} of {total_attempts}):"
+            
+            # Add failed cases from current run
+            failed_cases_current = learning_context.get('failed_cases_current', [])
+            if failed_cases_current:
+                learning_guidance += f"\n- Current failed test cases: {len(failed_cases_current)} cases"
+                # Add first few failed cases for context
+                for i, case in enumerate(failed_cases_current[:3]):  # Limit to first 3
+                    case_name = case.get('name', f'Case {i+1}')
+                    case_status = case.get('status', 'unknown')
+                    learning_guidance += f"\n  * {case_name}: {case_status}"
+                if len(failed_cases_current) > 3:
+                    learning_guidance += f"\n  * ... and {len(failed_cases_current) - 3} more cases"
+            
+            # Add successful patterns (mapped from successful_patterns_to_build_on)
+            successful_patterns = learning_context.get('successful_patterns_to_build_on', [])
+            if successful_patterns:
+                learning_guidance += f"\n- What worked in previous attempts: {', '.join(successful_patterns)}"
+                learning_guidance += "\n- Focus on similar approaches that were successful"
+            
+            # Add failed approaches (mapped from failed_approaches_to_avoid)
+            failed_approaches = learning_context.get('failed_approaches_to_avoid', [])
+            if failed_approaches:
+                learning_guidance += f"\n- What didn't work: {', '.join(failed_approaches)}"
+                learning_guidance += "\n- Avoid repeating these failed approaches"
+            
+            # Add what not to try again (detailed failure analysis)
+            what_not_to_try_again = learning_context.get('what_not_to_try_again', [])
+            if what_not_to_try_again:
+                learning_guidance += "\n- Detailed failure analysis:"
+                for failure in what_not_to_try_again[:3]:  # Limit to first 3
+                    failed_approach = failure.get('failed_approach', 'Unknown approach')
+                    why_failed = failure.get('why_failed', 'Unknown reason')
+                    lesson = failure.get('lesson', 'Avoid this approach')
+                    learning_guidance += f"\n  * {failed_approach}: {why_failed} → {lesson}"
+                if len(what_not_to_try_again) > 3:
+                    learning_guidance += f"\n  * ... and {len(what_not_to_try_again) - 3} more detailed failures"
+            
+            # Add LLM reasoning insights (removed - not currently used)
+            
+            # Add digested knowledge summary
+            digested_knowledge = learning_context.get('digested_knowledge_summary', {})
+            if digested_knowledge:
+                learning_guidance += "\n- Key learnings summary:"
+                if isinstance(digested_knowledge, dict):
+                    for key, value in digested_knowledge.items():
+                        if isinstance(value, list) and value:
+                            learning_guidance += f"\n  * {key}: {', '.join(str(v) for v in value[:2])}"  # Limit to first 2
+                        elif value:
+                            learning_guidance += f"\n  * {key}: {value}"
+                else:
+                    learning_guidance += f"\n  * {digested_knowledge}"
+            
+            # Add configuration factors
+            config_factors = learning_context.get('configuration_factors', {})
+            if config_factors:
+                learning_guidance += "\n- Configuration context:"
+                current_config = config_factors.get('current_config', {})
+                if current_config:
+                    learning_guidance += f"\n  * Current config: {current_config}"
+                config_influence = config_factors.get('config_influence_on_attempts', {})
+                if config_influence:
+                    learning_guidance += f"\n  * Config influence: {config_influence}"
+            
+            # Add original code sections for context
+            original_code_sections = learning_context.get('original_code_sections', {})
+            if original_code_sections:
+                learning_guidance += "\n- Original code context available for reference"
+            
+            prompt_parts.append(learning_guidance)
+            
+            # Add strategic guidance for subsequent attempts
+            if current_attempt > 1:
+                strategic_guidance = f"\nSTRATEGIC GUIDANCE FOR ATTEMPT {current_attempt}:"
+                strategic_guidance += "\n- Learn from previous attempts and avoid repeating failed approaches"
+                strategic_guidance += "\n- Focus on patterns that showed improvement"
+                strategic_guidance += "\n- Be more targeted and specific in your fixes"
+                strategic_guidance += "\n- Consider different approaches if previous ones didn't work"
                 
-                # Add original failure information
-                if original_failures:
-                    prompt_parts.append(f"\nOriginal Failure Information:\n{original_failures}")
+                # Add specific guidance based on previous attempts
+                if previous_attempts_history:
+                    last_attempt = previous_attempts_history[-1]
+                    approach_taken = last_attempt.get('approach_taken', '')
+                    why_it_failed = last_attempt.get('why_it_failed', '')
+                    lessons_learned = last_attempt.get('lessons_learned', '')
+                    
+                    if why_it_failed:
+                        strategic_guidance += f"\n- Last attempt failed because: {why_it_failed}"
+                    if lessons_learned:
+                        strategic_guidance += f"\n- Key lesson: {lessons_learned}"
+                    if approach_taken:
+                        strategic_guidance += f"\n- Avoid repeating: {approach_taken}"
                 
-                # Add learning context from previous attempts
-                if learning_context:
-                    current_attempt = learning_context.get('current_attempt', 1)
-                    total_attempts = learning_context.get('total_attempts', 0)
+                prompt_parts.append(strategic_guidance)
+        
+        # Handle targeting context for failure analysis
+        if targeting_context:
+            targeting_guidance = "\nTARGETING CONTEXT FOR FAILURE ANALYSIS:"
+            
+            # Add strict targeting guidance for surgical fixing
+            original_relevant_sections = targeting_context.get('original_relevant_sections', {})
+            if original_relevant_sections:
+                targeting_guidance += "\n\n🔴 CRITICAL: SURGICAL TARGETING REQUIREMENTS"
+                targeting_guidance += "\n- ONLY fix code in the following relevant sections:"
+                for section_name, section_info in original_relevant_sections.items():
+                    if isinstance(section_info, dict):
+                        line_start = section_info.get('line_start', 'unknown')
+                        line_end = section_info.get('line_end', 'unknown')
+                        targeting_guidance += f"\n  * {section_name} (lines {line_start}-{line_end})"
+                    else:
+                        targeting_guidance += f"\n  * {section_name}: {section_info}"
+                targeting_guidance += "\n- DO NOT modify any code outside these sections"
+                targeting_guidance += "\n- DO NOT add new functions or classes unless they are directly related to fixing the target agent class"
+                targeting_guidance += "\n- DO NOT modify imports unless they are directly related to the failing functions"
+                targeting_guidance += "\n- Focus ONLY on the specific agent class, methods used in that class, or imports needed by that class"
+            
+            # Add failing functions (from get_failure_analysis_data)
+            failing_functions = targeting_context.get('failing_functions', [])
+            if failing_functions:
+                targeting_guidance += f"\n- Failing functions to fix: {', '.join(failing_functions)}"
+                targeting_guidance += "\n- Focus your fixes on these specific functions"
+            
+            # Add failing lines (from get_failure_analysis_data)
+            failing_lines = targeting_context.get('failing_lines', [])
+            if failing_lines:
+                targeting_guidance += f"\n- Specific failing line numbers: {', '.join(map(str, sorted(failing_lines)))}"
+                targeting_guidance += "\n- Pay special attention to these exact lines"
+            
+            # Add test names (from get_failure_analysis_data)
+            test_names = targeting_context.get('test_names', [])
+            if test_names:
+                targeting_guidance += f"\n- Failing test names: {', '.join(test_names[:5])}"  # Limit to first 5
+                if len(test_names) > 5:
+                    targeting_guidance += f"\n  * ... and {len(test_names) - 5} more tests"
+                targeting_guidance += "\n- Ensure your fixes make these specific tests pass"
+            
+            # Add error messages (from get_failure_analysis_data)
+            error_messages = targeting_context.get('error_messages', [])
+            if error_messages:
+                targeting_guidance += "\n- Specific error messages to address:"
+                for i, error in enumerate(error_messages[:3]):  # Limit to first 3
+                    targeting_guidance += f"\n  * {error[:100]}{'...' if len(error) > 100 else ''}"
+                if len(error_messages) > 3:
+                    targeting_guidance += f"\n  * ... and {len(error_messages) - 3} more errors"
+                targeting_guidance += "\n- Fix the root causes of these specific errors"
+            
+            # Add error types (from get_failure_analysis_data)
+            error_types = targeting_context.get('error_types', [])
+            if error_types:
+                targeting_guidance += f"\n- Error types to fix: {', '.join(error_types)}"
+                targeting_guidance += "\n- Address these specific error patterns"
+            
+            # Add failed test cases (from get_failure_analysis_data)
+            failed_test_cases = targeting_context.get('failed_test_cases', [])
+            if failed_test_cases:
+                targeting_guidance += f"\n- Failed test cases: {len(failed_test_cases)} cases"
+                # Add all failed test case details
+                for i, case in enumerate(failed_test_cases):
+                    case_name = case.get('test_name', f'Case {i+1}')
+                    case_status = case.get('status', 'unknown')
+                    case_error = case.get('error_message', '')
+                    case_details = case.get('details', {})
                     
-                    learning_guidance = f"\nLEARNING FROM PREVIOUS ATTEMPTS (Attempt {current_attempt} of {total_attempts}):"
+                    # Build comprehensive case information
+                    case_info = f"\n  * {case_name} ({case_status})"
+                    if case_error:
+                        case_info += f"\n    Error: {case_error}"
                     
-                    # Add successful patterns
-                    successful_patterns = learning_context.get('successful_patterns', [])
-                    if successful_patterns:
-                        learning_guidance += f"\n- What worked in previous attempts: {', '.join(successful_patterns)}"
-                        learning_guidance += "\n- Focus on similar approaches that were successful"
+                    # Add additional details if available
+                    if case_details:
+                        if isinstance(case_details, dict):
+                            for key, value in case_details.items():
+                                if value:  # Only include non-empty values
+                                    case_info += f"\n    {key}: {value}"
+                        else:
+                            case_info += f"\n    Details: {case_details}"
                     
-                    # Add failed approaches
-                    failed_approaches = learning_context.get('failed_approaches', [])
-                    if failed_approaches:
-                        learning_guidance += f"\n- What didn't work: {', '.join(failed_approaches)}"
-                        learning_guidance += "\n- Avoid repeating these failed approaches"
+                    # Add any other relevant fields from the case
+                    for key, value in case.items():
+                        if key not in ['test_name', 'status', 'error_message', 'details'] and value:
+                            case_info += f"\n    {key}: {value}"
                     
-                    # Add common errors
-                    common_errors = learning_context.get('common_errors', [])
-                    if common_errors:
-                        learning_guidance += f"\n- Common error patterns: {', '.join(common_errors)}"
-                        learning_guidance += "\n- Pay special attention to these error types"
-                    
-                    # Add improvement insights
-                    improvement_insights = learning_context.get('improvement_insights', [])
-                    if improvement_insights:
-                        learning_guidance += f"\n- Recent improvements: {', '.join(improvement_insights)}"
-                        learning_guidance += "\n- Build on these successful improvements"
-                    
-                    prompt_parts.append(learning_guidance)
-                
-                # Add specific analysis from previous attempts
-                if previous_analysis:
-                    analysis_guidance = "\nPREVIOUS ATTEMPT ANALYSIS:"
-                    
-                    what_worked = previous_analysis.get('what_worked', [])
-                    if what_worked:
-                        analysis_guidance += f"\n- Successful strategies: {', '.join(what_worked)}"
-                    
-                    what_didnt_work = previous_analysis.get('what_didnt_work', [])
-                    if what_didnt_work:
-                        analysis_guidance += f"\n- Failed strategies: {', '.join(what_didnt_work)}"
-                    
-                    recommendations = previous_analysis.get('recommendations', [])
-                    if recommendations:
-                        analysis_guidance += f"\n- Recommendations: {', '.join(recommendations)}"
-                    
-                    prompt_parts.append(analysis_guidance)
-                
-                # Add strategic guidance for subsequent attempts
-                if current_attempt > 1:
-                    strategic_guidance = f"\nSTRATEGIC GUIDANCE FOR ATTEMPT {current_attempt}:"
-                    strategic_guidance += "\n- Learn from previous attempts and avoid repeating failed approaches"
-                    strategic_guidance += "\n- Focus on patterns that showed improvement"
-                    strategic_guidance += "\n- Be more targeted and specific in your fixes"
-                    strategic_guidance += "\n- Consider different approaches if previous ones didn't work"
-                    
-                    prompt_parts.append(strategic_guidance)
-                
-            else:
-                # Standard failure data (backward compatibility)
-                prompt_parts.append(f"\nFailure Information:\n{failure_data}")
+                    targeting_guidance += case_info
+            
+            # Add best attempt so far (from get_failure_analysis_data)
+            best_attempt = targeting_context.get('best_attempt_so_far', {})
+            if best_attempt:
+                targeting_guidance += "\n- Best attempt so far:"
+                success_rate = best_attempt.get('success_rate', 0)
+                targeting_guidance += f"\n  * Success rate: {success_rate:.2%}"
+                if success_rate > 0:
+                    targeting_guidance += "\n  * Build on what worked in the best attempt"
+                else:
+                    targeting_guidance += "\n  * All attempts failed - try a different approach"
+            
+            # Add regression analysis (from get_failure_analysis_data)
+            regression_analysis = targeting_context.get('regression_analysis', {})
+            if regression_analysis:
+                targeting_guidance += "\n- Regression analysis:"
+                if isinstance(regression_analysis, dict):
+                    for key, value in regression_analysis.items():
+                        targeting_guidance += f"\n  * {key}: {value}"
+                else:
+                    targeting_guidance += f"\n  * {regression_analysis}"
+                targeting_guidance += "\n- Avoid introducing new regressions"
+            
+            # Legacy support for old targeting context keys
+            failure_patterns = targeting_context.get('failure_patterns', [])
+            if failure_patterns:
+                targeting_guidance += f"\n- Identified failure patterns: {', '.join(failure_patterns)}"
+                targeting_guidance += "\n- Focus on addressing these specific failure types"
+            
+            root_causes = targeting_context.get('root_causes', [])
+            if root_causes:
+                targeting_guidance += f"\n- Root causes identified: {', '.join(root_causes)}"
+                targeting_guidance += "\n- Address these underlying issues in your fixes"
+            
+            test_failures = targeting_context.get('test_failures', {})
+            if test_failures:
+                targeting_guidance += f"\n- Test failure details: {test_failures}"
+                targeting_guidance += "\n- Focus on making tests pass by addressing these specific issues"
+            
+            prompt_parts.append(targeting_guidance)
         
         if config:
             # Only include relevant configuration info, not test cases
@@ -988,16 +1195,18 @@ class LLMCodeFixer:
         except Exception as e:
             raise LLMError(f"Failed to initialize LLM model: {str(e)}")
     
-    def fix_code(self, content: str, file_path: str, failure_data: Optional[Dict] = None,
-                config: Optional['TestConfiguration'] = None, context_files: Optional[Dict[str, str]] = None) -> FixResult:
+    def fix_code(self, content: str, file_path: str, learning_context: Optional[Dict] = None,
+                targeting_context: Optional[Dict] = None, config: Optional['TestConfiguration'] = None, 
+                context_files: Optional[Dict[str, str]] = None) -> FixResult:
         """
         Fix code using LLM.
         
         Args:
             content: Content to fix
             file_path: Path to the file
-            failure_data: Optional failure information
-            user_goal: Optional user goal
+            learning_context: Optional learning context from previous attempts
+            targeting_context: Optional targeting context for failure analysis
+            config: Optional test configuration
             context_files: Optional dictionary of related files
             
         Returns:
@@ -1006,7 +1215,7 @@ class LLMCodeFixer:
         try:
             # Prepare the prompt
             prompt = self.prompt_builder.build_fix_prompt(
-                content, file_path, failure_data, config, context_files
+                content, file_path, learning_context, targeting_context, config, context_files
             )
             # logger.info(f"Prompt: {prompt}")
             # Get fix from LLM

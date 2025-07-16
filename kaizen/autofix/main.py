@@ -14,6 +14,7 @@ import tempfile
 import traceback
 import google.generativeai as genai
 
+from kaizen.cli.commands.memory import ExecutionMemory
 from kaizen.cli.commands.models import TestExecutionHistory
 from kaizen.utils.test_utils import get_failed_tests_dict_from_unified
 
@@ -199,29 +200,7 @@ class CompatibilityChecker:
         except Exception:
             return False
 
-class CodeStateManager:
-    """Manages code state and provides rollback functionality."""
-    
-    def __init__(self, file_paths: Set[str]):
-        self.file_paths = file_paths
-        self.backup_dir = tempfile.mkdtemp()
-        self._backup_files()
-    
-    def _backup_files(self) -> None:
-        """Create backups of all files."""
-        for file_path in self.file_paths:
-            backup_path = os.path.join(self.backup_dir, os.path.basename(file_path))
-            shutil.copy2(file_path, backup_path)
-    
-    def restore_files(self) -> None:
-        """Restore files from backup."""
-        for file_path in self.file_paths:
-            backup_path = os.path.join(self.backup_dir, os.path.basename(file_path))
-            shutil.copy2(backup_path, file_path)
-    
-    def cleanup(self) -> None:
-        """Clean up backup directory."""
-        shutil.rmtree(self.backup_dir)
+
 
 class TestResultAnalyzer:
     """Analyzes test results and determines improvement status."""
@@ -284,328 +263,6 @@ class TestResultAnalyzer:
             'passed': passed_tests,
             'improved': passed_tests > 0
         }
-
-class LearningManager:
-    """Manages learning between fix attempts to improve subsequent fixes."""
-    
-    def __init__(self):
-        self.attempt_history: List[Dict[str, Any]] = []
-        self.learned_patterns: Dict[str, List[str]] = {
-            'successful_fixes': [],
-            'failed_approaches': [],
-            'common_errors': [],
-            'improvement_insights': []
-        }
-        self.baseline_failures: Optional[Dict] = None
-    
-    def set_baseline_failures(self, failure_data: Optional[Dict]) -> None:
-        """Set the baseline failure data from the initial test run."""
-        self.baseline_failures = failure_data
-        logger.debug("Set baseline failures for learning", extra={
-            'has_failures': bool(failure_data)
-        })
-    
-    def record_attempt(self, attempt_number: int, changes: Dict[str, Any], 
-                      test_results: Dict[str, Any], status: FixStatus) -> None:
-        """Record an attempt and its results for learning."""
-        attempt_record = {
-            'attempt_number': attempt_number,
-            'changes': changes,
-            'test_results': test_results,
-            'status': status,
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        self.attempt_history.append(attempt_record)
-        self._analyze_attempt_for_learning(attempt_record)
-        
-        logger.debug(f"Recorded attempt {attempt_number} for learning", extra={
-            'status': status,
-            'has_changes': bool(changes)
-        })
-    
-    def _analyze_attempt_for_learning(self, attempt_record: Dict[str, Any]) -> None:
-        """Analyze an attempt to extract learning patterns."""
-        changes = attempt_record.get('changes', {})
-        test_results = attempt_record.get('test_results', {})
-        status = attempt_record.get('status')
-        
-        # Analyze what worked
-        if status == FixStatus.SUCCESS:
-            self._extract_successful_patterns(changes, test_results)
-        else:
-            self._extract_failure_patterns(changes, test_results)
-        
-        # Analyze improvements even if not fully successful
-        if TestResultAnalyzer.has_improvements(test_results):
-            self._extract_improvement_insights(changes, test_results)
-    
-    def _extract_successful_patterns(self, changes: Dict[str, Any], test_results: Dict[str, Any]) -> None:
-        """Extract patterns from successful fixes."""
-        for file_path, file_changes in changes.items():
-            if isinstance(file_changes, dict) and 'fixed_code' in file_changes:
-                # Analyze the type of fix that worked
-                fix_type = self._classify_fix_type(file_changes)
-                if fix_type:
-                    self.learned_patterns['successful_fixes'].append(fix_type)
-    
-    def _extract_failure_patterns(self, changes: Dict[str, Any], test_results: Dict[str, Any]) -> None:
-        """Extract patterns from failed attempts."""
-        for file_path, file_changes in changes.items():
-            if isinstance(file_changes, dict) and 'fixed_code' in file_changes:
-                # Analyze what didn't work
-                failed_approach = self._classify_failed_approach(file_changes, test_results)
-                if failed_approach:
-                    self.learned_patterns['failed_approaches'].append(failed_approach)
-        
-        # Extract common errors from test results
-        common_errors = self._extract_common_errors(test_results)
-        self.learned_patterns['common_errors'].extend(common_errors)
-    
-    def _extract_improvement_insights(self, changes: Dict[str, Any], test_results: Dict[str, Any]) -> None:
-        """Extract insights from partial improvements."""
-        improvement_summary = TestResultAnalyzer.get_improvement_summary(test_results)
-        if improvement_summary['improved']:
-            insight = f"Attempt improved {improvement_summary['passed']}/{improvement_summary['total']} tests"
-            self.learned_patterns['improvement_insights'].append(insight)
-    
-    def _classify_fix_type(self, file_changes: Dict[str, Any]) -> Optional[str]:
-        """Classify the type of fix that was applied."""
-        fixed_code = file_changes.get('fixed_code', '')
-        if not fixed_code:
-            return None
-        
-        # Simple heuristics to classify fix types
-        if 'try:' in fixed_code and 'except' in fixed_code:
-            return 'error_handling_added'
-        elif 'if ' in fixed_code and 'is None' in fixed_code:
-            return 'null_check_added'
-        elif 'import ' in fixed_code:
-            return 'import_fixed'
-        elif 'def ' in fixed_code and '->' in fixed_code:
-            return 'type_hints_added'
-        elif 'class ' in fixed_code:
-            return 'class_structure_fixed'
-        
-        return 'general_code_fix'
-    
-    def _classify_failed_approach(self, file_changes: Dict[str, Any], test_results: Dict[str, Any]) -> Optional[str]:
-        """Classify what approach failed."""
-        # Analyze test results to understand what failed
-        failed_tests = []
-        for region, result in test_results.items():
-            if region == 'overall_status':
-                continue
-            if isinstance(result, dict):
-                test_cases = result.get('test_cases', [])
-                for tc in test_cases:
-                    if tc.get('status') == 'failed':
-                        failed_tests.append(tc.get('name', 'Unknown'))
-        
-        if failed_tests:
-            return f"failed_to_fix_tests: {', '.join(failed_tests[:3])}"  # Limit to first 3
-        
-        return 'general_fix_failed'
-    
-    def _extract_common_errors(self, test_results: Dict[str, Any]) -> List[str]:
-        """Extract common error patterns from test results."""
-        errors = []
-        for region, result in test_results.items():
-            if region == 'overall_status':
-                continue
-            if isinstance(result, dict):
-                test_cases = result.get('test_cases', [])
-                for tc in test_cases:
-                    if tc.get('status') == 'failed':
-                        error_msg = tc.get('details', '')
-                        if error_msg:
-                            # Extract error type
-                            if 'SyntaxError' in error_msg:
-                                errors.append('syntax_error')
-                            elif 'ImportError' in error_msg:
-                                errors.append('import_error')
-                            elif 'AttributeError' in error_msg:
-                                errors.append('attribute_error')
-                            elif 'TypeError' in error_msg:
-                                errors.append('type_error')
-                            elif 'NameError' in error_msg:
-                                errors.append('name_error')
-        
-        return list(set(errors))  # Remove duplicates
-    
-    def get_enhanced_failure_data(self, current_attempt: int) -> Dict[str, Any]:
-        """Get enhanced failure data that includes learning from previous attempts."""
-        if not self.baseline_failures:
-            return {}
-        
-        enhanced_data = {
-            'original_failures': self.baseline_failures,
-            'learning_context': {
-                'current_attempt': current_attempt,
-                'total_attempts': len(self.attempt_history),
-                'successful_patterns': self.learned_patterns['successful_fixes'][-3:],  # Last 3
-                'failed_approaches': self.learned_patterns['failed_approaches'][-3:],  # Last 3
-                'common_errors': list(set(self.learned_patterns['common_errors'])),  # Unique
-                'improvement_insights': self.learned_patterns['improvement_insights'][-2:]  # Last 2
-            }
-        }
-        
-        # Add specific guidance based on previous attempts
-        if current_attempt > 1:
-            enhanced_data['previous_attempt_analysis'] = self._analyze_previous_attempts()
-        
-        logger.debug(f"Generated enhanced failure data for attempt {current_attempt}", extra={
-            'has_learning_context': bool(enhanced_data['learning_context']),
-            'successful_patterns_count': len(enhanced_data['learning_context']['successful_patterns']),
-            'failed_approaches_count': len(enhanced_data['learning_context']['failed_approaches'])
-        })
-        
-        return enhanced_data
-    
-    def _analyze_previous_attempts(self) -> Dict[str, Any]:
-        """Analyze previous attempts to provide specific guidance."""
-        if len(self.attempt_history) < 2:
-            return {}
-        
-        analysis = {
-            'what_worked': [],
-            'what_didnt_work': [],
-            'recommendations': []
-        }
-        
-        # Analyze recent attempts
-        recent_attempts = self.attempt_history[-3:]  # Last 3 attempts
-        
-        for attempt in recent_attempts:
-            if attempt['status'] == FixStatus.SUCCESS:
-                analysis['what_worked'].append(f"Attempt {attempt['attempt_number']}: Complete success")
-            elif TestResultAnalyzer.has_improvements(attempt['test_results']):
-                improvement = TestResultAnalyzer.get_improvement_summary(attempt['test_results'])
-                analysis['what_worked'].append(
-                    f"Attempt {attempt['attempt_number']}: Improved {improvement['passed']}/{improvement['total']} tests"
-                )
-            else:
-                analysis['what_didnt_work'].append(f"Attempt {attempt['attempt_number']}: No improvement")
-        
-        # Generate recommendations based on patterns
-        if self.learned_patterns['successful_fixes']:
-            analysis['recommendations'].append(
-                f"Focus on: {', '.join(set(self.learned_patterns['successful_fixes']))}"
-            )
-        
-        if self.learned_patterns['failed_approaches']:
-            analysis['recommendations'].append(
-                f"Avoid: {', '.join(set(self.learned_patterns['failed_approaches']))}"
-            )
-        
-        return analysis
-    
-    def get_learning_summary(self) -> Dict[str, Any]:
-        """Get a summary of all learning accumulated."""
-        return {
-            'total_attempts': len(self.attempt_history),
-            'successful_patterns': list(set(self.learned_patterns['successful_fixes'])),
-            'failed_approaches': list(set(self.learned_patterns['failed_approaches'])),
-            'common_errors': list(set(self.learned_patterns['common_errors'])),
-            'improvement_insights': self.learned_patterns['improvement_insights'],
-            'learning_progress': self._calculate_learning_progress()
-        }
-    
-    def _calculate_learning_progress(self) -> Dict[str, Any]:
-        """Calculate learning progress metrics."""
-        if not self.attempt_history:
-            return {'progress': 0, 'trend': 'no_data'}
-        
-        # Calculate success rate trend
-        recent_attempts = self.attempt_history[-3:]
-        success_count = sum(1 for a in recent_attempts if a['status'] == FixStatus.SUCCESS)
-        success_rate = success_count / len(recent_attempts)
-        
-        # Determine trend
-        if len(self.attempt_history) >= 2:
-            first_half = self.attempt_history[:len(self.attempt_history)//2]
-            second_half = self.attempt_history[len(self.attempt_history)//2:]
-            
-            first_success_rate = sum(1 for a in first_half if a['status'] == FixStatus.SUCCESS) / len(first_half)
-            second_success_rate = sum(1 for a in second_half if a['status'] == FixStatus.SUCCESS) / len(second_half)
-            
-            if second_success_rate > first_success_rate:
-                trend = 'improving'
-            elif second_success_rate < first_success_rate:
-                trend = 'declining'
-            else:
-                trend = 'stable'
-        else:
-            trend = 'insufficient_data'
-        
-        return {
-            'recent_success_rate': success_rate,
-            'trend': trend,
-            'patterns_learned': len(set(self.learned_patterns['successful_fixes']))
-        }
-
-class FixAttemptTracker:
-    """Tracks fix attempts and their results."""
-    
-    def __init__(self, max_retries: int):
-        self.max_retries = max_retries
-        self.attempts: List[FixAttempt] = []
-        self.current_attempt: Optional[FixAttempt] = None
-    
-    def should_continue(self) -> bool:
-        """Check if more attempts should be made."""
-        return len(self.attempts) < self.max_retries
-    
-    def start_attempt(self) -> FixAttempt:
-        """Start a new fix attempt."""
-        logger.info(f"Starting new attempt")
-        attempt = FixAttempt(attempt_number=len(self.attempts) + 1)
-        logger.info(f"Attempt: {attempt}")
-        self.current_attempt = attempt
-        self.attempts.append(attempt)
-        return attempt
-    
-    def update_attempt(self, attempt: FixAttempt, status: FixStatus, 
-                      changes: Dict, test_results: Dict, error: Optional[str] = None) -> None:
-        """Update attempt with results."""
-        attempt.status = status
-        attempt.changes = changes
-        attempt.test_results = test_results
-        attempt.error = error
-    
-    def update_attempt_with_unified_result(self, attempt: FixAttempt, status: FixStatus, 
-                                          changes: Dict, test_execution_result: Any, error: Optional[str] = None) -> None:
-        """Update attempt with unified TestExecutionResult."""
-        attempt.status = status
-        attempt.changes = changes
-        attempt.test_execution_result = test_execution_result
-        attempt.test_results = test_execution_result.to_legacy_format() if test_execution_result else None
-        attempt.error = error
-    
-    def get_successful_attempt(self) -> Optional[FixAttempt]:
-        """Get the first successful attempt if any."""
-        return next((attempt for attempt in self.attempts if attempt.status == FixStatus.SUCCESS), None)
-    
-    def get_best_attempt(self) -> Optional[FixAttempt]:
-        """Get the best attempt based on test results."""
-        if not self.attempts:
-            return None
-            
-        # First try to find a successful attempt
-        successful = self.get_successful_attempt()
-        if successful:
-            return successful
-            
-        # If no successful attempt, find any attempt with improvements
-        for attempt in self.attempts:
-            if TestResultAnalyzer.has_improvements(attempt.test_results):
-                return attempt
-        
-        return None
-    
-    def get_last_attempt(self) -> Optional[FixAttempt]:
-        """Get the last attempt."""
-        return self.attempts[-1]
 
 class PRStrategy(Enum):
     """Strategy for when to create pull requests."""
@@ -1510,11 +1167,13 @@ class AutoFix:
     LOG_LEVEL_ERROR = "error"
     ERROR_MSG_FIX_FAILED = "Failed to fix code"
     
-    def __init__(self, config: Union[Dict, 'TestConfiguration'], runner_config: Dict[str, Any]):
+    def __init__(self, config: Union[Dict, 'TestConfiguration'], runner_config: Dict[str, Any], memory=ExecutionMemory()):
         """Initialize AutoFix with configuration.
         
         Args:
             config: Either a dictionary or TestConfiguration object containing configuration
+            runner_config: Configuration for the test runner
+            memory: Optional ExecutionMemory instance for enhanced learning
         """
         try:
             if not isinstance(config, dict):
@@ -1523,8 +1182,10 @@ class AutoFix:
             self.test_runner = TestRunner(runner_config)
             self.pr_manager = None  # Initialize lazily when needed
             self.llm_fixer = LLMCodeFixer(config)  # Initialize LLM fixer
+            self.memory = memory  # Store memory for enhanced learning
             logger.info("AutoFix initialized", extra={
-                'config': vars(self.config)
+                'config': vars(self.config),
+                'has_memory': memory is not None
             })
         except Exception as e:
             raise ConfigurationError(f"Failed to initialize AutoFix: {str(e)}")
@@ -1592,50 +1253,19 @@ class AutoFix:
             'suggested_files': set()
         }
     
-    def _process_file_with_llm(self, current_file_path: str, file_content: str, 
-                             context_files: Dict[str, str], failure_data: Optional[Dict],
-                             config: Optional['TestConfiguration']) -> FixResult:
-        """Process a single file using LLM.
-        
-        Args:
-            current_file_path: Path to the file being processed
-            file_content: Content of the file
-            context_files: Dictionary of related files and their contents
-            failure_data: Data about test failures
-            config: Test configuration
-            
-        Returns:
-            FixResult object
-            
-        Raises:
-            ConfigurationError: If there's an issue with the configuration
-            FileNotFoundError: If the file cannot be found
-            PermissionError: If there are permission issues
-        """
-        try:
-            return self._handle_llm_fix(current_file_path, file_content, context_files, failure_data, config)
-        except (ConfigurationError, FileNotFoundError, PermissionError) as e:
-            logger.error(f"Error processing file {current_file_path}", extra={
-                'error': str(e),
-                'error_type': type(e).__name__,
-                'traceback': traceback.format_exc()
-            })
-            return FixResult(
-                status=FixStatus.ERROR,
-                changes={},
-                error=str(e)
-            )
+
 
     def _handle_llm_fix(self, current_file_path: str, file_content: str,
-                       context_files: Dict[str, str], failure_data: Optional[Dict],
-                       config: Optional['TestConfiguration']) -> FixResult:
+                       context_files: Dict[str, str], learning_context: Optional[Dict],
+                       targeting_context: Optional[Dict], config: Optional['TestConfiguration']) -> FixResult:
         """Handle LLM-based code fixing.
         
         Args:
             current_file_path: Path to the file being processed
             file_content: Content of the file
             context_files: Dictionary of related files and their contents
-            failure_data: Data about test failures
+            learning_context: Memory-based learning context from previous attempts
+            targeting_context: Memory-based targeting context for failure analysis
             config: Test configuration
             
         Returns:
@@ -1645,7 +1275,8 @@ class AutoFix:
             fix_result = self.llm_fixer.fix_code(
                 file_content,
                 current_file_path,
-                failure_data=failure_data,
+                learning_context=learning_context,
+                targeting_context=targeting_context,
                 config=config,
                 context_files=context_files
             )
@@ -1910,75 +1541,65 @@ class AutoFix:
             logger.info("Starting code fix")
             
             # Initialize components
-            state_manager = CodeStateManager(set(files_to_fix))
-            attempt_tracker = FixAttemptTracker(self.config.max_retries)
-            learning_manager = LearningManager()
             test_history = TestExecutionHistory()
             
-            logger.debug(f"State manager: {state_manager}")
-            logger.debug(f"Attempt tracker: {attempt_tracker}")
-            
-            # Set baseline failures for learning
-            if test_execution_result:
-                baseline_failures = self._extract_failure_data_from_unified(test_execution_result)
-                learning_manager.set_baseline_failures(baseline_failures)
-                test_history.add_baseline_result(test_execution_result)
-                logger.debug("Set baseline failures for learning")
-            
-            logger.debug("Learning manager initialized")
-            
-            # Check if Git is available
-            git_available = self._check_git_availability()
-            original_branch = None
-            branch_name = None
-            
-            if git_available:
-                try:
-                    # Store the original branch
-                    original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
-                    logger.info("Retrieved original branch", extra={'branch': original_branch})
-                    
-                    # Initialize branch_name with a default value
-                    branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-                    subprocess.run(["git", "checkout", "-b", branch_name], check=True)
-                    logger.info(f"Created and switched to branch: {branch_name}")
-                except Exception as e:
-                    logger.warning(f"Git operations failed, continuing without Git: {str(e)}")
-                    git_available = False
-            else:
-                logger.info("Git not available, using file-based operations")
-            
-            results = {'status': 'pending', 'changes': {}, 'processed_files': []}
-            
-            # Use provided test_execution_result as baseline, otherwise run baseline test
-            if test_execution_result is not None:
-                baseline_test_results = test_execution_result
-                logger.debug("Using provided test execution result as baseline")
-            else:
-                logger.info("Running baseline test before any fixes")
-                baseline_test_results = self.test_runner.run_tests(Path(file_path))
-                test_history.add_baseline_result(baseline_test_results)
-                logger.info(f"Baseline test results: {baseline_test_results}")
-            
             try:
-                logger.debug(f"Attempt tracker should continue check")
-                while attempt_tracker.should_continue():
-                    logger.debug(f"Attempt tracker should continue")
-                    attempt = attempt_tracker.start_attempt()
-                    logger.info(f"Starting attempt {attempt.attempt_number} of {self.config.max_retries}")
+                logger.debug("Memory system initialized")
+                
+                # Check if Git is available
+                git_available = self._check_git_availability()
+                original_branch = None
+                branch_name = None
+                
+                if git_available:
+                    try:
+                        # Store the original branch
+                        original_branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+                        logger.info("Retrieved original branch", extra={'branch': original_branch})
+                        
+                        # Initialize branch_name with a default value
+                        branch_name = f"autofix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                        subprocess.run(["git", "checkout", "-b", branch_name], check=True)
+                        logger.info(f"Created and switched to branch: {branch_name}")
+                    except Exception as e:
+                        logger.warning(f"Git operations failed, continuing without Git: {str(e)}")
+                        git_available = False
+                else:
+                    logger.info("Git not available, using file-based operations")
+                
+                results = {'status': 'pending', 'changes': {}, 'processed_files': []}
+                   
+                test_history.add_baseline_result(test_execution_result)
+                
+                # Track attempt number using memory system
+                attempt_number = 1
+                max_attempts = self.config.max_retries
+                
+                while attempt_number <= max_attempts:
+                    logger.info(f"Starting attempt {attempt_number} of {max_attempts}")
+                    
+                    # Check if we should continue based on memory learning
+                    should_continue = self.memory.should_continue_fixing(file_path)
+                    if not should_continue.get('should_continue', True):
+                        logger.warning(f"Stopping attempts based on memory analysis: {should_continue.get('reason', 'Unknown')}")
+                        break
                     
                     try:
                         # Store original code state
-                        attempt.original_code = {
+                        original_code = {
                             path: self._read_file_content(path)
                             for path in files_to_fix
                         }
                         
-                        # Get enhanced failure data with learning from previous attempts
-                        enhanced_failure_data = learning_manager.get_enhanced_failure_data(attempt.attempt_number)
-                        logger.info(f"Using enhanced failure data for attempt {attempt.attempt_number}", extra={
-                            'has_learning_context': bool(enhanced_failure_data.get('learning_context')),
-                            'has_previous_analysis': bool(enhanced_failure_data.get('previous_attempt_analysis'))
+                        # Get memory-based learning context
+                        learning_context = self.memory.get_previous_attempts_insights(file_path)
+                        targeting_context = self.memory.get_failure_analysis_data(file_path)
+                        should_continue = self.memory.should_continue_fixing(file_path)
+                        
+                        logger.info(f"Using memory-enhanced failure data for attempt {attempt_number}", extra={
+                            'has_learning_context': bool(learning_context),
+                            'has_targeting_context': bool(targeting_context),
+                            'should_continue': should_continue.get('should_continue', True)
                         })
                         
                         # Process each file individually
@@ -1991,8 +1612,8 @@ class AutoFix:
                                     if path != current_file
                                 }
                                 
-                                fix_result = self._process_file_with_llm(
-                                    current_file, file_content, context_files, enhanced_failure_data, config
+                                fix_result = self._handle_llm_fix(
+                                    current_file, file_content, context_files, learning_context, targeting_context, config
                                 )
                                 logger.debug(f"fix result: {fix_result}")
                                 if fix_result.status == FixStatus.SUCCESS:
@@ -2018,7 +1639,7 @@ class AutoFix:
                                 })
                         
                         # Run tests and get unified result
-                        logger.info(f"Running tests after attempt {attempt.attempt_number}")
+                        logger.info(f"Running tests after attempt {attempt_number}")
                         current_test_result = self._run_tests_and_get_result(Path(file_path))
                         
                         # Add to test history
@@ -2026,42 +1647,49 @@ class AutoFix:
                         
                         # Update attempt status using unified result
                         status = self._determine_attempt_status_from_unified(current_test_result)
-                        attempt_tracker.update_attempt_with_unified_result(
-                            attempt, status, results, current_test_result
-                        )
                         
                         # Show attempt results
                         failed_count = current_test_result.get_failure_count()
                         total_count = current_test_result.summary.total_tests
-                        logger.info(f"Attempt {attempt.attempt_number} results: {total_count - failed_count}/{total_count} tests passed")
+                        logger.info(f"Attempt {attempt_number} results: {total_count - failed_count}/{total_count} tests passed")
                         
-                        # Record attempt for learning (convert to legacy format for compatibility)
-                        learning_manager.record_attempt(
-                            attempt.attempt_number, 
-                            results['changes'], 
-                            current_test_result.to_legacy_format(), 
-                            status
-                        )
-                        logger.info(f"Recorded attempt {attempt.attempt_number} for learning")
+                        # Record attempt for learning using memory system (once per attempt, not per file)
+                        try:
+                            # Log the fix attempt to memory for the main file path (not individual files)
+                            self.memory.log_fix_attempt(
+                                file_path=file_path,  # Use main file path instead of individual files
+                                attempt_number=attempt_number,
+                                original_code=original_code.get(file_path, ''),  # Use main file's original code
+                                fixed_code=self._read_file_content(file_path),  # Use main file's current code
+                                success=status == FixStatus.SUCCESS,
+                                test_results_before={},  # Would need baseline results
+                                test_results_after=current_test_result.to_legacy_format(),
+                                approach_description=f"AutoFix attempt {attempt_number}",
+                                code_changes=str(results['changes']),
+                                llm_interaction=None  # Would need to capture LLM interaction
+                            )
+                            logger.info(f"Logged attempt {attempt_number} to memory")
+                        except Exception as e:
+                            logger.warning(f"Failed to log attempt to memory: {str(e)}")
+                        
+                        logger.info(f"Recorded attempt {attempt_number} for learning")
                         
                         if status == FixStatus.SUCCESS:
                             logger.info("All tests passed!")
                             test_history.set_final_result(current_test_result)
                             break
                         
+                        attempt_number += 1
+                        
                     except Exception as e:
-                        logger.error(f"Error in attempt {attempt.attempt_number}: {str(e)}")
-                        attempt_tracker.update_attempt(
-                            attempt, FixStatus.ERROR, {}, error=str(e)
-                        )
-                        state_manager.restore_files()
-                # Add this except block to fix IndentationError
+                        logger.error(f"Error in attempt {attempt_number}: {str(e)}")
+                        attempt_number += 1
             except Exception as e:
                 logger.error(f"Error during fix attempts: {str(e)}")
                 raise
                 
             # Add learning summary to results
-            learning_summary = learning_manager.get_learning_summary()
+            learning_summary = self._get_memory_learning_summary(file_path)
             results['learning_summary'] = learning_summary
             results['test_history'] = test_history.to_legacy_format()
             logger.info("Learning summary added to results", extra={
@@ -2073,9 +1701,10 @@ class AutoFix:
             if self.config.create_pr and git_available:
                 logger.info(f"start creating pr")
                 try:
-                    best_attempt = attempt_tracker.get_best_attempt()
-                    logger.info(f"best attempt: {best_attempt}")
-                    if best_attempt and hasattr(best_attempt, 'test_execution_result'):
+                    # Get best attempt from memory system
+                    best_attempt = self.memory.find_best_attempt(file_path)
+                    
+                    if best_attempt:
                         # Use test history for improvement analysis
                         improvement_summary = test_history.get_improvement_summary()
                         logger.info(f"start creating pr")
@@ -2084,12 +1713,12 @@ class AutoFix:
                         test_results_for_pr = self._create_test_results_for_pr_from_history(test_history)
                         
                         pr_data = self._get_pr_manager().create_pr(
-                            best_attempt.changes,
+                            results['changes'],
                             test_results_for_pr
                         )
                         return {
-                            'status': 'success' if best_attempt.status == FixStatus.SUCCESS else 'improved',
-                            'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                            'status': 'success' if best_attempt.get('success_rate', 0) == 1.0 else 'improved',
+                            'attempts': self._get_attempts_from_memory(file_path),
                             'pr': pr_data,
                             'improvement_summary': improvement_summary,
                             'learning_summary': learning_summary,
@@ -2104,7 +1733,7 @@ class AutoFix:
                         return {
                             'status': 'partial_success',
                             'message': 'Code changes were made successfully, but PR creation failed due to private repository access issues. Please check your GitHub token permissions.',
-                            'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                            'attempts': self._get_attempts_from_memory(file_path),
                             'error': str(e),
                             'changes_made': True,
                             'learning_summary': learning_summary,
@@ -2120,37 +1749,36 @@ class AutoFix:
                 return {
                     'status': 'partial_success',
                     'message': 'Code changes were made successfully, but PR creation failed because Git is not available in this environment.',
-                    'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                    'attempts': self._get_attempts_from_memory(file_path),
                     'changes_made': True,
                     'learning_summary': learning_summary,
                     'test_history': test_history.to_legacy_format()
                 }
             
             # Check if any improvements were made, even if not all tests pass
-            best_attempt = attempt_tracker.get_best_attempt()
+            best_attempt = self.memory.find_best_attempt(file_path)
+            
             has_any_improvements = False
             
-            if best_attempt and best_attempt.test_execution_result:
+            if best_attempt:
                 # Compare with baseline to see if there were any improvements
                 if test_execution_result:
-                    improvement_summary = self._get_improvement_summary_from_unified(
-                        test_execution_result, best_attempt.test_execution_result
-                    )
-                    has_any_improvements = improvement_summary['has_improvement']
+                    # Use memory system to determine improvements
+                    has_any_improvements = best_attempt.get('success_rate', 0) > 0
                 else:
                     # If no baseline, check if any tests passed
-                    has_any_improvements = best_attempt.test_execution_result.get_failure_count() < best_attempt.test_execution_result.summary.total_tests
+                    has_any_improvements = best_attempt.get('success_rate', 0) > 0
             
             # Determine if we should preserve changes based on improvements and configuration
             should_preserve_changes = (
                 has_any_improvements or 
-                best_attempt.status == FixStatus.SUCCESS or
+                (best_attempt and best_attempt.get('success_rate', 0) == 1.0) or
                 (len(results['changes']) > 0 and self.config.preserve_partial_improvements)  # Use config option
             )
             
             logger.info("Change preservation decision", extra={
                 'has_any_improvements': has_any_improvements,
-                'best_attempt_success': best_attempt.status == FixStatus.SUCCESS if best_attempt else False,
+                'best_attempt_success': best_attempt.get('success_rate', 0) == 1.0 if best_attempt else False,
                 'changes_made': len(results['changes']) > 0,
                 'preserve_partial_improvements': self.config.preserve_partial_improvements,
                 'should_preserve_changes': should_preserve_changes
@@ -2159,13 +1787,13 @@ class AutoFix:
             if should_preserve_changes:
                 logger.info("Preserving changes due to improvements or successful fixes")
                 return {
-                    'status': 'success' if best_attempt and best_attempt.status == FixStatus.SUCCESS else 'improved',
+                    'status': 'success' if best_attempt and best_attempt.get('success_rate', 0) == 1.0 else 'improved',
                     'message': 'Code changes were applied successfully. Some improvements were made even if not all tests pass.',
-                    'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                    'attempts': self._get_attempts_from_memory(file_path),
                     'changes_made': True,
                     'learning_summary': learning_summary,
                     'test_history': test_history.to_legacy_format(),
-                    'best_test_execution_result': best_attempt.test_execution_result if best_attempt else None
+                    'best_test_execution_result': None  # Memory system doesn't store TestExecutionResult objects
                 }
             else:
                 # Only revert if no improvements were made at all
@@ -2173,14 +1801,13 @@ class AutoFix:
                 if git_available and original_branch:
                     subprocess.run(["git", "checkout", original_branch], check=True)
                 else:
-                    # If Git is not available, restore files using state manager
-                    state_manager.restore_files()
-                    logger.info("Restored files using state manager (Git not available)")
+                    # If Git is not available, log warning but don't revert
+                    logger.warning("Git not available and no improvements made. Files have been modified but not reverted.")
                 
                 return {
                     'status': 'failed',
                     'message': 'No improvements were made to the code. All changes have been reverted.',
-                    'attempts': [vars(attempt) for attempt in attempt_tracker.attempts],
+                    'attempts': self._get_attempts_from_memory(file_path),
                     'changes_made': False,
                     'learning_summary': learning_summary,
                     'test_history': test_history.to_legacy_format(),
@@ -2191,19 +1818,19 @@ class AutoFix:
             logger.error(f"Error in fix_code: {str(e)}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
             
-            # Try to restore original branch or files
+            # Try to restore original branch
             try:
                 if 'git_available' in locals() and git_available and 'original_branch' in locals() and original_branch:
                     subprocess.run(["git", "checkout", original_branch], check=True)
-                elif 'state_manager' in locals():
-                    state_manager.restore_files()
+                else:
+                    logger.warning("Git not available, cannot restore original state")
             except Exception as restore_error:
                 logger.error(f"Failed to restore original state: {str(restore_error)}")
             
             return {
                 'status': 'error',
                 'error': str(e),
-                'attempts': [vars(attempt) for attempt in attempt_tracker.attempts] if 'attempt_tracker' in locals() else [],
+                'attempts': self._get_attempts_from_memory(file_path) if 'file_path' in locals() else [],
                 'test_history': test_history.to_legacy_format() if 'test_history' in locals() else None,
                 'best_test_execution_result': None
             }
@@ -2318,6 +1945,71 @@ class AutoFix:
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
+    
+    def _get_memory_learning_summary(self, file_path: str) -> Dict[str, Any]:
+        """Get learning summary from memory system.
+        
+        Args:
+            file_path: Path to the file being processed
+            
+        Returns:
+            Dictionary containing learning summary
+        """
+        # Get learning context from memory using the specific file path
+        learning_context = self.memory.get_previous_attempts_insights(file_path)
+        
+        return {
+            'total_attempts': len(learning_context.get('previous_attempts_history', [])),
+            'successful_patterns': learning_context.get('successful_patterns_to_build_on', []),
+            'failed_approaches': learning_context.get('failed_approaches_to_avoid', []),
+            'common_errors': [],  # Memory system doesn't track this separately
+            'improvement_insights': [],  # Removed insights_from_llm_reasoning - not currently used
+            'learning_progress': {'progress': len(learning_context.get('previous_attempts_history', [])), 'trend': 'improving'}
+        }
+    
+    def _get_attempts_from_memory(self, file_path: str) -> List[Dict[str, Any]]:
+        """Get attempts from memory system in legacy format for report generation.
+        
+        Args:
+            file_path: Path to the file being processed
+            
+        Returns:
+            List of attempts in legacy format
+        """
+        if not self.memory or not self.memory.current_execution:
+            return []
+        
+        attempts = []
+        fix_attempts = self.memory.current_execution.get('fix_attempts', [])
+        
+        # Filter attempts for the specific file path
+        file_attempts = [attempt for attempt in fix_attempts if attempt.file_path == file_path]
+        
+        for attempt in file_attempts:
+            # Convert FixAttempt to legacy format
+            legacy_attempt = {
+                'attempt_number': attempt.attempt_number,
+                'status': 'success' if attempt.success else 'failed',
+                'changes': {
+                    'type': 'llm_fix',
+                    'approach_description': attempt.approach_description,
+                    'code_changes_made': attempt.code_changes_made,
+                    'lessons_learned': attempt.lessons_learned,
+                    'why_approach_failed': attempt.why_approach_failed,
+                    'what_worked_partially': attempt.what_worked_partially
+                },
+                'test_results': attempt.test_results_after,
+                'test_execution_result': None,  # Memory system doesn't store TestExecutionResult objects
+                'error': None if attempt.success else attempt.why_approach_failed,
+                'original_code': {file_path: attempt.original_code},
+                'timestamp': attempt.timestamp.isoformat() if attempt.timestamp else None
+            }
+            attempts.append(legacy_attempt)
+        
+        # Sort by attempt number
+        attempts.sort(key=lambda x: x['attempt_number'])
+        
+        return attempts
     
     def _extract_failure_data_from_unified(self, test_execution_result) -> Dict:
         """Extract failure data from unified test execution result for learning manager compatibility.

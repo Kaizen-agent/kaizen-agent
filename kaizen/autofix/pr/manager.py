@@ -744,17 +744,36 @@ Generate the summary section now:"""
         # Build table rows
         table_rows = [header_row, separator_row]
         
+        def normalize_status(status):
+            if not status:
+                return 'failed'
+            s = str(status).lower()
+            if s in ['passed', 'success']:
+                return 'passed'
+            elif s in ['failed', 'fail']:
+                return 'failed'
+            elif s == 'error':
+                return 'error'
+            else:
+                return 'failed'  # treat unknown/missing as failed for reporting
+        
         for case_name in test_case_names:
             row = [case_name]
             
             # Add results for each attempt
             for attempt in attempts:
-                result = next((tc['status'] for tc in attempt['test_cases'] if tc['name'] == case_name), 'N/A')
+                tc = next((tc for tc in attempt['test_cases'] if tc['name'] == case_name), None)
+                if tc is not None:
+                    result = normalize_status(tc.get('status', 'failed'))
+                else:
+                    result = 'failed'  # If missing, treat as failed
                 row.append(result)
             
             # Calculate improvement
-            baseline_status = next((tc['status'] for tc in baseline_attempt['test_cases'] if tc['name'] == case_name), 'unknown')
-            final_status = next((tc['status'] for tc in attempts[-1]['test_cases'] if tc['name'] == case_name), 'unknown')
+            baseline_tc = next((tc for tc in baseline_attempt['test_cases'] if tc['name'] == case_name), None)
+            final_tc = next((tc for tc in attempts[-1]['test_cases'] if tc['name'] == case_name), None)
+            baseline_status = normalize_status(baseline_tc.get('status', 'failed') if baseline_tc else 'failed')
+            final_status = normalize_status(final_tc.get('status', 'failed') if final_tc else 'failed')
             
             # Add final status to the row
             row.append(final_status)

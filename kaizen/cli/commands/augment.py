@@ -64,18 +64,38 @@ def analyze_test_structure(tests: List[Dict]) -> Dict[str, Any]:
                 input_params = input_data['input']
                 if isinstance(input_params, list):
                     param_analysis = []
+                    all_param_fields = set()
+                    param_field_types = {}
+                    
                     for param in input_params:
                         if isinstance(param, dict):
+                            param_fields = list(param.keys())
+                            all_param_fields.update(param_fields)
+                            
+                            # Analyze field types
+                            for field, value in param.items():
+                                if field not in param_field_types:
+                                    param_field_types[field] = set()
+                                param_field_types[field].add(type(value).__name__)
+                            
                             param_analysis.append({
-                                'fields': list(param.keys()),
+                                'fields': param_fields,
                                 'has_name': 'name' in param,
                                 'has_type': 'type' in param,
-                                'has_value': 'value' in param
+                                'has_value': 'value' in param,
+                                'has_class_path': 'class_path' in param,
+                                'has_args': 'args' in param,
+                                'field_count': len(param_fields)
                             })
+                    
                     structure['input_structure'] = {
                         'is_list': True,
                         'param_count': len(input_params),
-                        'param_analysis': param_analysis
+                        'param_analysis': param_analysis,
+                        'all_param_fields': list(all_param_fields),
+                        'param_field_types': {field: list(types) for field, types in param_field_types.items()},
+                        'required_fields': ['name'],  # name is always required
+                        'optional_fields': [field for field in all_param_fields if field != 'name']
                     }
     
     return structure
@@ -119,8 +139,23 @@ def extract_agent_context(tests: List[Dict]) -> Dict[str, Any]:
                     for param in input_params:
                         if isinstance(param, dict):
                             param_name = param.get('name', '').lower()
-                            param_value = param.get('value')
                             param_type = param.get('type', 'unknown')
+                            
+                            # Handle different parameter structures
+                            param_value = None
+                            if 'value' in param:
+                                param_value = param['value']
+                            elif 'args' in param:
+                                # For parameters with args structure, extract key information
+                                args = param['args']
+                                if isinstance(args, dict):
+                                    # Look for text or content in args
+                                    for key in ['text', 'content', 'message', 'data']:
+                                        if key in args:
+                                            param_value = args[key]
+                                            break
+                                    if param_value is None:
+                                        param_value = str(args)  # Fallback to string representation
                             
                             context['input_names'].add(param_name)
                             context['input_types'].add(param_type)
@@ -168,6 +203,22 @@ def validate_test_structure(tests: List[Dict]) -> None:
     reference_fields = set(reference_test.keys())
     reference_input_fields = set(reference_test.get('input', {}).keys()) if 'input' in reference_test else set()
     
+    # Analyze parameter structure from reference test
+    reference_param_structure = None
+    if 'input' in reference_test:
+        input_data = reference_test['input']
+        if isinstance(input_data, dict) and 'input' in input_data:
+            input_params = input_data['input']
+            if isinstance(input_params, list) and input_params:
+                # Analyze the structure of the first parameter as reference
+                first_param = input_params[0]
+                if isinstance(first_param, dict):
+                    reference_param_structure = {
+                        'required_fields': ['name'],  # name is always required
+                        'optional_fields': [key for key in first_param.keys() if key != 'name'],
+                        'field_types': {key: type(value).__name__ for key, value in first_param.items()}
+                    }
+    
     for i, test in enumerate(tests):
         if not isinstance(test, dict):
             raise ValueError(f"Test case {i} is not a dictionary")
@@ -204,7 +255,7 @@ def validate_test_structure(tests: List[Dict]) -> None:
                 if not isinstance(input_params, list):
                     raise ValueError(f"Test case {i} 'input.input' field is not a list")
                 
-                # Validate each input parameter has required fields
+                # Validate each input parameter
                 for j, param in enumerate(input_params):
                     if not isinstance(param, dict):
                         raise ValueError(f"Test case {i} input parameter {j} is not a dictionary")
@@ -212,8 +263,116 @@ def validate_test_structure(tests: List[Dict]) -> None:
                     # Check for required fields in parameters
                     if 'name' not in param:
                         raise ValueError(f"Test case {i} input parameter {j} missing 'name' field")
-                    if 'value' not in param:
-                        raise ValueError(f"Test case {i} input parameter {j} missing 'value' field")
+                    
+                    # Validate parameter structure consistency if we have a reference
+                    if reference_param_structure:
+                        param_fields = set(param.keys())
+                        required_fields = set(reference_param_structure['required_fields'])
+                        
+                        # Check that all required fields are present
+                        missing_required = required_fields - param_fields
+                        if missing_required:
+                            raise ValueError(f"Test case {i} input parameter {j} missing required fields: {missing_required}")
+                        
+                        # Check field type consistency for common fields
+                        for field, expected_type in reference_param_structure['field_types'].items():
+                            if field in param:
+                                actual_type = type(param[field]).__name__
+                                if actual_type != expected_type:
+                                    # Allow some flexibility in type matching (e.g., str vs int for numeric values)
+                                    if not (expected_type in ['str', 'int', 'float'] and actual_type in ['str', 'int', 'float']):
+                                        raise ValueError(f"Test case {i} input parameter {j} field '{field}' has type {actual_type}, expected {expected_type}")
+
+def validate_generated_test_structure(test: Dict, existing_tests: List[Dict]) -> None:
+    """Validate that a generated test case follows the same structure as existing tests.
+    
+    Args:
+        test: Generated test case to validate
+        existing_tests: List of existing test cases for reference
+        
+    Raises:
+        ValueError: If the test case doesn't follow the expected structure
+    """
+    if not existing_tests:
+        return
+    
+    reference_test = existing_tests[0]
+    
+    # Check that test has the same structure as existing tests
+    reference_fields = set(reference_test.keys())
+    test_fields = set(test.keys())
+    
+    if test_fields != reference_fields:
+        missing_fields = reference_fields - test_fields
+        extra_fields = test_fields - reference_fields
+        if missing_fields:
+            raise ValueError(f"Generated test missing fields: {missing_fields}")
+        if extra_fields:
+            raise ValueError(f"Generated test has extra fields: {extra_fields}")
+    
+    # Validate input structure if present
+    if 'input' in test:
+        input_data = test['input']
+        if not isinstance(input_data, dict):
+            raise ValueError("Test case 'input' field is not a dictionary")
+        
+        # Check input fields match reference
+        reference_input = reference_test['input']
+        reference_input_fields = set(reference_input.keys())
+        test_input_fields = set(input_data.keys())
+        
+        if test_input_fields != reference_input_fields:
+            missing_input_fields = reference_input_fields - test_input_fields
+            extra_input_fields = test_input_fields - reference_input_fields
+            if missing_input_fields:
+                raise ValueError(f"Generated test input missing fields: {missing_input_fields}")
+            if extra_input_fields:
+                raise ValueError(f"Generated test input has extra fields: {extra_input_fields}")
+        
+        # Validate input parameters if present
+        if 'input' in input_data:
+            input_params = input_data['input']
+            if not isinstance(input_params, list):
+                raise ValueError("Test case 'input.input' field is not a list")
+            
+            # Analyze reference parameter structure
+            reference_params = reference_input.get('input', [])
+            if reference_params and isinstance(reference_params, list) and reference_params:
+                reference_param = reference_params[0]
+                if isinstance(reference_param, dict):
+                    reference_param_fields = set(reference_param.keys())
+                    required_fields = {'name'}  # name is always required
+            
+            # Validate each input parameter
+            for param in input_params:
+                if not isinstance(param, dict):
+                    raise ValueError("Input parameter is not a dictionary")
+                
+                if 'name' not in param:
+                    raise ValueError("Input parameter missing 'name' field")
+                
+                # Check parameter structure consistency if we have a reference
+                if reference_params and isinstance(reference_params, list) and reference_params:
+                    reference_param = reference_params[0]
+                    if isinstance(reference_param, dict):
+                        reference_param_fields = set(reference_param.keys())
+                        param_fields = set(param.keys())
+                        
+                        # Check that all required fields are present
+                        required_fields = {'name'}  # name is always required
+                        missing_required = required_fields - param_fields
+                        if missing_required:
+                            raise ValueError(f"Input parameter missing required fields: {missing_required}")
+                        
+                        # Check field type consistency for common fields
+                        for field, expected_value in reference_param.items():
+                            if field in param:
+                                expected_type = type(expected_value).__name__
+                                actual_type = type(param[field]).__name__
+                                if actual_type != expected_type:
+                                    # Allow some flexibility in type matching
+                                    if not (expected_type in ['str', 'int', 'float'] and actual_type in ['str', 'int', 'float']):
+                                        raise ValueError(f"Input parameter field '{field}' has type {actual_type}, expected {expected_type}")
 
 # Configure rich logging
 console = Console()
@@ -306,6 +465,8 @@ CRITICAL REQUIREMENTS:
 - Return ONLY a valid YAML array of test cases
 - Follow the EXACT same YAML format as existing tests
 - Maintain same structure and field names
+- Handle different parameter structures (some may have 'value', others 'args', 'class_path', etc.)
+- Ensure all parameters have a 'name' field (this is required)
 - NO explanations, comments, or markdown formatting
 - NO code blocks or ```yaml tags
 - Ensure all YAML syntax is correct (proper indentation, quotes, etc.)
@@ -326,6 +487,9 @@ Guidelines for Test Generation:
 - Test edge cases that could cause failures in production
 - Generate realistic inputs that users might actually provide
 - Consider error conditions and how the agent should handle them
+- Maintain parameter structure consistency - if a parameter uses 'args' structure, keep using 'args'; if it uses 'value', keep using 'value'
+- Ensure all parameters have the required 'name' field
+- Preserve the exact field structure of each parameter type (e.g., 'class_path' + 'args' vs 'type' + 'value')
 
 Based on the agent's purpose ({agent_context.get('agent_purpose', 'unknown')}), focus on generating test cases that:
 - Test the agent's core functionality thoroughly
@@ -381,17 +545,8 @@ Generate {needed_count} diverse and comprehensive test cases in valid YAML forma
                 
                 # Check that test has the same structure as existing tests
                 if existing_tests:
-                    reference_test = existing_tests[0]
-                    reference_fields = set(reference_test.keys())
-                    test_fields = set(test.keys())
-                    
-                    if test_fields != reference_fields:
-                        missing_fields = reference_fields - test_fields
-                        extra_fields = test_fields - reference_fields
-                        if missing_fields:
-                            raise ValueError(f"Generated test missing fields: {missing_fields}")
-                        if extra_fields:
-                            raise ValueError(f"Generated test has extra fields: {extra_fields}")
+                    # Use the new validation function
+                    validate_generated_test_structure(test, existing_tests)
                 
                 # Validate input structure if present
                 if 'input' in test:
@@ -401,32 +556,8 @@ Generate {needed_count} diverse and comprehensive test cases in valid YAML forma
                     
                     # Check input fields match reference
                     if existing_tests and 'input' in existing_tests[0]:
-                        reference_input = existing_tests[0]['input']
-                        reference_input_fields = set(reference_input.keys())
-                        test_input_fields = set(input_data.keys())
-                        
-                        if test_input_fields != reference_input_fields:
-                            missing_input_fields = reference_input_fields - test_input_fields
-                            extra_input_fields = test_input_fields - reference_input_fields
-                            if missing_input_fields:
-                                raise ValueError(f"Generated test input missing fields: {missing_input_fields}")
-                            if extra_input_fields:
-                                raise ValueError(f"Generated test input has extra fields: {extra_input_fields}")
-                    
-                    # Validate input parameters if present
-                    if 'input' in input_data:
-                        input_params = input_data['input']
-                        if not isinstance(input_params, list):
-                            raise ValueError("Test case 'input.input' field is not a list")
-                        
-                        # Validate each input parameter
-                        for param in input_params:
-                            if not isinstance(param, dict):
-                                raise ValueError("Input parameter is not a dictionary")
-                            if 'name' not in param:
-                                raise ValueError("Input parameter missing 'name' field")
-                            if 'value' not in param:
-                                raise ValueError("Input parameter missing 'value' field")
+                        # Use the new validation function
+                        validate_generated_test_structure(test, existing_tests)
             
             return new_tests
             
